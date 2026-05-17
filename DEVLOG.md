@@ -1,5 +1,25 @@
 # PHANTOM DEVLOG
 
+## 2026-05-17 17:08 EDT — Graph Viewer Operational Canvas
+
+- Promoted the Graph page from a scrollable SVG panel into a first-class operational viewer with a fitted pan/zoom canvas, fit/reset controls, zoom controls, and no internal canvas scrollbars.
+- Replaced Bezier graph links with orthogonal 90-degree connector paths plus lane offsets for parallel edges, preserving blocked/policy path styling.
+- Added live-watch behavior for active runs: WebSocket trace/artifact events track the current live run, auto-follow can select the active run, and users can pause/resume follow for historical inspection.
+- Added graph layout helper tests for orthogonal paths, graph bounds, and fit-to-view transforms; `npm test` now includes frontend graph tests.
+- Added deterministic graph viewer smoke fixture and Playwright smoke covering blocked paths, artifact nodes, fit/zoom/follow controls, live indicator state, and no page/canvas overflow.
+
+Validation passed:
+- `npm test` — 38/38 passing
+- `npm run build` — passing (legacy non-module script warnings remain)
+- `find server frontend/js -name '*.js' -print0 | xargs -0 -n1 node --check` — passing
+- `python3 tests/smoke_test.py` — 4/4 passing against Hermes routed proxy
+- `python3 tests/graph_viewer_smoke.py` — passing; screenshot at `/tmp/phantom-graph-viewer-first-class.png`
+- `git diff --check` — passing
+
+Notes:
+- Graph remains trace-derived from persisted runs, trace events, and artifacts; no frontend-only graph state or materialized graph tables were introduced.
+- Asset/finding topology graph modes remain a future enhancement.
+
 ## 2026-05-17 16:32 EDT — Phase 8 Asset Registry and Mitigation Reruns
 
 - Added first-class operational asset persistence for networks, devices, services, web apps, URLs/domains, owners, environments, tags, notes, service/address records, and redacted credential references.

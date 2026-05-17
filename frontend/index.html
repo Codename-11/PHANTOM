@@ -182,23 +182,31 @@
         </section>
 
         <section class="app-page" data-page="graph" id="graph-page">
-          <div class="page-header">
+          <div class="page-header graph-page-header">
             <div>
               <p class="eyebrow">Live execution map</p>
               <h1>Graph</h1>
-              <p>Trace-derived execution, observation, and artifact graph for each PHANTOM run.</p>
+              <p>Trace-derived execution, observation, policy, and artifact graph for each PHANTOM run.</p>
             </div>
-            <div class="page-actions">
+            <div class="page-actions graph-actions">
+              <span id="graph-live-indicator" class="graph-live-indicator idle">Historical</span>
               <span id="graph-stats" class="graph-stats">No graph loaded</span>
+              <button id="graph-follow-btn" class="btn btn-secondary" aria-pressed="true">⏱ Following live</button>
+              <button id="graph-fit-btn" class="btn btn-secondary">Fit</button>
+              <button id="graph-reset-btn" class="btn btn-secondary">Reset</button>
               <button id="export-graph-btn" class="btn btn-secondary">Export snapshot</button>
               <button id="refresh-graph-btn" class="btn btn-secondary">↻ Refresh</button>
             </div>
           </div>
-          <div class="graph-layout">
-            <aside id="graph-runs-list" class="runs-list graph-runs-list"></aside>
+          <div class="graph-layout graph-operational-layout">
+            <aside id="graph-runs-list" class="runs-list graph-runs-list" aria-label="Runs with graphs"></aside>
             <section class="graph-workspace">
-              <div id="graph-canvas" class="graph-canvas"></div>
-              <aside id="graph-node-detail" class="graph-node-detail"></aside>
+              <div id="graph-canvas" class="graph-canvas" role="region" aria-label="Operational graph viewer"></div>
+              <div id="graph-zoom-controls" class="graph-zoom-controls" aria-label="Graph zoom controls">
+                <button id="graph-zoom-in-btn" class="btn btn-secondary btn-sm" aria-label="Zoom in">+</button>
+                <button id="graph-zoom-out-btn" class="btn btn-secondary btn-sm" aria-label="Zoom out">−</button>
+              </div>
+              <aside id="graph-node-detail" class="graph-node-detail" aria-label="Selected graph node detail"></aside>
             </section>
           </div>
         </section>
@@ -647,6 +655,7 @@
   <script src="js/settings.js"></script>
   <script src="js/pages/settings-page.js"></script>
   <script src="js/pages/runs-page.js"></script>
+  <script src="js/graph/graph-layout.js"></script>
   <script src="js/pages/graph-page.js"></script>
   <script src="js/pages/artifacts-page.js"></script>
   <script src="js/pages/scope-page.js"></script>
