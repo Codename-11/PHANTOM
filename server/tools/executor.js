@@ -16,28 +16,13 @@ function escapeShellArg(arg) {
   return "'" + String(arg).replace(/'/g, "'\\''") + "'";
 }
 
-/**
- * Execute a tool by name with given arguments
- * @param {Function} onProgress - optional callback for live output streaming
- */
-export async function executeTool(name, args, onProgress, options = {}) {
-  if (options.enforceScope || Object.prototype.hasOwnProperty.call(options, 'scope')) {
-    const decision = evaluateToolAction({ toolName: name, args, scope: options.scope || null });
-    if (!decision.allowed) {
-      const message = `Blocked by PHANTOM scope policy: ${decision.reason}`;
-      options.trace?.({
-        type: 'tool.call.blocked',
-        phase: 'tool',
-        status: 'skipped',
-        toolName: name,
-        input: args,
-        outputPreview: message,
-        metadata: { decision, risk: decision.risk, targets: decision.targets, scopeId: options.scope?.id || null },
-      });
-      return message;
-    }
-  }
+function preview(value, max = 4000) {
+  if (value === undefined || value === null) return '';
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  return text.length > max ? `${text.substring(0, max)}…` : text;
+}
 
+async function runToolImplementation(name, args, onProgress) {
   switch (name) {
     case 'execute_command': return await executeCommand(args, onProgress);
     case 'read_file': return await readFileContent(args);
@@ -56,6 +41,91 @@ export async function executeTool(name, args, onProgress, options = {}) {
     case 'show_preview_window': return showPreviewWindow(args);
     default:
       return `Unknown tool: ${name}`;
+  }
+}
+
+/**
+ * Execute a tool by name with given arguments.
+ * Emits a complete lifecycle trace when options.trace is provided unless
+ * options.emitLifecycle === false (used by the websocket path, which emits
+ * live/broadcast trace events around this executor).
+ * @param {Function} onProgress - optional callback for live output streaming
+ */
+export async function executeTool(name, args, onProgress, options = {}) {
+  const emitLifecycle = !!options.trace && options.emitLifecycle !== false;
+  const startedAt = new Date().toISOString();
+  const startedMs = Date.now();
+  const toolCallId = options.toolCallId || options.tool_call_id || options.id || `direct:${startedMs}:${name}`;
+  const baseMetadata = { toolCallId, scopeId: options.scope?.id || null };
+  let startedEvent = null;
+
+  if (emitLifecycle) {
+    startedEvent = options.trace({
+      type: 'tool.call.started',
+      phase: 'tool',
+      status: 'started',
+      toolName: name,
+      input: args,
+      metadata: baseMetadata,
+      startedAt,
+    });
+  }
+
+  if (options.enforceScope || Object.prototype.hasOwnProperty.call(options, 'scope')) {
+    const decision = evaluateToolAction({ toolName: name, args, scope: options.scope || null });
+    if (!decision.allowed) {
+      const message = `Blocked by PHANTOM scope policy: ${decision.reason}`;
+      options.trace?.({
+        parentEventId: startedEvent?.id || null,
+        type: 'tool.call.blocked',
+        phase: 'tool',
+        status: 'skipped',
+        toolName: name,
+        input: args,
+        outputPreview: message,
+        metadata: { ...baseMetadata, decision, risk: decision.risk, targets: decision.targets },
+        startedAt,
+        endedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedMs,
+      });
+      return message;
+    }
+  }
+
+  try {
+    const result = await runToolImplementation(name, args, onProgress);
+    if (emitLifecycle) {
+      options.trace({
+        parentEventId: startedEvent?.id || null,
+        type: 'tool.call.completed',
+        phase: 'tool',
+        status: 'completed',
+        toolName: name,
+        outputPreview: preview(result),
+        metadata: baseMetadata,
+        startedAt,
+        endedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedMs,
+      });
+    }
+    return result;
+  } catch (err) {
+    if (emitLifecycle) {
+      options.trace({
+        parentEventId: startedEvent?.id || null,
+        type: 'tool.call.failed',
+        phase: 'tool',
+        status: 'failed',
+        toolName: name,
+        input: args,
+        outputPreview: err.message,
+        metadata: { ...baseMetadata, error: err.message },
+        startedAt,
+        endedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedMs,
+      });
+    }
+    throw err;
   }
 }
 

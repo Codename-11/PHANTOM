@@ -23,6 +23,7 @@ import {
   resolvePrompt,
 } from '../prompts/prompt-store.js';
 import { getToolDefinitions } from '../tools/registry.js';
+import { buildRunReplay } from '../runs/replay.js';
 import os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -165,6 +166,12 @@ router.get('/runs/:id', (req, res) => {
   if (!run) return res.status(404).json({ error: 'Run not found' });
   const artifacts = getArtifactsForRun(req.params.id).map(artifact => artifactToPublic(artifact));
   res.json({ ...run, events: getTraceEvents(req.params.id), artifacts });
+});
+
+router.get('/runs/:id/replay', (req, res) => {
+  const replay = buildRunReplay(req.params.id, { eventLimit: req.query.limit || 2000 });
+  if (!replay) return res.status(404).json({ error: 'Run not found' });
+  res.json(replay);
 });
 
 router.get('/runs/:id/artifacts', (req, res) => {

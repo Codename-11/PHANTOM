@@ -115,6 +115,16 @@ describe('API Routes Integration', () => {
     assert.strictEqual(events.length, 1);
     assert.strictEqual(events[0].seq, 1);
 
+    res = await fetch(`${baseUrl}/runs/${run.id}/replay`);
+    assert.strictEqual(res.status, 200);
+    const replay = await res.json();
+    assert.strictEqual(replay.run.id, run.id);
+    assert.deepStrictEqual(replay.replay.sequence, [1]);
+    assert.strictEqual(replay.replay.eventCount, 1);
+    assert.strictEqual(replay.replay.artifactCount, 0);
+    assert.ok(Array.isArray(replay.events));
+    assert.ok(replay.graph.nodes.some(node => node.type === 'run'));
+
     res = await fetch(`${baseUrl}/prompts/preview`);
     assert.strictEqual(res.status, 200);
     const prompt = await res.json();

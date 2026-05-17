@@ -233,6 +233,8 @@ export async function processMessage(conversationId, userMessage, onChunk, onToo
               scope: options.scope || null,
               enforceScope: options.enforceScope !== false,
               trace: options.trace,
+              emitLifecycle: false,
+              toolCallId: tc.id,
             });
           } catch (e) {
             result = `Error: ${e.message}`;

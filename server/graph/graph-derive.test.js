@@ -71,4 +71,46 @@ describe('Graph derivation', () => {
     assert.ok(graph.edges.some(edge => edge.type === 'generated' && edge.target === 'artifact:artifact-1'));
     assert.ok(graph.edges.some(edge => edge.type === 'observed' && edge.target.startsWith('host:10.0.0.5')));
   });
+
+  test('deriveRunGraph marks blocked and out-of-scope policy decisions', () => {
+    const run = {
+      id: 'run-blocked',
+      title: 'Blocked graph run',
+      goal: 'nmap 10.0.0.5',
+      status: 'completed',
+      scope: { id: 'scope-1', name: 'Local lab' },
+    };
+    const events = [
+      {
+        id: 'evt-blocked',
+        run_id: run.id,
+        seq: 1,
+        type: 'tool.call.blocked',
+        phase: 'tool',
+        status: 'skipped',
+        tool_name: 'execute_command',
+        input: { command: 'nmap 10.0.0.5' },
+        output_preview: 'Blocked by PHANTOM scope policy: target outside selected scope',
+        metadata: {
+          risk: 'network-scan',
+          scopeId: 'scope-1',
+          decision: { allowed: false, reason: 'target outside selected scope', targets: ['10.0.0.5'], risk: 'network-scan' },
+        },
+      },
+    ];
+
+    const graph = deriveRunGraph({ run, events, artifacts: [] });
+    const runNode = graph.nodes.find(node => node.id === `run:${run.id}`);
+    assert.strictEqual(runNode.metadata.scopeName, 'Local lab');
+
+    const blockedTool = graph.nodes.find(node => node.type === 'tool' && node.label === 'execute_command');
+    assert.strictEqual(blockedTool.status, 'blocked');
+    assert.strictEqual(blockedTool.metadata.policy.allowed, false);
+    assert.strictEqual(blockedTool.metadata.risk, 'network-scan');
+
+    const outOfScopeHost = graph.nodes.find(node => node.type === 'host' && node.label === '10.0.0.5');
+    assert.strictEqual(outOfScopeHost.status, 'blocked');
+    assert.strictEqual(outOfScopeHost.metadata.scopeStatus, 'out-of-scope');
+    assert.ok(graph.edges.some(edge => edge.type === 'blocked_by_policy'));
+  });
 });

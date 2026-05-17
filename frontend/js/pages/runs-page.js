@@ -11,6 +11,7 @@ window.RunsPage = {
       const runId = event.detail?.runId;
       if (runId && (window.Router?.current === 'runs')) this.loadRuns(runId);
     });
+    if (window.Router?.current === 'runs') setTimeout(() => this.loadRuns(this.selectedRunId), 0);
   },
 
   async loadRuns(selectRunId = this.selectedRunId) {
@@ -44,7 +45,7 @@ window.RunsPage = {
         <span class="run-status ${this.escapeHtml(run.status)}"></span>
         <span class="run-list-body">
           <strong>${this.escapeHtml(run.title || run.goal || 'Untitled Run')}</strong>
-          <small>${this.escapeHtml(run.model || 'model unknown')} · ${this.escapeHtml(run.started_at || '')}</small>
+          <small>${this.escapeHtml(run.model || 'model unknown')} · ${this.escapeHtml(run.scope?.name || 'no scope')} · ${this.escapeHtml(run.started_at || '')}</small>
         </span>
       `;
       item.addEventListener('click', () => this.selectRun(run.id));
@@ -58,9 +59,10 @@ window.RunsPage = {
     const detail = document.getElementById('run-detail');
     detail.innerHTML = '<div class="empty-msg">Loading timeline…</div>';
     try {
-      const res = await fetch(`/api/runs/${encodeURIComponent(id)}`);
+      const res = await fetch(`/api/runs/${encodeURIComponent(id)}/replay`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const run = await res.json();
+      const replayPayload = await res.json();
+      const run = { ...replayPayload.run, events: replayPayload.events, artifacts: replayPayload.artifacts, replay: replayPayload.replay, graph: replayPayload.graph };
       detail.innerHTML = `
         <div class="run-detail-header">
           <div>
@@ -76,6 +78,9 @@ window.RunsPage = {
           <div><span>Prompt profile</span><strong>${this.escapeHtml(run.prompt_snapshot?.profile?.name || 'Default')}</strong></div>
           <div><span>Started</span><strong>${this.escapeHtml(run.started_at || '—')}</strong></div>
           <div><span>Ended</span><strong>${this.escapeHtml(run.ended_at || '—')}</strong></div>
+        </div>
+        <div class="run-replay-summary">
+          ${this.renderReplaySummary(run.replay)}
         </div>
         <div class="run-actions">
           <button class="btn btn-secondary btn-sm" data-run-action="report">Generate pentest report</button>
@@ -106,6 +111,21 @@ window.RunsPage = {
     document.getElementById('run-detail').innerHTML = '<div class="empty-msg">Select a run to inspect the trace timeline.</div>';
   },
 
+  renderReplaySummary(replay) {
+    if (!replay) return '<div class="empty-msg">Replay metadata unavailable.</div>';
+    const pillClass = replay.complete ? 'completed' : 'failed';
+    return `
+      <div class="replay-card">
+        <span class="run-pill ${pillClass}">${replay.complete ? 'Replay complete' : 'Replay incomplete'}</span>
+        <div><strong>${this.escapeHtml(replay.eventCount)}</strong><span>events</span></div>
+        <div><strong>${this.escapeHtml(replay.artifactCount)}</strong><span>artifacts</span></div>
+        <div><strong>${this.escapeHtml(replay.toolCalls?.length || 0)}</strong><span>tool calls</span></div>
+        <div><strong>${this.escapeHtml(replay.blockedActions || 0)}</strong><span>blocked</span></div>
+      </div>
+      ${replay.incompleteToolCalls ? `<div class="empty-msg danger">${this.escapeHtml(replay.incompleteToolCalls)} tool call(s) are missing terminal trace events.</div>` : ''}
+    `;
+  },
+
   renderEvent(event) {
     const preview = event.output_preview || event.outputPreview || event.tool_name || '';
     const isBlocked = event.type === 'tool.call.blocked' || event.type === 'scope.blocked';
@@ -119,6 +139,7 @@ window.RunsPage = {
             ${event.tool_name ? `<em>${this.escapeHtml(event.tool_name)}</em>` : ''}
           </div>
           ${preview ? `<pre>${this.escapeHtml(preview)}</pre>` : ''}
+          ${event.metadata?.decision ? `<small class="policy-note">Risk: ${this.escapeHtml(event.metadata.risk || event.metadata.decision.risk || 'unknown')} · ${this.escapeHtml(event.metadata.decision.reason || 'policy decision')}</small>` : ''}
         </div>
       </div>
     `;

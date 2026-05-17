@@ -867,3 +867,15 @@ html, body {
 .prompt-admin-grid .placeholder-card { display: grid; gap: 8px; }
 .trace-event.skipped .trace-event-dot, .trace-event.failed .trace-event-dot { background: #f87171; box-shadow: 0 0 12px rgba(248,113,113,.6); }
 @media (max-width: 800px) { .scope-layout { grid-template-columns: 1fr; } }
+
+/* Replay Guarantees */
+.run-replay-summary { margin: 14px 0; }
+.replay-card { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--border-color); border-radius: 12px; background: rgba(7, 14, 27, 0.62); }
+.replay-card div { min-width: 84px; display: grid; gap: 2px; }
+.replay-card strong { color: var(--text-primary); }
+.replay-card span { color: var(--text-secondary); font-size: 12px; }
+.policy-note { display: inline-block; color: #fbbf24; margin-top: 6px; }
+.graph-node.blocked rect { stroke: #f87171; fill: rgba(127, 29, 29, 0.32); }
+.graph-node.blocked circle { fill: #f87171; filter: drop-shadow(0 0 8px rgba(248, 113, 113, .55)); }
+.graph-edge.blocked, .graph-edge.blocked_by_policy { stroke: #f87171; stroke-dasharray: 5 4; }
+.node-type-pill.blocked { background: rgba(248, 113, 113, .14); color: #fecaca; }

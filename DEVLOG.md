@@ -1,5 +1,28 @@
 # PHANTOM DEVLOG
 
+## 2026-05-17 15:25 EDT — Phase 7 Replay Guarantees
+
+- Added restart/reopen regression coverage proving runs, ordered trace events, artifacts, scope metadata, and redacted prompt snapshots survive DB close/reopen.
+- Added direct traced tool lifecycle guarantees: traced executor calls now emit `tool.call.started` plus terminal `tool.call.completed` / `tool.call.failed` / `tool.call.blocked` events when used outside the WebSocket live path.
+- Added `/api/runs/:id/replay` to return a replay bundle: run, events, artifacts, graph, sequence checks, tool-call completeness, blocked/failed counts, and artifact counts.
+- Hardened graph derivation with scope/prompt run metadata plus blocked/out-of-scope policy markers on tool, command, host, and edge nodes.
+- Updated Runs UI to load historical runs from replay bundles, show replay completeness stats, scope/profile metadata, artifacts, and policy notes after refresh/restart.
+- Updated Graph UI to show blocked node/edge styling, scope-aware run list labels, and blocked counts in graph stats.
+- Fixed initial hash-route loading for Runs so direct `/#runs` loads historical replay data without needing a route change.
+- Validation passed:
+  - RED tests added first for DB restart replay, direct traced tool lifecycle, replay API, and blocked graph indicators.
+  - `npm test` — 31/31 passing
+  - `npm run build` — passing (legacy non-module script warnings remain)
+  - `find server frontend/js -name '*.js' -print0 | xargs -0 -n1 node --check` — passing
+  - `python3 tests/smoke_test.py` — 4/4 passing against Hermes routed proxy
+  - Live replay API/DB smoke passed and cleaned fixtures.
+  - Playwright replay UI smoke passed for Runs replay card and Graph blocked indicators.
+  - `git diff --check` — passing
+
+Notes:
+- The executor now owns durable lifecycle trace coverage for direct invocations; the WebSocket path opts out of duplicate lifecycle emission because it already broadcasts/persists live trace events.
+- This phase does not add an approval queue or prompt fragment version history; those remain next-phase candidates.
+
 ## 2026-05-17 15:03 EDT — Phase 5/6 Governed Runs
 
 - Added first-class `scopes`, `prompt_profiles`, and `prompt_fragments` SQLite tables plus CRUD helpers and APIs.

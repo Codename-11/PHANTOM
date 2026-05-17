@@ -60,7 +60,7 @@ window.GraphPage = {
         <span class="run-status ${this.escapeHtml(run.status)}"></span>
         <span class="run-list-body">
           <strong>${this.escapeHtml(run.title || run.goal || 'Untitled Run')}</strong>
-          <small>${this.escapeHtml(run.model || 'model unknown')} · ${this.escapeHtml(run.started_at || '')}</small>
+          <small>${this.escapeHtml(run.model || 'model unknown')} · ${this.escapeHtml(run.scope?.name || 'no scope')} · ${this.escapeHtml(run.started_at || '')}</small>
         </span>
       `;
       item.addEventListener('click', () => this.loadGraph(run.id));
@@ -104,7 +104,8 @@ window.GraphPage = {
     const nodeMap = new Map(layout.nodes.map(node => [node.id, node]));
 
     if (stats) {
-      stats.textContent = `${this.graph.stats?.nodes || this.graph.nodes.length} nodes · ${this.graph.stats?.edges || this.graph.edges.length} edges · ${this.graph.stats?.events || 0} events · ${this.graph.stats?.artifacts || 0} artifacts`;
+      const blocked = this.graph.nodes.filter(node => node.status === 'blocked').length;
+      stats.textContent = `${this.graph.stats?.nodes || this.graph.nodes.length} nodes · ${this.graph.stats?.edges || this.graph.edges.length} edges · ${this.graph.stats?.events || 0} events · ${this.graph.stats?.artifacts || 0} artifacts${blocked ? ` · ${blocked} blocked` : ''}`;
     }
 
     const edgeMarkup = this.graph.edges.map((edge) => {
@@ -116,11 +117,11 @@ window.GraphPage = {
       const x2 = target.x + 10;
       const y2 = target.y + 26;
       const mid = Math.max(x1 + 40, (x1 + x2) / 2);
-      return `<path class="graph-edge ${this.escapeAttribute(edge.type)}" d="M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}" marker-end="url(#graph-arrow)"><title>${this.escapeHtml(edge.type || 'edge')}</title></path>`;
+      return `<path class="graph-edge ${this.escapeAttribute(edge.type)} ${edge.type === 'blocked_by_policy' ? 'blocked' : ''}" d="M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}" marker-end="url(#graph-arrow)"><title>${this.escapeHtml(edge.type || 'edge')}</title></path>`;
     }).join('');
 
     const nodeMarkup = layout.nodes.map((node) => `
-      <g class="graph-node ${this.escapeAttribute(node.type)} ${node.id === this.selectedNodeId ? 'selected' : ''}" data-node-id="${this.escapeAttribute(node.id)}" transform="translate(${node.x}, ${node.y})" tabindex="0" role="button">
+      <g class="graph-node ${this.escapeAttribute(node.type)} ${this.escapeAttribute(node.status || '')} ${node.id === this.selectedNodeId ? 'selected' : ''}" data-node-id="${this.escapeAttribute(node.id)}" transform="translate(${node.x}, ${node.y})" tabindex="0" role="button">
         <rect rx="12" width="172" height="58"></rect>
         <circle cx="18" cy="29" r="7"></circle>
         <text x="34" y="24" class="graph-node-type">${this.escapeHtml(node.type)}</text>
@@ -201,7 +202,7 @@ window.GraphPage = {
       <div class="node-detail-header">
         <span class="node-type-pill ${this.escapeAttribute(node.type)}">${this.escapeHtml(node.type)}</span>
         <h3>${this.escapeHtml(node.label || node.id)}</h3>
-        <p>${this.escapeHtml(node.status || 'observed')}</p>
+        <p>${this.escapeHtml(node.status || 'observed')}${node.metadata?.risk ? ` · ${this.escapeHtml(node.metadata.risk)}` : ''}${node.metadata?.scopeStatus ? ` · ${this.escapeHtml(node.metadata.scopeStatus)}` : ''}</p>
       </div>
       ${node.metadata?.contentUrl ? `<a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="${this.escapeAttribute(node.metadata.contentUrl)}">Open artifact</a>` : ''}
       <div class="node-detail-section"><h4>Edges</h4>${relatedEdges.length ? `<ul>${relatedEdges.map(edge => `<li><code>${this.escapeHtml(edge.type)}</code> ${this.escapeHtml(edge.source)} → ${this.escapeHtml(edge.target)}</li>`).join('')}</ul>` : '<p>No related edges.</p>'}</div>

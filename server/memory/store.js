@@ -548,4 +548,5 @@ export function getArtifactsForRun(runId, options = {}) {
 
 export function closeDB() {
   if (db) db.close();
+  db = null;
 }

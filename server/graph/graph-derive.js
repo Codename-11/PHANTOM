@@ -49,7 +49,7 @@ function addNode(nodes, node) {
     return nodes.get(node.id);
   }
 
-  const statusPriority = { failed: 5, error: 5, completed: 4, running: 3, started: 2, observed: 1, unknown: 0 };
+  const statusPriority = { blocked: 6, skipped: 6, failed: 5, error: 5, completed: 4, running: 3, started: 2, observed: 1, unknown: 0 };
   const nextStatus = statusPriority[node.status] >= statusPriority[existing.status] ? node.status : existing.status;
   nodes.set(node.id, {
     ...existing,
@@ -119,26 +119,48 @@ function observationNodeId(observation) {
   return `${observation.type === 'domain' ? 'host' : observation.type}:${observation.value}`;
 }
 
+function isPolicyBlocked(event) {
+  return event?.type === 'tool.call.blocked' || event?.metadata?.decision?.allowed === false;
+}
+
+function policyMetadataForObservation(event, observation) {
+  if (!isPolicyBlocked(event)) return {};
+  const decision = event.metadata?.decision || {};
+  const targets = new Set([...(decision.targets || []), ...(event.metadata?.targets || [])].map(String));
+  const host = observation.host || observation.value;
+  const outOfScope = /outside selected scope/i.test(decision.reason || event.output_preview || '')
+    || targets.has(String(observation.value))
+    || targets.has(String(host));
+  return {
+    status: 'blocked',
+    scopeStatus: outOfScope ? 'out-of-scope' : 'blocked',
+    risk: event.metadata?.risk || decision.risk,
+    policyReason: decision.reason || event.output_preview,
+  };
+}
+
 function addObservation(nodes, edges, sourceNodeId, observation, event = null) {
   const nodeType = observation.type === 'domain' ? 'host' : observation.type;
   const nodeId = observationNodeId(observation);
+  const policy = policyMetadataForObservation(event, observation);
   addNode(nodes, {
     id: nodeId,
     type: nodeType,
     label: observation.value,
-    status: 'observed',
+    status: policy.status || 'observed',
     refId: observation.value,
     metadata: {
       host: observation.host,
       sourceEventId: event?.id,
       sourceSeq: event?.seq,
+      ...policy,
     },
   });
   addEdge(edges, {
-    type: 'observed',
+    type: policy.status === 'blocked' ? 'blocked_by_policy' : 'observed',
     source: sourceNodeId,
     target: nodeId,
-    label: 'observed',
+    label: policy.status === 'blocked' ? 'blocked' : 'observed',
     eventId: event?.id,
   });
 
@@ -182,6 +204,7 @@ function addObservation(nodes, edges, sourceNodeId, observation, event = null) {
 }
 
 function eventStatus(event) {
+  if (isPolicyBlocked(event) || event.status === 'skipped' || event.type?.includes('blocked')) return 'blocked';
   if (event.status === 'failed' || event.type?.includes('error') || event.type?.includes('failed')) return 'failed';
   if (event.status === 'completed' || event.type?.endsWith('.completed')) return 'completed';
   if (event.status === 'started' || event.type?.endsWith('.started')) return 'started';
@@ -213,6 +236,10 @@ export function deriveRunGraph({ run, events = [], artifacts = [] }) {
       providerRoute: run.provider_route,
       startedAt: run.started_at,
       endedAt: run.ended_at,
+      scopeId: run.scope_id || run.scope?.id || null,
+      scopeName: run.scope?.name || null,
+      promptProfile: run.prompt_snapshot?.profile?.name || null,
+      riskLevel: run.risk_level,
     },
   });
 
@@ -236,13 +263,17 @@ export function deriveRunGraph({ run, events = [], artifacts = [] }) {
           input: event.input,
           outputPreview: event.output_preview,
           phase: event.phase,
+          policy: event.metadata?.decision || null,
+          risk: event.metadata?.risk || event.metadata?.decision?.risk,
+          scopeId: event.metadata?.scopeId,
+          scopeStatus: isPolicyBlocked(event) ? 'blocked' : undefined,
         },
       });
       addEdge(edges, {
-        type: 'called',
+        type: isPolicyBlocked(event) ? 'blocked_by_policy' : 'called',
         source: runNodeId,
         target: toolNodeId,
-        label: event.tool_name || 'tool',
+        label: isPolicyBlocked(event) ? 'blocked' : (event.tool_name || 'tool'),
         eventId: event.id,
       });
       sourceNodeId = toolNodeId;
@@ -256,13 +287,13 @@ export function deriveRunGraph({ run, events = [], artifacts = [] }) {
           label: truncate(command, 96),
           status: eventStatus(event),
           refId: event.id,
-          metadata: { eventId: event.id, fullCommand: command },
+          metadata: { eventId: event.id, fullCommand: command, policy: event.metadata?.decision || null, risk: event.metadata?.risk },
         });
         addEdge(edges, {
-          type: 'called',
+          type: isPolicyBlocked(event) ? 'blocked_by_policy' : 'called',
           source: toolNodeId,
           target: commandNodeId,
-          label: 'command',
+          label: isPolicyBlocked(event) ? 'blocked command' : 'command',
           eventId: event.id,
         });
         sourceNodeId = commandNodeId;
