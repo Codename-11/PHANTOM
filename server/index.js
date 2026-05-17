@@ -170,7 +170,8 @@ wss.on('connection', (ws) => {
 });
 
 // Start server
-server.listen(config.port, () => {
+server.listen(config.port, '0.0.0.0', () => {
+  
   console.log(`
 ╔══════════════════════════════════════════════╗
 ║                                              ║
@@ -188,12 +189,14 @@ server.listen(config.port, () => {
 ║               ╚═╝    ╚═════╝ ╚═╝     ╚═╝     ║
 ║                                              ║
 ║   AI-Powered Pentesting Command Center       ║
-║   🌐 http://localhost:${String(config.port).padEnd(24)}║
-║   ⚡ WebSocket: ws://localhost:${String(config.port).padEnd(14)}║
+║   🌐 Local:   http://localhost:${String(config.port)}          ║
+║   📡 LAN:     http://<YOUR-LAN-IP>:${String(config.port)}     ║
+║   ⚡ WebSocket: ws://<YOUR-LAN-IP>:${String(config.port)}/ws  ║
 ║   🔓 Unlimited Tool Iterations               ║
 ║                                              ║
 ╚══════════════════════════════════════════════╝
   `);
+
 });
 
 // Graceful shutdown

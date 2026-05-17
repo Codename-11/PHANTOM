@@ -343,12 +343,13 @@ html, body {
 .settings-section h3 { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.5px; }
 .form-group { margin-bottom: 16px; }
 .form-group label { display: block; font-size: 13px; font-weight: 500; color: var(--text-primary); margin-bottom: 6px; }
-.form-group input[type="text"], .form-group input[type="url"], .form-group input[type="password"], .form-group input[type="number"] {
+.form-group input[type="text"], .form-group input[type="url"], .form-group input[type="password"], .form-group input[type="number"], .form-group select {
   width: 100%; padding: 9px 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color);
   border-radius: var(--radius-sm); color: var(--text-primary); font-family: var(--font-mono);
   font-size: 13px; outline: none; transition: border-color var(--transition-fast);
 }
-.form-group input:focus { border-color: var(--border-focus); }
+.form-group select { cursor: pointer; }
+.form-group input:focus, .form-group select:focus { border-color: var(--border-focus); }
 .form-group small { display: block; margin-top: 4px; font-size: 11px; color: var(--text-muted); }
 .form-group input[type="range"] { width: 100%; accent-color: var(--accent); }
 .input-with-toggle { display: flex; align-items: center; gap: 4px; }
@@ -359,6 +360,14 @@ html, body {
 .test-result.success { color: var(--accent); }
 .test-result.error { color: var(--danger); }
 .settings-footer { padding-top: 16px; border-top: 1px solid var(--border-color); }
+.settings-note { font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.55; }
+.proxy-card { padding: 14px; border: 1px solid rgba(59,184,240,0.22); border-radius: var(--radius-md); background: linear-gradient(180deg, rgba(59,184,240,0.08), rgba(59,184,240,0.02)); margin-bottom: 16px; }
+.proxy-status-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.proxy-status-row strong { display: block; font-size: 13px; color: var(--text-primary); }
+.proxy-status-row small { display: block; margin-top: 2px; color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; }
+.proxy-dot { width: 10px; height: 10px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 14px var(--accent); flex: 0 0 auto; }
+.advanced-proxy-settings { margin-top: 8px; border-top: 1px solid var(--border-color); padding-top: 10px; }
+.advanced-proxy-settings summary { cursor: pointer; color: var(--text-secondary); font-size: 12px; margin-bottom: 10px; }
 .mcp-list { margin-bottom: 10px; }
 .mcp-empty { font-size: 12px; color: var(--text-muted); padding: 10px 0; }
 .mcp-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: var(--bg-tertiary); border-radius: var(--radius-sm); margin-bottom: 6px; font-size: 13px; }

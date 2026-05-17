@@ -111,7 +111,7 @@
               <span class="feature-text">Unlimited Tool Iterations</span>
             </div>
           </div>
-          <p class="welcome-hint">Configure your API key in <button id="welcome-settings-btn" class="inline-link">Settings</button> to get started</p>
+          <p class="welcome-hint">Hermes OAuth Proxy is preconfigured. Choose a Grok/Codex model in <button id="welcome-settings-btn" class="inline-link">Settings</button> when needed.</p>
           <p class="welcome-hint" style="margin-top:4px; color: var(--text-muted);">🖼️ Drag &amp; drop an image to start OSINT investigation</p>
         </div>
 
@@ -191,37 +191,60 @@
             </button>
           </section>
 
-          <!-- API Configuration -->
-          <section class="settings-section">
-            <h3>🤖 API Configuration</h3>
-            <div class="form-group">
-              <label for="setting-base-url">Base URL</label>
-              <input type="url" id="setting-base-url" placeholder="https://api.openai.com/v1" />
-              <small>OpenAI, OpenRouter, Ollama, LM Studio, Nvidia (https://integrate.api.nvidia.com/v1), etc.</small>
-            </div>
-            <div class="form-group">
-              <label for="setting-api-key">API Key</label>
-              <div class="input-with-toggle">
-                <input type="password" id="setting-api-key" placeholder="sk-..." />
-                <button id="toggle-api-key" class="btn-icon-sm" title="Show/Hide">👁️</button>
+          <!-- Hermes Proxy Configuration -->
+          <section class="settings-section proxy-settings">
+            <h3>🔷 Hermes OAuth Proxy</h3>
+            <p class="settings-note">
+              PHANTOM is wired to the local Hermes proxy. Pick a model; Hermes routes it to the right subscription provider (Grok, Codex, Nous) and injects OAuth automatically.
+            </p>
+            <div class="proxy-card">
+              <div class="proxy-status-row">
+                <span class="proxy-dot"></span>
+                <div>
+                  <strong>Single endpoint</strong>
+                  <small id="proxy-endpoint-label">http://127.0.0.1:8648/v1</small>
+                </div>
               </div>
-            </div>
-            <div class="form-group">
-              <label for="setting-model">Model ID</label>
-              <input type="text" id="setting-model" placeholder="gpt-4o" list="model-suggestions" />
-              <datalist id="model-suggestions">
-                <option value="gpt-4o">
-                <option value="gpt-4o-mini">
-                <option value="gpt-4-turbo">
-                <option value="claude-3-opus-20240229">
-                <option value="claude-3-5-sonnet-20241022">
-                <option value="deepseek-chat">
-                <option value="deepseek-reasoner">
-                <option value="meta-llama/llama-3-70b-instruct">
-                <option value="mistralai/mixtral-8x22b-instruct">
-                <option value="qwen/qwen-2.5-72b-instruct">
-                <option value="nvidia/nemotron-3-super-120b-a12b">
-              </datalist>
+              <div class="form-group">
+                <label for="setting-provider-preset">Model Route</label>
+                <select id="setting-provider-preset">
+                  <option value="grok-4.3">Grok · grok-4.3</option>
+                  <option value="grok-4.20-reasoning">Grok Reasoning · grok-4.20-reasoning</option>
+                  <option value="gpt-5.4">Codex · gpt-5.4</option>
+                  <option value="gpt-5.4-mini">Codex Mini · gpt-5.4-mini</option>
+                  <option value="gpt-5.3-codex">Codex Research · gpt-5.3-codex</option>
+                  <option value="custom">Custom model slug…</option>
+                </select>
+                <small>Routing is model-based: Grok slugs → xAI OAuth, GPT/Codex slugs → OpenAI Codex OAuth.</small>
+              </div>
+              <div class="form-group" id="custom-model-group">
+                <label for="setting-model">Model ID</label>
+                <input type="text" id="setting-model" placeholder="grok-4.3" list="model-suggestions" />
+                <datalist id="model-suggestions">
+                  <option value="grok-4.3">
+                  <option value="grok-4.20-reasoning">
+                  <option value="gpt-5.4">
+                  <option value="gpt-5.4-mini">
+                  <option value="gpt-5.3-codex">
+                  <option value="hermes-4-405b">
+                </datalist>
+              </div>
+              <details class="advanced-proxy-settings">
+                <summary>Advanced connection details</summary>
+                <div class="form-group">
+                  <label for="setting-base-url">Base URL</label>
+                  <input type="url" id="setting-base-url" placeholder="http://127.0.0.1:8645/v1" />
+                  <small>Default should stay on the Hermes proxy unless testing another endpoint.</small>
+                </div>
+                <div class="form-group">
+                  <label for="setting-api-key">Bearer Token</label>
+                  <div class="input-with-toggle">
+                    <input type="password" id="setting-api-key" placeholder="hermes-proxy" />
+                    <button id="toggle-api-key" class="btn-icon-sm" title="Show/Hide">👁️</button>
+                  </div>
+                  <small>Any value works. The proxy replaces it with your real OAuth token.</small>
+                </div>
+              </details>
             </div>
             <div class="form-row">
               <div class="form-group">
@@ -231,11 +254,11 @@
               </div>
               <div class="form-group">
                 <label for="setting-max-tokens">Max Tokens</label>
-                <input type="number" id="setting-max-tokens" value="4096" min="256" max="128000" />
+                <input type="number" id="setting-max-tokens" value="8192" min="256" max="128000" />
               </div>
             </div>
             <div class="form-actions">
-              <button id="test-connection" class="btn btn-secondary">🔌 Test Connection</button>
+              <button id="test-connection" class="btn btn-secondary">🔌 Test Proxy</button>
               <span id="test-result" class="test-result"></span>
             </div>
           </section>

@@ -3,6 +3,8 @@
  * Added: AI Doctor — temporary AI to diagnose & fix system issues
  */
 window.Settings = {
+  HERMES_PROXY_URL: 'http://127.0.0.1:8648/v1',
+  HERMES_PROXY_TOKEN: 'hermes-proxy',
   panel: null,
   isOpen: false,
 
@@ -20,6 +22,11 @@ window.Settings = {
     const tempValue = document.getElementById('temperature-value');
     tempSlider.addEventListener('input', () => {
       tempValue.textContent = tempSlider.value;
+    });
+
+    // Hermes proxy model route selector
+    document.getElementById('setting-provider-preset')?.addEventListener('change', (e) => {
+      this.applyModelPreset(e.target.value);
     });
 
     // API key visibility toggle
@@ -70,13 +77,15 @@ window.Settings = {
       const res = await fetch('/api/settings');
       const data = await res.json();
 
-      document.getElementById('setting-base-url').value = data.baseUrl || '';
-      document.getElementById('setting-api-key').value = data.apiKeySet ? '••••••••' : '';
-      document.getElementById('setting-model').value = data.model || '';
+      document.getElementById('setting-base-url').value = data.baseUrl || this.HERMES_PROXY_URL;
+      document.getElementById('setting-api-key').value = data.apiKeySet ? '••••••••' : this.HERMES_PROXY_TOKEN;
+      document.getElementById('setting-model').value = data.model || 'grok-4.3';
       document.getElementById('setting-temperature').value = data.temperature || 0.7;
       document.getElementById('temperature-value').textContent = data.temperature || 0.7;
-      document.getElementById('setting-max-tokens').value = data.maxTokens || 4096;
+      document.getElementById('setting-max-tokens').value = data.maxTokens || 8192;
       document.getElementById('setting-workspace').value = data.workspace || '';
+      this.syncPresetFromModel(data.model || 'grok-4.3');
+      document.getElementById('proxy-endpoint-label').textContent = data.baseUrl || this.HERMES_PROXY_URL;
 
       // Update model badge
       document.getElementById('current-model').textContent = data.model || 'No Model';
@@ -87,14 +96,14 @@ window.Settings = {
 
   async save() {
     const settings = {
-      baseUrl: document.getElementById('setting-base-url').value,
-      model: document.getElementById('setting-model').value,
+      baseUrl: document.getElementById('setting-base-url').value || this.HERMES_PROXY_URL,
+      model: document.getElementById('setting-model').value || 'grok-4.3',
       temperature: parseFloat(document.getElementById('setting-temperature').value),
       maxTokens: parseInt(document.getElementById('setting-max-tokens').value),
       workspace: document.getElementById('setting-workspace').value,
     };
 
-    const apiKey = document.getElementById('setting-api-key').value;
+    const apiKey = document.getElementById('setting-api-key').value || this.HERMES_PROXY_TOKEN;
     if (apiKey && !apiKey.startsWith('••')) {
       settings.apiKey = apiKey;
     }
@@ -113,6 +122,7 @@ window.Settings = {
 
       if (res.ok) {
         document.getElementById('current-model').textContent = settings.model || 'No Model';
+        document.getElementById('proxy-endpoint-label').textContent = settings.baseUrl;
 
         const btn = document.getElementById('save-settings');
         btn.textContent = '✓ Saved';
@@ -125,6 +135,38 @@ window.Settings = {
     } catch (err) {
       console.error('Failed to save settings:', err);
     }
+  },
+
+  applyModelPreset(value) {
+    const modelInput = document.getElementById('setting-model');
+    const customGroup = document.getElementById('custom-model-group');
+    const baseUrlInput = document.getElementById('setting-base-url');
+    const apiKeyInput = document.getElementById('setting-api-key');
+
+    baseUrlInput.value = baseUrlInput.value || this.HERMES_PROXY_URL;
+    apiKeyInput.value = apiKeyInput.value && !apiKeyInput.value.startsWith('••')
+      ? apiKeyInput.value
+      : this.HERMES_PROXY_TOKEN;
+
+    if (value === 'custom') {
+      customGroup.style.display = 'block';
+      modelInput.focus();
+      return;
+    }
+
+    customGroup.style.display = 'none';
+    modelInput.value = value;
+    document.getElementById('current-model').textContent = value;
+  },
+
+  syncPresetFromModel(model) {
+    const preset = document.getElementById('setting-provider-preset');
+    const customGroup = document.getElementById('custom-model-group');
+    if (!preset || !customGroup) return;
+
+    const known = Array.from(preset.options).some(option => option.value === model);
+    preset.value = known ? model : 'custom';
+    customGroup.style.display = known ? 'none' : 'block';
   },
 
   async testConnection() {
