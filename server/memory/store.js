@@ -4,6 +4,11 @@ import { v4 as uuidv4 } from 'uuid';
 
 let db;
 
+function ensureColumn(table, column, definition) {
+  const existing = db.prepare(`PRAGMA table_info(${table})`).all().some(item => item.name === column);
+  if (!existing) db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
+}
+
 export function initDB(dbPath = config.db.path) {
   if (db) db.close();
   db = new Database(dbPath);
@@ -80,7 +85,45 @@ export function initDB(dbPath = config.db.path) {
       summary TEXT,
       started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       ended_at DATETIME,
+      prompt_snapshot_json TEXT,
       FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS scopes (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      targets_json TEXT,
+      allowed_actions_json TEXT,
+      blocked_actions_json TEXT,
+      credential_refs_json TEXT,
+      notes TEXT,
+      expires_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      archived_at DATETIME
+    );
+
+    CREATE TABLE IF NOT EXISTS prompt_profiles (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      mode TEXT DEFAULT 'general',
+      is_default INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS prompt_fragments (
+      id TEXT PRIMARY KEY,
+      profile_id TEXT,
+      kind TEXT NOT NULL,
+      name TEXT NOT NULL,
+      body TEXT NOT NULL,
+      enabled INTEGER DEFAULT 1,
+      position INTEGER DEFAULT 100,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (profile_id) REFERENCES prompt_profiles(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS trace_events (
@@ -123,10 +166,16 @@ export function initDB(dbPath = config.db.path) {
     CREATE INDEX IF NOT EXISTS idx_memories_key ON memories(key);
     CREATE INDEX IF NOT EXISTS idx_runs_conversation ON runs(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
+    CREATE INDEX IF NOT EXISTS idx_runs_scope ON runs(scope_id);
+    CREATE INDEX IF NOT EXISTS idx_scopes_archived ON scopes(archived_at);
+    CREATE INDEX IF NOT EXISTS idx_prompt_fragments_profile ON prompt_fragments(profile_id);
+    CREATE INDEX IF NOT EXISTS idx_prompt_fragments_kind ON prompt_fragments(kind);
     CREATE INDEX IF NOT EXISTS idx_trace_events_run_seq ON trace_events(run_id, seq);
     CREATE INDEX IF NOT EXISTS idx_artifacts_run ON artifacts(run_id);
     CREATE INDEX IF NOT EXISTS idx_artifacts_conversation ON artifacts(conversation_id);
   `);
+
+  ensureColumn('runs', 'prompt_snapshot_json', 'TEXT');
 
   return db;
 }
@@ -254,15 +303,48 @@ export function saveToolResult(conversationId, toolName, input, output, status, 
 }
 
 // ─── Runs ───
-function normalizeRun(row) {
-  return row || null;
+function normalizeScopeSummary(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    expires_at: row.expires_at,
+    archived_at: row.archived_at,
+  };
 }
 
-export function createRun({ conversationId, title, goal, model, providerRoute, scopeId = null, riskLevel = 'unknown' }) {
+function redactSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return snapshot || null;
+  const clone = JSON.parse(JSON.stringify(snapshot));
+  if (clone.scope) delete clone.scope.credential_refs;
+  if (clone.scope?.credentialRefs) delete clone.scope.credentialRefs;
+  return clone;
+}
+
+function normalizeRun(row) {
+  if (!row) return null;
+  const normalized = {
+    ...row,
+    prompt_snapshot: row.prompt_snapshot_json ? redactSnapshot(parseJSONField(row.prompt_snapshot_json)) : null,
+  };
+  delete normalized.prompt_snapshot_json;
+  if (row.scope_id) {
+    try {
+      normalized.scope = normalizeScopeSummary(getDB().prepare('SELECT id, name, expires_at, archived_at FROM scopes WHERE id = ?').get(row.scope_id));
+    } catch {
+      normalized.scope = null;
+    }
+  } else {
+    normalized.scope = null;
+  }
+  return normalized;
+}
+
+export function createRun({ conversationId, title, goal, model, providerRoute, scopeId = null, riskLevel = 'unknown', promptSnapshot = null }) {
   const id = uuidv4();
   getDB().prepare(
-    `INSERT INTO runs (id, conversation_id, title, goal, status, model, provider_route, scope_id, risk_level)
-     VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?)`
+    `INSERT INTO runs (id, conversation_id, title, goal, status, model, provider_route, scope_id, risk_level, prompt_snapshot_json)
+     VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)`
   ).run(
     id,
     conversationId,
@@ -271,7 +353,8 @@ export function createRun({ conversationId, title, goal, model, providerRoute, s
     model || null,
     providerRoute || null,
     scopeId || null,
-    riskLevel || 'unknown'
+    riskLevel || 'unknown',
+    promptSnapshot ? JSON.stringify(promptSnapshot) : null
   );
   return normalizeRun(getRun(id));
 }

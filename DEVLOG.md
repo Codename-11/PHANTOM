@@ -1,5 +1,33 @@
 # PHANTOM DEVLOG
 
+## 2026-05-17 15:03 EDT — Phase 5/6 Governed Runs
+
+- Added first-class `scopes`, `prompt_profiles`, and `prompt_fragments` SQLite tables plus CRUD helpers and APIs.
+- Added conservative scope policy evaluation for tool actions: risk classification, URL/IP/domain/host:port extraction, CIDR/domain/host matching, expiry checks, and explicit blocked action classes.
+- Wired scope gating into tool execution before commands run; blocked actions return a visible policy result and persist `tool.call.blocked` trace events without executing the underlying command.
+- Extended run creation with nullable `scope_id`, scope summaries in run list/detail payloads, and redacted prompt/config/scope snapshots for replayability.
+- Updated prompt resolution to layer base system prompt + profile/mode fragments + scope rules + policy/tool/custom fragments.
+- Added scope/profile/fragment APIs and profile/scope-aware prompt preview.
+- Updated vanilla UI:
+  - Targets / Scope page for scope CRUD and chat scope selection.
+  - Chat scope selector and warning.
+  - Settings → Prompts profile/fragment editor and resolved preview.
+  - Runs detail scope/profile snapshot metadata and highlighted block events.
+- Validation passed:
+  - RED tests added first for scope store, policy evaluator, prompt store/resolution, run snapshots, blocked tool execution, and API behavior.
+  - `npm test` — 28/28 passing
+  - `npm run build` — passing (existing non-module script bundle warnings remain)
+  - `find server frontend/js -name '*.js' -print0 | xargs -0 -n1 node --check` — passing
+  - `python3 tests/smoke_test.py` — 4/4 passing against Hermes routed proxy
+  - Live governed-run smoke passed: created test scope/profile/fragment, verified out-of-scope command blocked before execution, verified prompt preview/snapshot metadata, and removed fixture data.
+  - Playwright governed UI smoke passed for Scope page, Chat scope selector, and Settings prompt editor.
+  - `git diff --check` — passing
+
+Notes:
+- This phase intentionally implements block-and-explain, not a full approval queue/workflow.
+- Scope matching is conservative and MVP-level; deeper service/finding/topology semantics remain future work.
+- Prompt fragments are editable and snapshotted, but full version history/rollback remains future work.
+
 ## 2026-05-17 13:40 EDT — Phase 4 Live Graph MVP
 
 - Added trace-derived graph derivation that builds run, tool, command, observed host/URL/port, artifact, and error nodes from persisted `runs`, `trace_events`, and `artifacts`.

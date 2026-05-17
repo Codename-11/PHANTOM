@@ -5,6 +5,7 @@ import { dirname, resolve } from 'path';
 import os from 'os';
 import { saveMemory, searchMemories } from '../memory/store.js';
 import { getSetting } from '../memory/store.js';
+import { evaluateToolAction } from '../scope/policy.js';
 import config from '../config.js';
 
 /**
@@ -19,7 +20,24 @@ function escapeShellArg(arg) {
  * Execute a tool by name with given arguments
  * @param {Function} onProgress - optional callback for live output streaming
  */
-export async function executeTool(name, args, onProgress) {
+export async function executeTool(name, args, onProgress, options = {}) {
+  if (options.enforceScope || Object.prototype.hasOwnProperty.call(options, 'scope')) {
+    const decision = evaluateToolAction({ toolName: name, args, scope: options.scope || null });
+    if (!decision.allowed) {
+      const message = `Blocked by PHANTOM scope policy: ${decision.reason}`;
+      options.trace?.({
+        type: 'tool.call.blocked',
+        phase: 'tool',
+        status: 'skipped',
+        toolName: name,
+        input: args,
+        outputPreview: message,
+        metadata: { decision, risk: decision.risk, targets: decision.targets, scopeId: options.scope?.id || null },
+      });
+      return message;
+    }
+  }
+
   switch (name) {
     case 'execute_command': return await executeCommand(args, onProgress);
     case 'read_file': return await readFileContent(args);
@@ -115,7 +133,17 @@ async function executeCommand({ command, timeout = 120, working_directory, use_s
       }
     });
 
+    const timeoutHandle = setTimeout(() => {
+      try {
+        proc.kill('SIGTERM');
+      } catch (err) {
+        console.warn(`Failed to kill process: ${err.message}`);
+      }
+      resolvePromise(stdout + stderr + `\n[TIMEOUT] Command timed out after ${timeout}s`);
+    }, timeout * 1000);
+
     proc.on('close', (code) => {
+      clearTimeout(timeoutHandle);
       let result = '';
       if (stdout) result += stdout;
       if (stderr) result += (result ? '\n' : '') + `[STDERR] ${stderr}`;
@@ -124,17 +152,9 @@ async function executeCommand({ command, timeout = 120, working_directory, use_s
     });
 
     proc.on('error', (err) => {
+      clearTimeout(timeoutHandle);
       resolvePromise(`Error executing command: ${err.message}`);
     });
-
-    setTimeout(() => {
-      try {
-        proc.kill('SIGTERM');
-      } catch (err) {
-        console.warn(`Failed to kill process: ${err.message}`);
-      }
-      resolvePromise(stdout + stderr + `\n[TIMEOUT] Command timed out after ${timeout}s`);
-    }, timeout * 1000);
   });
 }
 

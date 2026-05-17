@@ -12,6 +12,9 @@ import {
   createRun, addTraceEvent, completeRun, failRun, updateRunStatus,
 } from './memory/store.js';
 import { processMessage } from './ai/llm-client.js';
+import { buildSystemPrompt } from './ai/system-prompt.js';
+import { getScope } from './scope/scope-store.js';
+import { resolvePrompt } from './prompts/prompt-store.js';
 import { writePreviewArtifact, exportRunTrace } from './artifacts/artifact-store.js';
 import { artifactToPublic } from './artifacts/renderers.js';
 import apiRouter from './routes/api.js';
@@ -120,12 +123,26 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({ type: 'conversation_created', conversationId }));
           }
 
+          const selectedScope = msg.scopeId ? getScope(msg.scopeId) : null;
+          const selectedProfileId = msg.profileId || null;
+          const resolvedPrompt = resolvePrompt({
+            basePrompt: buildSystemPrompt({ raw: true }),
+            profileId: selectedProfileId,
+            scopeId: selectedScope?.id || null,
+          });
+
           const run = createRun({
             conversationId,
             title: (msg.content || 'New Run').substring(0, 80),
             goal: msg.content,
             model: config.api.model,
             providerRoute: providerRoute(),
+            scopeId: selectedScope?.id || null,
+            promptSnapshot: {
+              ...resolvedPrompt.snapshot,
+              model: config.api.model,
+              providerRoute: providerRoute(),
+            },
           });
           currentRunId = run.id;
           currentRunStopped = false;
@@ -143,7 +160,7 @@ wss.on('connection', (ws) => {
               phase: 'chat',
               status: 'started',
               outputPreview: preview(msg.content),
-              metadata: { conversationId, model: config.api.model, providerRoute: providerRoute() },
+              metadata: { conversationId, model: config.api.model, providerRoute: providerRoute(), scopeId: selectedScope?.id || null, profileId: selectedProfileId },
             }
           );
 
@@ -244,6 +261,12 @@ wss.on('connection', (ws) => {
                   metadata: { toolCallId: progress.id },
                 }
               );
+            },
+            {
+              scope: selectedScope,
+              profileId: selectedProfileId,
+              enforceScope: true,
+              trace: (event) => trace(run.id, event),
             }
           );
 

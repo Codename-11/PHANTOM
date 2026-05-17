@@ -122,6 +122,62 @@ describe('API Routes Integration', () => {
     assert.ok(!JSON.stringify(prompt).includes('sudo_password'));
   });
 
+  test('Scope and prompt APIs support governed run administration', async () => {
+    let res = await fetch(`${baseUrl}/scopes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'API scope',
+        targets: { hosts: ['example.com'], cidrs: ['192.168.1.0/24'] },
+        allowedActions: ['recon', 'network-scan'],
+        blockedActions: ['destructive'],
+        credentialRefs: ['vault:api-ref'],
+        notes: 'API rules',
+      }),
+    });
+    assert.strictEqual(res.status, 200);
+    const scope = await res.json();
+    assert.strictEqual(scope.name, 'API scope');
+    assert.ok(!JSON.stringify(scope).includes('targets_json'));
+
+    res = await fetch(`${baseUrl}/scopes/${scope.id}/evaluate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ toolName: 'execute_command', args: { command: 'nmap 10.0.0.5' } }),
+    });
+    assert.strictEqual(res.status, 200);
+    const decision = await res.json();
+    assert.strictEqual(decision.allowed, false);
+    assert.match(decision.reason, /outside selected scope/i);
+
+    res = await fetch(`${baseUrl}/prompts/profiles`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'API profile', mode: 'recon', description: 'API prompt profile' }),
+    });
+    assert.strictEqual(res.status, 200);
+    const profile = await res.json();
+
+    res = await fetch(`${baseUrl}/prompts/fragments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileId: profile.id, kind: 'mode', name: 'API mode', body: 'API MODE FRAGMENT', position: 1 }),
+    });
+    assert.strictEqual(res.status, 200);
+    const fragment = await res.json();
+    assert.strictEqual(fragment.body, 'API MODE FRAGMENT');
+
+    res = await fetch(`${baseUrl}/prompts/preview?profileId=${profile.id}&scopeId=${scope.id}`);
+    assert.strictEqual(res.status, 200);
+    const preview = await res.json();
+    assert.ok(preview.content.includes('API MODE FRAGMENT'));
+    assert.ok(preview.content.includes('Scope: API scope'));
+    assert.ok(!JSON.stringify(preview).includes('vault:api-ref'));
+
+    res = await fetch(`${baseUrl}/scopes/${scope.id}/archive`, { method: 'POST' });
+    assert.strictEqual(res.status, 200);
+  });
+
   test('Artifact endpoints list metadata and serve artifact content', async () => {
     const conv = createConversation('Artifact API test');
     const run = createRun({

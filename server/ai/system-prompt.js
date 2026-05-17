@@ -3,6 +3,7 @@ import { execSync } from 'child_process';
 import config from '../config.js';
 import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { resolvePrompt } from '../prompts/prompt-store.js';
 
 function getSystemInfo() {
   try {
@@ -80,12 +81,12 @@ function getRecentTraces() {
   } catch { return ''; }
 }
 
-export function buildSystemPrompt() {
+export function buildSystemPrompt({ profileId = null, scopeId = null, raw = false } = {}) {
   const sys = getSystemInfo();
   const skills = getAvailableSkills();
   const traces = getRecentTraces();
 
-  return `You are PHANTOM — an elite AI-powered pentesting and red teaming command center. You run locally on the operator's machine with full system access and unlimited tool iterations.
+  const basePrompt = `You are PHANTOM — an elite AI-powered pentesting and red teaming command center. You run locally on the operator's machine with full system access and unlimited tool iterations.
 
 ## IDENTITY & BEHAVIOR
 - You are a professional cybersecurity AI assistant
@@ -192,4 +193,7 @@ When creating tools/scripts:
 10. For general questions, use search_web + scrape_webpage for real-time data
 11. Create reusable scripts in workspace/skills/ for common operations
 12. Log traces of complex operations for self-improvement`;
+
+  if (raw) return basePrompt;
+  return resolvePrompt({ basePrompt, profileId, scopeId }).content;
 }

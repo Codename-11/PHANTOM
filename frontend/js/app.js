@@ -40,6 +40,7 @@
   window.RunsPage?.init?.();
   window.GraphPage?.init?.();
   window.ArtifactsPage?.init?.();
+  window.ScopePage?.init?.();
   Management.init();
   initMatrix();
   connectWebSocket();
@@ -275,6 +276,8 @@ Start the investigation immediately!`;
           type: 'chat',
           content: imageMsg,
           conversationId: currentConversationId,
+          scopeId: document.getElementById('active-scope-select')?.value || null,
+          profileId: document.getElementById('prompt-profile-select')?.value || null,
         }));
       } else {
         Chat.addErrorMessage('Not connected to server. Trying to reconnect...');
@@ -293,6 +296,8 @@ Start the investigation immediately!`;
         type: 'chat',
         content: finalContent,
         conversationId: currentConversationId,
+        scopeId: document.getElementById('active-scope-select')?.value || null,
+        profileId: document.getElementById('prompt-profile-select')?.value || null,
       }));
     } else {
       Chat.addErrorMessage('Not connected to server. Trying to reconnect...');

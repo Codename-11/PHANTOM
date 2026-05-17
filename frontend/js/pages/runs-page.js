@@ -72,6 +72,8 @@ window.RunsPage = {
         <div class="run-meta-grid">
           <div><span>Model</span><strong>${this.escapeHtml(run.model || '—')}</strong></div>
           <div><span>Route</span><strong>${this.escapeHtml(run.provider_route || '—')}</strong></div>
+          <div><span>Scope</span><strong>${this.escapeHtml(run.scope?.name || 'No scope')}</strong></div>
+          <div><span>Prompt profile</span><strong>${this.escapeHtml(run.prompt_snapshot?.profile?.name || 'Default')}</strong></div>
           <div><span>Started</span><strong>${this.escapeHtml(run.started_at || '—')}</strong></div>
           <div><span>Ended</span><strong>${this.escapeHtml(run.ended_at || '—')}</strong></div>
         </div>
@@ -106,13 +108,14 @@ window.RunsPage = {
 
   renderEvent(event) {
     const preview = event.output_preview || event.outputPreview || event.tool_name || '';
+    const isBlocked = event.type === 'tool.call.blocked' || event.type === 'scope.blocked';
     return `
-      <div class="trace-event ${this.escapeHtml(event.status || '')}">
+      <div class="trace-event ${this.escapeHtml(isBlocked ? 'failed' : (event.status || ''))}">
         <div class="trace-event-dot"></div>
         <div class="trace-event-body">
           <div class="trace-event-title">
             <span>#${event.seq}</span>
-            <strong>${this.escapeHtml(event.type)}</strong>
+            <strong>${isBlocked ? '🛡️ ' : ''}${this.escapeHtml(event.type)}</strong>
             ${event.tool_name ? `<em>${this.escapeHtml(event.tool_name)}</em>` : ''}
           </div>
           ${preview ? `<pre>${this.escapeHtml(preview)}</pre>` : ''}

@@ -26,6 +26,9 @@ describe('Database Store Initialization', () => {
       'mcp_servers',
       'tool_results',
       'runs',
+      'scopes',
+      'prompt_profiles',
+      'prompt_fragments',
       'trace_events',
       'artifacts'
     ];
@@ -41,6 +44,10 @@ describe('Database Store Initialization', () => {
       'idx_memories_category',
       'idx_memories_key',
       'idx_runs_conversation',
+      'idx_runs_status',
+      'idx_runs_scope',
+      'idx_scopes_archived',
+      'idx_prompt_fragments_profile',
       'idx_trace_events_run_seq',
       'idx_artifacts_run'
     ];

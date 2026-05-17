@@ -15,6 +15,13 @@ import { writeArtifact, exportEvidenceBundle } from '../artifacts/artifact-store
 import { renderExecutiveSummary, renderPentestReport } from '../artifacts/report-renderers.js';
 import { deriveRunGraph } from '../graph/graph-derive.js';
 import { buildSystemPrompt } from '../ai/system-prompt.js';
+import { createScope, getScope, getScopes, updateScope, archiveScope } from '../scope/scope-store.js';
+import { evaluateToolAction } from '../scope/policy.js';
+import {
+  createPromptProfile, getPromptProfiles, getPromptProfile, updatePromptProfile,
+  createPromptFragment, getPromptFragments, getPromptFragment, updatePromptFragment,
+  resolvePrompt,
+} from '../prompts/prompt-store.js';
 import { getToolDefinitions } from '../tools/registry.js';
 import os from 'os';
 import { exec } from 'child_process';
@@ -66,15 +73,82 @@ router.post('/settings/test', async (req, res) => {
   res.json(result);
 });
 
-// ─── Prompt Preview ───
+// ─── Prompt Preview + Profiles ───
 router.get('/prompts/preview', (req, res) => {
-  const content = buildSystemPrompt();
+  const basePrompt = buildSystemPrompt({ raw: true });
+  const resolved = resolvePrompt({ basePrompt, profileId: req.query.profileId || null, scopeId: req.query.scopeId || null });
   res.json({
-    id: 'system-default',
-    mode: 'read-only',
-    content,
-    length: content.length,
+    id: resolved.profile?.id || 'system-default',
+    mode: resolved.profile?.mode || 'default',
+    profile: resolved.profile,
+    scope: resolved.scope ? { id: resolved.scope.id, name: resolved.scope.name, expires_at: resolved.scope.expires_at } : null,
+    fragmentIds: resolved.snapshot.fragmentIds,
+    content: resolved.content,
+    length: resolved.content.length,
   });
+});
+
+router.get('/prompts/profiles', (req, res) => res.json(getPromptProfiles()));
+router.post('/prompts/profiles', (req, res) => {
+  try { res.json(createPromptProfile(req.body || {})); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+router.put('/prompts/profiles/:id', (req, res) => {
+  const profile = updatePromptProfile(req.params.id, req.body || {});
+  if (!profile) return res.status(404).json({ error: 'Prompt profile not found' });
+  res.json(profile);
+});
+
+router.get('/prompts/fragments', (req, res) => {
+  res.json(getPromptFragments({
+    profileId: req.query.profileId === undefined ? undefined : (req.query.profileId || null),
+    enabled: req.query.enabled === undefined ? undefined : req.query.enabled !== 'false',
+  }));
+});
+router.post('/prompts/fragments', (req, res) => {
+  try { res.json(createPromptFragment(req.body || {})); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+router.put('/prompts/fragments/:id', (req, res) => {
+  const fragment = updatePromptFragment(req.params.id, req.body || {});
+  if (!fragment) return res.status(404).json({ error: 'Prompt fragment not found' });
+  res.json(fragment);
+});
+
+// ─── Scopes ───
+router.get('/scopes', (req, res) => {
+  res.json(getScopes({ includeArchived: req.query.includeArchived === 'true' }));
+});
+router.post('/scopes', (req, res) => {
+  try { res.json(createScope(req.body || {})); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+router.get('/scopes/:id', (req, res) => {
+  const scope = getScope(req.params.id);
+  if (!scope) return res.status(404).json({ error: 'Scope not found' });
+  res.json(scope);
+});
+router.put('/scopes/:id', (req, res) => {
+  try {
+    const scope = updateScope(req.params.id, req.body || {});
+    if (!scope) return res.status(404).json({ error: 'Scope not found' });
+    res.json(scope);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+router.post('/scopes/:id/archive', (req, res) => {
+  const scope = archiveScope(req.params.id);
+  if (!scope) return res.status(404).json({ error: 'Scope not found' });
+  res.json(scope);
+});
+router.delete('/scopes/:id', (req, res) => {
+  const scope = archiveScope(req.params.id);
+  if (!scope) return res.status(404).json({ error: 'Scope not found' });
+  res.json(scope);
+});
+router.post('/scopes/:id/evaluate', (req, res) => {
+  const scope = getScope(req.params.id);
+  if (!scope) return res.status(404).json({ error: 'Scope not found' });
+  res.json(evaluateToolAction({ toolName: req.body?.toolName, args: req.body?.args || {}, scope }));
 });
 
 // ─── Runs + Trace Events ───

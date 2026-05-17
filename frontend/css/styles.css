@@ -855,3 +855,15 @@ html, body {
     min-width: auto;
   }
 }
+
+/* Governed Runs */
+.input-footer { gap: 10px; flex-wrap: wrap; }
+.active-scope-control { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; }
+.active-scope-control select, .prompt-admin-grid input, .prompt-admin-grid select, .prompt-admin-grid textarea, .scope-editor input, .scope-editor textarea { background: rgba(5,10,20,.72); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; padding: 8px 10px; }
+.scope-warning { color: var(--warning, #fbbf24); font-size: 12px; }
+.scope-layout { display: grid; grid-template-columns: minmax(220px, 320px) 1fr; gap: 16px; min-height: 0; }
+.scope-editor { display: grid; gap: 10px; }
+.prompt-admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.prompt-admin-grid .placeholder-card { display: grid; gap: 8px; }
+.trace-event.skipped .trace-event-dot, .trace-event.failed .trace-event-dot { background: #f87171; box-shadow: 0 0 12px rgba(248,113,113,.6); }
+@media (max-width: 800px) { .scope-layout { grid-template-columns: 1fr; } }

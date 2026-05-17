@@ -1,4 +1,7 @@
 window.SettingsPage = {
+  profiles: [],
+  fragments: [],
+
   init() {
     this.mountExistingSettingsBody();
     this.initTabs();
@@ -7,9 +10,10 @@ window.SettingsPage = {
     window.addEventListener('phantom:route', (event) => {
       if (event.detail?.route === 'settings') {
         window.Settings?.load?.();
-        this.loadPromptPreview();
+        this.loadPromptAdmin();
       }
     });
+    this.loadPromptAdmin();
   },
 
   mountExistingSettingsBody() {
@@ -28,12 +32,104 @@ window.SettingsPage = {
         const target = tab.dataset.settingsTab;
         tabs.forEach(t => t.classList.toggle('active', t === tab));
         panels.forEach(panel => panel.classList.toggle('active', panel.dataset.settingsPanel === target));
+        if (target === 'prompts') this.loadPromptAdmin();
       });
     });
   },
 
   initPromptPreview() {
     document.getElementById('refresh-prompt-preview')?.addEventListener('click', () => this.loadPromptPreview());
+    document.getElementById('save-prompt-profile')?.addEventListener('click', () => this.saveProfile());
+    document.getElementById('save-prompt-fragment')?.addEventListener('click', () => this.saveFragment());
+    document.getElementById('prompt-profile-select')?.addEventListener('change', () => {
+      this.populateProfileForm();
+      this.loadPromptPreview();
+    });
+    document.getElementById('prompt-fragment-select')?.addEventListener('change', () => this.populateFragmentForm());
+  },
+
+  async loadPromptAdmin() {
+    await Promise.all([this.loadProfiles(), this.loadFragments()]);
+    this.loadPromptPreview();
+  },
+
+  async loadProfiles() {
+    const select = document.getElementById('prompt-profile-select');
+    if (!select) return;
+    const res = await fetch('/api/prompts/profiles');
+    if (!res.ok) return;
+    this.profiles = await res.json();
+    select.innerHTML = '<option value="">Default base</option>' + this.profiles.map(profile => `<option value="${this.escapeAttribute(profile.id)}">${this.escapeHtml(profile.name)}</option>`).join('');
+    this.populateProfileForm();
+  },
+
+  async loadFragments() {
+    const select = document.getElementById('prompt-fragment-select');
+    if (!select) return;
+    const res = await fetch('/api/prompts/fragments?enabled=false');
+    const enabledRes = await fetch('/api/prompts/fragments');
+    if (!res.ok || !enabledRes.ok) return;
+    const disabled = await res.json();
+    const enabled = await enabledRes.json();
+    const byId = new Map([...enabled, ...disabled].map(fragment => [fragment.id, fragment]));
+    this.fragments = Array.from(byId.values());
+    select.innerHTML = '<option value="">New fragment</option>' + this.fragments.map(fragment => `<option value="${this.escapeAttribute(fragment.id)}">${this.escapeHtml(fragment.kind)} · ${this.escapeHtml(fragment.name)}</option>`).join('');
+    this.populateFragmentForm();
+  },
+
+  populateProfileForm() {
+    const id = document.getElementById('prompt-profile-select')?.value;
+    const profile = this.profiles.find(item => item.id === id);
+    const name = document.getElementById('prompt-profile-name');
+    const mode = document.getElementById('prompt-profile-mode');
+    if (name) name.value = profile?.name || '';
+    if (mode) mode.value = profile?.mode || '';
+  },
+
+  populateFragmentForm() {
+    const id = document.getElementById('prompt-fragment-select')?.value;
+    const fragment = this.fragments.find(item => item.id === id);
+    const kind = document.getElementById('prompt-fragment-kind');
+    const name = document.getElementById('prompt-fragment-name');
+    const body = document.getElementById('prompt-fragment-body');
+    if (kind) kind.value = fragment?.kind || 'custom';
+    if (name) name.value = fragment?.name || '';
+    if (body) body.value = fragment?.body || '';
+  },
+
+  async saveProfile() {
+    const id = document.getElementById('prompt-profile-select')?.value;
+    const payload = {
+      name: document.getElementById('prompt-profile-name')?.value || 'Untitled profile',
+      mode: document.getElementById('prompt-profile-mode')?.value || 'general',
+    };
+    const res = await fetch(id ? `/api/prompts/profiles/${encodeURIComponent(id)}` : '/api/prompts/profiles', {
+      method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const saved = await res.json();
+    await this.loadProfiles();
+    const select = document.getElementById('prompt-profile-select');
+    if (select) select.value = saved.id;
+    this.loadPromptPreview();
+  },
+
+  async saveFragment() {
+    const id = document.getElementById('prompt-fragment-select')?.value;
+    const profileId = document.getElementById('prompt-profile-select')?.value || null;
+    const payload = {
+      profileId,
+      kind: document.getElementById('prompt-fragment-kind')?.value || 'custom',
+      name: document.getElementById('prompt-fragment-name')?.value || 'Untitled fragment',
+      body: document.getElementById('prompt-fragment-body')?.value || '',
+      enabled: true,
+    };
+    const res = await fetch(id ? `/api/prompts/fragments/${encodeURIComponent(id)}` : '/api/prompts/fragments', {
+      method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await this.loadFragments();
+    this.loadPromptPreview();
   },
 
   async loadPromptPreview() {
@@ -41,13 +137,21 @@ window.SettingsPage = {
     if (!target) return;
     target.textContent = 'Loading prompt preview…';
     try {
-      const res = await fetch('/api/prompts/preview');
+      const profileId = document.getElementById('prompt-profile-select')?.value || '';
+      const scopeId = document.getElementById('active-scope-select')?.value || '';
+      const qs = new URLSearchParams();
+      if (profileId) qs.set('profileId', profileId);
+      if (scopeId) qs.set('scopeId', scopeId);
+      const res = await fetch(`/api/prompts/preview${qs.toString() ? `?${qs}` : ''}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       target.textContent = data.content || '';
-      document.getElementById('system-prompt-meta').textContent = `${data.length || 0} chars · read-only`;
+      document.getElementById('system-prompt-meta').textContent = `${data.length || 0} chars · ${data.profile?.name || 'default'} · ${data.scope?.name || 'no scope'}`;
     } catch (err) {
       target.textContent = `Failed to load prompt preview: ${err.message}`;
     }
   },
+
+  escapeHtml(value) { const div = document.createElement('div'); div.textContent = value == null ? '' : String(value); return div.innerHTML; },
+  escapeAttribute(value) { return this.escapeHtml(value).replace(/"/g, '&quot;'); },
 };
