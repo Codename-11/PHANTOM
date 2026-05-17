@@ -1,5 +1,25 @@
 # PHANTOM DEVLOG
 
+## 2026-05-17 13:40 EDT — Phase 4 Live Graph MVP
+
+- Added trace-derived graph derivation that builds run, tool, command, observed host/URL/port, artifact, and error nodes from persisted `runs`, `trace_events`, and `artifacts`.
+- Added graph APIs: `/api/runs/:id/graph` for live derived graph state and `/api/runs/:id/artifacts/graph` for durable JSON graph snapshot artifacts.
+- Added Graph page with run selector, SVG execution graph, node detail panel, live refresh from WebSocket trace/artifact events, and graph snapshot export.
+- Enabled Runs page `Open graph` CTA for selected runs.
+- Kept scope enforcement, prompt profile editing, ReactFlow migration, and advanced network topology modes deferred.
+- Validation passed:
+  - RED tests added first for graph derivation and graph API/snapshot behavior.
+  - `node --test server/graph/graph-derive.test.js server/routes/api.test.js` — passing
+  - `npm test` — 18/18 passing
+  - `npm run build` — passing (existing non-module script bundle warnings remain)
+  - `node --check server/graph/graph-derive.js server/routes/api.js frontend/js/*.js frontend/js/pages/*.js` — passing
+  - `python3 tests/smoke_test.py` — 4/4 passing against Hermes routed proxy
+  - Playwright graph page smoke passed and saved `/tmp/phantom-graph-page.png`.
+
+Notes:
+- Graph state is currently derived on demand from trace/artifact data rather than materialized into graph tables.
+- Observation extraction intentionally captures obvious URLs, IPs, domains, and host:port pairs only; deeper service/finding semantics belong in later topology/finding phases.
+
 ## 2026-05-17 12:23 EDT — Phase 3 Durable Artifacts
 
 - Added first-class SQLite `artifacts` table plus store helpers for run-linked metadata.

@@ -401,7 +401,7 @@ html, body {
   padding: 18px; border: 1px dashed var(--border-color); border-radius: var(--radius-md);
   background: var(--bg-surface); color: var(--text-secondary);
 }
-.settings-page-layout, .runs-layout, .artifacts-layout {
+.settings-page-layout, .runs-layout, .artifacts-layout, .graph-layout {
   display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px;
 }
 .settings-page-tabs, .runs-list, .artifacts-list {
@@ -498,6 +498,46 @@ html, body {
 .artifact-preview-frame { width: 100%; min-height: 520px; border: 0; background: white; }
 .artifact-text-preview { max-height: 560px; overflow: auto; padding: 14px; white-space: pre-wrap; word-break: break-word; color: var(--text-secondary); font-family: var(--font-mono); font-size: 12px; }
 
+/* ─── Graph Page ─── */
+.graph-stats { color: var(--text-muted); font-family: var(--font-mono); font-size: 12px; }
+.graph-workspace {
+  min-height: 560px; display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 14px;
+}
+.graph-canvas, .graph-node-detail {
+  background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-lg);
+}
+.graph-canvas { min-height: 560px; overflow: auto; padding: 12px; }
+.graph-svg { width: 100%; min-width: 920px; height: auto; display: block; }
+.graph-edge { fill: none; stroke: rgba(148,163,184,0.42); stroke-width: 1.6; }
+.graph-edge.observed { stroke: rgba(59,184,240,0.54); stroke-dasharray: 4 4; }
+.graph-edge.generated { stroke: rgba(34,197,94,0.55); }
+.graph-edge.blocked_by { stroke: rgba(239,68,68,0.6); }
+#graph-arrow path { fill: rgba(148,163,184,0.65); }
+.graph-node { cursor: pointer; outline: none; }
+.graph-node rect {
+  fill: rgba(20,20,20,0.96); stroke: rgba(55,65,81,0.9); stroke-width: 1;
+  filter: drop-shadow(0 8px 18px rgba(0,0,0,0.24));
+}
+.graph-node:hover rect, .graph-node.selected rect { stroke: var(--accent-secondary); }
+.graph-node circle { fill: var(--accent-secondary); filter: drop-shadow(0 0 8px rgba(59,184,240,0.45)); }
+.graph-node.run circle { fill: var(--accent); }
+.graph-node.tool circle, .graph-node.command circle { fill: var(--warning); }
+.graph-node.artifact circle { fill: #a78bfa; }
+.graph-node.error circle { fill: var(--danger); }
+.graph-node.port circle { fill: #f472b6; }
+.graph-node-type { fill: var(--text-muted); font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; }
+.graph-node-label { fill: var(--text-primary); font-family: var(--font-sans); font-size: 12px; font-weight: 600; }
+.graph-node-detail { padding: 16px; min-width: 0; overflow: auto; }
+.node-detail-header { border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 12px; }
+.node-detail-header h3 { font-size: 16px; margin: 8px 0 4px; word-break: break-word; }
+.node-detail-header p { color: var(--text-secondary); font-family: var(--font-mono); font-size: 12px; }
+.node-type-pill { display: inline-flex; padding: 3px 8px; border: 1px solid var(--border-color); border-radius: 999px; color: var(--accent); font-size: 10px; text-transform: uppercase; font-family: var(--font-mono); }
+.node-detail-section { margin-top: 14px; }
+.node-detail-section h4 { font-size: 13px; margin-bottom: 8px; color: var(--text-primary); }
+.node-detail-section ul { padding-left: 18px; color: var(--text-secondary); font-size: 12px; }
+.node-detail-section li { margin-bottom: 6px; word-break: break-word; }
+.node-detail-section pre { max-height: 240px; overflow: auto; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 10px; color: var(--text-secondary); font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+
 /* ─── Mobile ─── */
 .mobile-only { display: none; }
 @media (max-width: 768px) {
@@ -510,7 +550,9 @@ html, body {
   .settings-drawer { width: 100vw; }
   .page-container { padding: 14px; }
   .page-header { flex-direction: column; }
-  .settings-page-layout, .runs-layout, .artifacts-layout { grid-template-columns: 1fr; }
+  .settings-page-layout, .runs-layout, .artifacts-layout, .graph-layout { grid-template-columns: 1fr; }
+  .graph-workspace { grid-template-columns: 1fr; }
+  .graph-node-detail { min-height: 220px; }
   .settings-page-tabs { display: flex; overflow-x: auto; gap: 6px; }
   .settings-page-tab { min-width: max-content; margin-bottom: 0; }
   .run-meta-grid { grid-template-columns: 1fr 1fr; }

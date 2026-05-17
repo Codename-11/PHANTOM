@@ -38,6 +38,7 @@
   Settings.init();
   window.SettingsPage?.init?.();
   window.RunsPage?.init?.();
+  window.GraphPage?.init?.();
   window.ArtifactsPage?.init?.();
   Management.init();
   initMatrix();

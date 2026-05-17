@@ -80,7 +80,7 @@ window.RunsPage = {
           <button class="btn btn-secondary btn-sm" data-run-action="summary">Generate executive summary</button>
           <button class="btn btn-secondary btn-sm" data-run-action="evidence">Export evidence bundle</button>
           <button class="btn btn-secondary btn-sm" data-run-action="local-preview" ${this.hasHtmlArtifact(run) ? '' : 'disabled'}>Local preview</button>
-          <button class="btn btn-secondary btn-sm" disabled title="Graph visualization is intentionally later-phase work">Open graph</button>
+          <button class="btn btn-secondary btn-sm" data-run-action="graph">Open graph</button>
           <button class="btn btn-secondary btn-sm" disabled title="Publishing is intentionally later-phase work">Publish preview</button>
         </div>
         <div class="run-artifacts-block">
@@ -138,6 +138,13 @@ window.RunsPage = {
   },
 
   async handleRunAction(run, action, button) {
+    if (action === 'graph') {
+      if (window.GraphPage) window.GraphPage.selectedRunId = run.id;
+      window.Router?.navigate?.('graph');
+      window.GraphPage?.loadGraph?.(run.id);
+      return;
+    }
+
     if (action === 'local-preview') {
       const artifact = (run.artifacts || []).find(item => item.type === 'html' && item.contentUrl);
       if (artifact) window.showPreview?.('', artifact.title || 'Preview', artifact);

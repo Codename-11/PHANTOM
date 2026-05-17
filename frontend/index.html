@@ -176,8 +176,26 @@
           </div>
         </section>
 
-        <section class="app-page placeholder-page" data-page="graph">
-          <div class="page-header"><div><p class="eyebrow">Planned</p><h1>Graph</h1><p>Graph visualization arrives after the trace substrate hardens.</p></div></div>
+        <section class="app-page" data-page="graph" id="graph-page">
+          <div class="page-header">
+            <div>
+              <p class="eyebrow">Live execution map</p>
+              <h1>Graph</h1>
+              <p>Trace-derived execution, observation, and artifact graph for each PHANTOM run.</p>
+            </div>
+            <div class="page-actions">
+              <span id="graph-stats" class="graph-stats">No graph loaded</span>
+              <button id="export-graph-btn" class="btn btn-secondary">Export snapshot</button>
+              <button id="refresh-graph-btn" class="btn btn-secondary">↻ Refresh</button>
+            </div>
+          </div>
+          <div class="graph-layout">
+            <aside id="graph-runs-list" class="runs-list graph-runs-list"></aside>
+            <section class="graph-workspace">
+              <div id="graph-canvas" class="graph-canvas"></div>
+              <aside id="graph-node-detail" class="graph-node-detail"></aside>
+            </section>
+          </div>
         </section>
 
         <section class="app-page" data-page="artifacts" id="artifacts-page">
@@ -575,6 +593,7 @@
   <script src="js/settings.js"></script>
   <script src="js/pages/settings-page.js"></script>
   <script src="js/pages/runs-page.js"></script>
+  <script src="js/pages/graph-page.js"></script>
   <script src="js/pages/artifacts-page.js"></script>
   <script src="js/management.js"></script>
   <script src="js/app.js"></script>

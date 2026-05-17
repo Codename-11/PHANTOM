@@ -131,6 +131,22 @@ describe('API Routes Integration', () => {
       model: 'grok-4.3',
       providerRoute: 'hermes-proxy',
     });
+    addTraceEvent(run.id, {
+      type: 'tool.call.started',
+      phase: 'tool',
+      status: 'started',
+      toolName: 'execute_command',
+      input: { command: 'curl http://example.com:8080/status && nc -vz 10.0.0.5 22' },
+      metadata: { toolCallId: 'call-api-graph' },
+    });
+    const completedEvent = addTraceEvent(run.id, {
+      type: 'tool.call.completed',
+      phase: 'tool',
+      status: 'completed',
+      toolName: 'execute_command',
+      outputPreview: 'Connected to 10.0.0.5:22 and https://api.example.com/login',
+      metadata: { toolCallId: 'call-api-graph' },
+    });
     const artifact = createArtifact({
       runId: run.id,
       conversationId: conv.id,
@@ -138,7 +154,7 @@ describe('API Routes Integration', () => {
       title: 'API Preview',
       mimeType: 'text/html',
       path: '/tmp/phantom-api-preview.html',
-      metadata: { source: 'test', secret: 'should-not-leak-in-list' },
+      metadata: { source: 'test', traceEventId: completedEvent.id, secret: 'should-not-leak-in-list' },
     });
 
     let res = await fetch(`${baseUrl}/artifacts?runId=${run.id}`);
@@ -169,5 +185,28 @@ describe('API Routes Integration', () => {
     assert.strictEqual(res.status, 200);
     const reportText = await res.text();
     assert.ok(reportText.includes('PHANTOM Pentest Report'));
+
+    res = await fetch(`${baseUrl}/runs/${run.id}/graph`);
+    assert.strictEqual(res.status, 200);
+    const graph = await res.json();
+    assert.strictEqual(graph.runId, run.id);
+    assert.ok(graph.nodes.some(node => node.type === 'run'));
+    assert.ok(graph.nodes.some(node => node.type === 'tool' && node.label === 'execute_command'));
+    assert.ok(graph.nodes.some(node => node.type === 'artifact' && node.refId === artifact.id));
+    assert.ok(graph.nodes.some(node => node.type === 'host' && node.label === '10.0.0.5'));
+    assert.ok(graph.nodes.some(node => node.type === 'url' && node.label === 'https://api.example.com/login'));
+    assert.ok(graph.edges.some(edge => edge.type === 'observed'));
+
+    res = await fetch(`${baseUrl}/runs/${run.id}/artifacts/graph`, { method: 'POST' });
+    assert.strictEqual(res.status, 200);
+    const graphArtifact = await res.json();
+    assert.strictEqual(graphArtifact.type, 'json');
+    assert.strictEqual(graphArtifact.title, 'Graph snapshot');
+
+    res = await fetch(`${baseUrl}/artifacts/${graphArtifact.id}/content`);
+    assert.strictEqual(res.status, 200);
+    const graphSnapshot = await res.json();
+    assert.strictEqual(graphSnapshot.runId, run.id);
+    assert.ok(graphSnapshot.nodes.length >= graph.nodes.length);
   });
 });

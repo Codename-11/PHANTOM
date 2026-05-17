@@ -13,6 +13,7 @@ import {
 import { artifactToPublic } from '../artifacts/renderers.js';
 import { writeArtifact, exportEvidenceBundle } from '../artifacts/artifact-store.js';
 import { renderExecutiveSummary, renderPentestReport } from '../artifacts/report-renderers.js';
+import { deriveRunGraph } from '../graph/graph-derive.js';
 import { buildSystemPrompt } from '../ai/system-prompt.js';
 import { getToolDefinitions } from '../tools/registry.js';
 import os from 'os';
@@ -96,6 +97,33 @@ router.get('/runs/:id/artifacts', (req, res) => {
   const run = getRun(req.params.id);
   if (!run) return res.status(404).json({ error: 'Run not found' });
   res.json(getArtifactsForRun(req.params.id).map(artifact => artifactToPublic(artifact)));
+});
+
+router.get('/runs/:id/graph', (req, res) => {
+  const run = getRun(req.params.id);
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  const events = getTraceEvents(req.params.id, { limit: req.query.limit || 2000 });
+  const artifacts = getArtifactsForRun(req.params.id).map(artifact => artifactToPublic(artifact, { includeMetadata: true }));
+  res.json(deriveRunGraph({ run, events, artifacts }));
+});
+
+router.post('/runs/:id/artifacts/graph', (req, res) => {
+  const run = getRun(req.params.id);
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  const events = getTraceEvents(req.params.id, { limit: 2000 });
+  const artifacts = getArtifactsForRun(req.params.id).map(artifact => artifactToPublic(artifact, { includeMetadata: true }));
+  const graph = deriveRunGraph({ run, events, artifacts });
+  const artifact = writeArtifact({
+    runId: run.id,
+    conversationId: run.conversation_id,
+    type: 'json',
+    title: 'Graph snapshot',
+    mimeType: 'application/json',
+    extension: '.json',
+    content: JSON.stringify(graph, null, 2),
+    metadata: { source: 'graph_snapshot', eventCount: events.length, nodeCount: graph.nodes.length, edgeCount: graph.edges.length },
+  });
+  res.json(artifactToPublic(artifact, { includeMetadata: true }));
 });
 
 router.post('/runs/:id/artifacts/report', (req, res) => {
