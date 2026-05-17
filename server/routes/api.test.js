@@ -7,6 +7,7 @@ import {
   createConversation,
   createRun,
   addTraceEvent,
+  createArtifact,
 } from '../memory/store.js';
 
 let server;
@@ -106,6 +107,7 @@ describe('API Routes Integration', () => {
     assert.strictEqual(runDetail.id, run.id);
     assert.ok(Array.isArray(runDetail.events));
     assert.strictEqual(runDetail.events[0].type, 'run.started');
+    assert.ok(Array.isArray(runDetail.artifacts));
 
     res = await fetch(`${baseUrl}/runs/${run.id}/events`);
     assert.strictEqual(res.status, 200);
@@ -118,5 +120,54 @@ describe('API Routes Integration', () => {
     const prompt = await res.json();
     assert.ok(prompt.content.includes('You are PHANTOM'));
     assert.ok(!JSON.stringify(prompt).includes('sudo_password'));
+  });
+
+  test('Artifact endpoints list metadata and serve artifact content', async () => {
+    const conv = createConversation('Artifact API test');
+    const run = createRun({
+      conversationId: conv.id,
+      title: 'Artifact API Run',
+      goal: 'Verify artifact API',
+      model: 'grok-4.3',
+      providerRoute: 'hermes-proxy',
+    });
+    const artifact = createArtifact({
+      runId: run.id,
+      conversationId: conv.id,
+      type: 'html',
+      title: 'API Preview',
+      mimeType: 'text/html',
+      path: '/tmp/phantom-api-preview.html',
+      metadata: { source: 'test', secret: 'should-not-leak-in-list' },
+    });
+
+    let res = await fetch(`${baseUrl}/artifacts?runId=${run.id}`);
+    assert.strictEqual(res.status, 200);
+    const artifacts = await res.json();
+    assert.strictEqual(artifacts.length, 1);
+    assert.strictEqual(artifacts[0].id, artifact.id);
+    assert.ok(!('path' in artifacts[0]), 'list response should not expose filesystem paths');
+    assert.ok(!JSON.stringify(artifacts[0]).includes('should-not-leak'));
+    assert.ok(artifacts[0].contentUrl.includes(`/api/artifacts/${artifact.id}/content`));
+
+    res = await fetch(`${baseUrl}/artifacts/${artifact.id}`);
+    assert.strictEqual(res.status, 200);
+    const detail = await res.json();
+    assert.strictEqual(detail.id, artifact.id);
+    assert.ok(!('path' in detail), 'detail response should not expose filesystem paths');
+
+    res = await fetch(`${baseUrl}/artifacts/${artifact.id}/content`);
+    assert.strictEqual(res.status, 404, 'missing file should produce 404 instead of leaking path');
+
+    res = await fetch(`${baseUrl}/runs/${run.id}/artifacts/report`, { method: 'POST' });
+    assert.strictEqual(res.status, 200);
+    const report = await res.json();
+    assert.strictEqual(report.type, 'markdown');
+    assert.strictEqual(report.title, 'Pentest report');
+
+    res = await fetch(`${baseUrl}/artifacts/${report.id}/content`);
+    assert.strictEqual(res.status, 200);
+    const reportText = await res.text();
+    assert.ok(reportText.includes('PHANTOM Pentest Report'));
   });
 });

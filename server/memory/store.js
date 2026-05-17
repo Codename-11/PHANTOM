@@ -103,12 +103,29 @@ export function initDB(dbPath = config.db.path) {
       FOREIGN KEY (parent_event_id) REFERENCES trace_events(id) ON DELETE SET NULL
     );
 
+    CREATE TABLE IF NOT EXISTS artifacts (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      conversation_id TEXT,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      path TEXT NOT NULL,
+      metadata_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      published_at DATETIME,
+      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+      FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
     CREATE INDEX IF NOT EXISTS idx_memories_key ON memories(key);
     CREATE INDEX IF NOT EXISTS idx_runs_conversation ON runs(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
     CREATE INDEX IF NOT EXISTS idx_trace_events_run_seq ON trace_events(run_id, seq);
+    CREATE INDEX IF NOT EXISTS idx_artifacts_run ON artifacts(run_id);
+    CREATE INDEX IF NOT EXISTS idx_artifacts_conversation ON artifacts(conversation_id);
   `);
 
   return db;
@@ -372,6 +389,78 @@ export function getTraceEvents(runId, { limit = 500 } = {}) {
   return getDB().prepare(
     'SELECT * FROM trace_events WHERE run_id = ? ORDER BY seq ASC LIMIT ?'
   ).all(runId, safeLimit).map(normalizeTraceEvent);
+}
+
+// ─── Artifacts ───
+function normalizeArtifact(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    metadata: parseJSONField(row.metadata_json) || {},
+  };
+}
+
+export function createArtifact({
+  runId,
+  conversationId = null,
+  type,
+  title,
+  mimeType,
+  path,
+  metadata = {},
+  publishedAt = null,
+}) {
+  if (!runId) throw new Error('runId is required');
+  if (!type) throw new Error('artifact type is required');
+  if (!path) throw new Error('artifact path is required');
+
+  const id = uuidv4();
+  getDB().prepare(
+    `INSERT INTO artifacts (id, run_id, conversation_id, type, title, mime_type, path, metadata_json, published_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
+    runId,
+    conversationId,
+    type,
+    title || 'Untitled Artifact',
+    mimeType || 'application/octet-stream',
+    path,
+    JSON.stringify(metadata || {}),
+    publishedAt
+  );
+  return getArtifact(id);
+}
+
+export function getArtifact(id) {
+  return normalizeArtifact(getDB().prepare('SELECT * FROM artifacts WHERE id = ?').get(id));
+}
+
+export function getArtifacts({ limit = 100, runId = null, conversationId = null, type = null } = {}) {
+  const safeLimit = Math.max(1, Math.min(parseInt(limit, 10) || 100, 500));
+  let sql = 'SELECT * FROM artifacts';
+  const params = [];
+  const where = [];
+  if (runId) {
+    where.push('run_id = ?');
+    params.push(runId);
+  }
+  if (conversationId) {
+    where.push('conversation_id = ?');
+    params.push(conversationId);
+  }
+  if (type) {
+    where.push('type = ?');
+    params.push(type);
+  }
+  if (where.length) sql += ` WHERE ${where.join(' AND ')}`;
+  sql += ' ORDER BY created_at DESC LIMIT ?';
+  params.push(safeLimit);
+  return getDB().prepare(sql).all(...params).map(normalizeArtifact);
+}
+
+export function getArtifactsForRun(runId, options = {}) {
+  return getArtifacts({ ...options, runId });
 }
 
 export function closeDB() {

@@ -5,6 +5,7 @@ import {
   createConversation,
   createRun, getRun, getRuns, updateRunStatus,
   addTraceEvent, getTraceEvents,
+  createArtifact, getArtifact, getArtifacts, getArtifactsForRun,
 } from './store.js';
 
 describe('Database Store Initialization', () => {
@@ -25,7 +26,8 @@ describe('Database Store Initialization', () => {
       'mcp_servers',
       'tool_results',
       'runs',
-      'trace_events'
+      'trace_events',
+      'artifacts'
     ];
 
     for (const table of expectedTables) {
@@ -39,7 +41,8 @@ describe('Database Store Initialization', () => {
       'idx_memories_category',
       'idx_memories_key',
       'idx_runs_conversation',
-      'idx_trace_events_run_seq'
+      'idx_trace_events_run_seq',
+      'idx_artifacts_run'
     ];
 
     for (const index of expectedIndices) {
@@ -106,5 +109,43 @@ describe('Database Store Initialization', () => {
 
     const runs = getRuns({ limit: 5 });
     assert.ok(runs.some(r => r.id === run.id), 'run should appear in run list');
+  });
+
+  test('artifacts should persist metadata and stay queryable by run', () => {
+    initDB(':memory:');
+    const conv = createConversation('Artifact test');
+    const run = createRun({
+      conversationId: conv.id,
+      title: 'Generate preview',
+      goal: 'Create durable preview',
+      model: 'grok-4.3',
+      providerRoute: 'hermes-proxy',
+    });
+
+    const artifact = createArtifact({
+      runId: run.id,
+      conversationId: conv.id,
+      type: 'html',
+      title: 'Preview Window',
+      mimeType: 'text/html',
+      path: '/tmp/phantom-preview.html',
+      metadata: { source: 'show_preview_window', traceEventId: 'evt-1' },
+    });
+
+    assert.ok(artifact.id, 'artifact should have an id');
+    assert.strictEqual(artifact.run_id, run.id);
+    assert.strictEqual(artifact.conversation_id, conv.id);
+    assert.deepStrictEqual(artifact.metadata, { source: 'show_preview_window', traceEventId: 'evt-1' });
+
+    const saved = getArtifact(artifact.id);
+    assert.strictEqual(saved.title, 'Preview Window');
+    assert.strictEqual(saved.mime_type, 'text/html');
+
+    const runArtifacts = getArtifactsForRun(run.id);
+    assert.strictEqual(runArtifacts.length, 1);
+    assert.strictEqual(runArtifacts[0].id, artifact.id);
+
+    const allArtifacts = getArtifacts({ limit: 5 });
+    assert.ok(allArtifacts.some(a => a.id === artifact.id));
   });
 });

@@ -73,6 +73,7 @@
         <div class="top-bar-actions">
           <button class="btn btn-sm btn-secondary" data-route="chat" title="Chat">💬 Chat</button>
           <button class="btn btn-sm btn-secondary" data-route="runs" title="Run history">🧾 Runs</button>
+          <button class="btn btn-sm btn-secondary" data-route="artifacts" title="Saved artifacts">📦 Artifacts</button>
           <button id="quick-model-btn" class="btn btn-sm btn-secondary" title="Quick model switch">🔷 Model</button>
           <button id="manage-btn" class="btn btn-sm btn-secondary" title="MCP &amp; Skills">🧩 Manage</button>
         </div>
@@ -179,8 +180,28 @@
           <div class="page-header"><div><p class="eyebrow">Planned</p><h1>Graph</h1><p>Graph visualization arrives after the trace substrate hardens.</p></div></div>
         </section>
 
-        <section class="app-page placeholder-page" data-page="artifacts">
-          <div class="page-header"><div><p class="eyebrow">Planned</p><h1>Artifacts</h1><p>Durable artifacts are intentionally out of scope for this slice.</p></div></div>
+        <section class="app-page" data-page="artifacts" id="artifacts-page">
+          <div class="page-header">
+            <div>
+              <p class="eyebrow">Workspace-backed outputs</p>
+              <h1>Artifacts</h1>
+              <p>Durable previews, reports, trace exports, and evidence written under the PHANTOM workspace.</p>
+            </div>
+            <div class="page-actions">
+              <select id="artifact-type-filter" class="artifact-filter" aria-label="Filter artifact type">
+                <option value="">All types</option>
+                <option value="html">HTML previews</option>
+                <option value="markdown">Markdown reports</option>
+                <option value="jsonl">Trace exports</option>
+                <option value="evidence">Evidence bundles</option>
+              </select>
+              <button id="refresh-artifacts-btn" class="btn btn-secondary">↻ Refresh</button>
+            </div>
+          </div>
+          <div class="artifacts-layout">
+            <aside id="artifacts-list" class="artifacts-list"></aside>
+            <section id="artifact-detail" class="artifact-detail"></section>
+          </div>
         </section>
 
         <section class="app-page placeholder-page" data-page="scope">
@@ -413,6 +434,7 @@
       <div class="preview-header">
         <h2 id="preview-title" class="preview-title">Preview</h2>
         <div class="preview-actions">
+          <a id="preview-open-artifact-btn" class="btn-icon hidden" title="Open artifact" target="_blank" rel="noopener">↗</a>
           <button id="preview-refresh-btn" class="btn-icon" title="Refresh">🔄</button>
           <button id="preview-close-btn" class="btn-icon" title="Close">✕</button>
         </div>
@@ -553,6 +575,7 @@
   <script src="js/settings.js"></script>
   <script src="js/pages/settings-page.js"></script>
   <script src="js/pages/runs-page.js"></script>
+  <script src="js/pages/artifacts-page.js"></script>
   <script src="js/management.js"></script>
   <script src="js/app.js"></script>
 </body>

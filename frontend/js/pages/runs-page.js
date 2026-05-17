@@ -75,10 +75,26 @@ window.RunsPage = {
           <div><span>Started</span><strong>${this.escapeHtml(run.started_at || '—')}</strong></div>
           <div><span>Ended</span><strong>${this.escapeHtml(run.ended_at || '—')}</strong></div>
         </div>
+        <div class="run-actions">
+          <button class="btn btn-secondary btn-sm" data-run-action="report">Generate pentest report</button>
+          <button class="btn btn-secondary btn-sm" data-run-action="summary">Generate executive summary</button>
+          <button class="btn btn-secondary btn-sm" data-run-action="evidence">Export evidence bundle</button>
+          <button class="btn btn-secondary btn-sm" data-run-action="local-preview" ${this.hasHtmlArtifact(run) ? '' : 'disabled'}>Local preview</button>
+          <button class="btn btn-secondary btn-sm" disabled title="Graph visualization is intentionally later-phase work">Open graph</button>
+          <button class="btn btn-secondary btn-sm" disabled title="Publishing is intentionally later-phase work">Publish preview</button>
+        </div>
+        <div class="run-artifacts-block">
+          <div class="section-subhead"><h4>Artifacts</h4><button class="inline-link" data-route="artifacts">Open Artifacts page</button></div>
+          ${this.renderRunArtifacts(run.artifacts || [])}
+        </div>
         <div class="trace-timeline">
           ${(run.events || []).map(event => this.renderEvent(event)).join('') || '<div class="empty-msg">No events recorded.</div>'}
         </div>
       `;
+      detail.querySelectorAll('[data-run-action]').forEach((button) => {
+        button.addEventListener('click', () => this.handleRunAction(run, button.dataset.runAction, button));
+      });
+      detail.querySelector('[data-route="artifacts"]')?.addEventListener('click', () => window.Router?.navigate?.('artifacts'));
     } catch (err) {
       detail.innerHTML = `<div class="empty-msg danger">Failed to load run: ${this.escapeHtml(err.message)}</div>`;
     }
@@ -105,9 +121,66 @@ window.RunsPage = {
     `;
   },
 
+  renderRunArtifacts(artifacts) {
+    if (!artifacts.length) return '<div class="empty-msg">No artifacts captured for this run yet.</div>';
+    return `<div class="run-artifact-chips">
+      ${artifacts.map(artifact => `
+        <a class="artifact-chip" href="${this.escapeAttribute(artifact.contentUrl)}" target="_blank" rel="noopener">
+          <span>${this.escapeHtml(artifact.type || 'artifact')}</span>
+          <strong>${this.escapeHtml(artifact.title || artifact.id)}</strong>
+        </a>
+      `).join('')}
+    </div>`;
+  },
+
+  hasHtmlArtifact(run) {
+    return (run.artifacts || []).some(artifact => artifact.type === 'html' && artifact.contentUrl);
+  },
+
+  async handleRunAction(run, action, button) {
+    if (action === 'local-preview') {
+      const artifact = (run.artifacts || []).find(item => item.type === 'html' && item.contentUrl);
+      if (artifact) window.showPreview?.('', artifact.title || 'Preview', artifact);
+      return;
+    }
+
+    const endpoints = {
+      report: 'report',
+      summary: 'summary',
+      evidence: 'evidence',
+    };
+    const endpoint = endpoints[action];
+    if (!endpoint) return;
+
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Working…';
+    try {
+      const res = await fetch(`/api/runs/${encodeURIComponent(run.id)}/artifacts/${endpoint}`, { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const artifact = await res.json();
+      window.dispatchEvent(new CustomEvent('phantom:artifact', { detail: { artifact, runId: run.id, conversationId: run.conversation_id } }));
+      await this.selectRun(run.id);
+      window.ArtifactsPage?.loadArtifacts?.(artifact.id);
+    } catch (err) {
+      button.textContent = `Failed: ${err.message}`;
+      setTimeout(() => {
+        button.textContent = original;
+        button.disabled = false;
+      }, 1800);
+      return;
+    }
+    button.textContent = original;
+    button.disabled = false;
+  },
+
   escapeHtml(value) {
     const div = document.createElement('div');
     div.textContent = value == null ? '' : String(value);
     return div.innerHTML;
+  },
+
+  escapeAttribute(value) {
+    return this.escapeHtml(value).replace(/"/g, '&quot;');
   },
 };

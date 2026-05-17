@@ -12,6 +12,8 @@ import {
   createRun, addTraceEvent, completeRun, failRun, updateRunStatus,
 } from './memory/store.js';
 import { processMessage } from './ai/llm-client.js';
+import { writePreviewArtifact, exportRunTrace } from './artifacts/artifact-store.js';
+import { artifactToPublic } from './artifacts/renderers.js';
 import apiRouter from './routes/api.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -83,6 +85,26 @@ wss.on('connection', (ws) => {
     return traceEvent;
   }
 
+  function exportTraceArtifact(runId, conversationId) {
+    try {
+      const artifact = exportRunTrace(runId, conversationId);
+      trace(runId, {
+        type: 'artifact.created',
+        phase: 'artifact',
+        status: 'completed',
+        outputPreview: artifact.title,
+        metadata: { artifactId: artifact.id, source: 'trace_export' },
+      });
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({ type: 'artifact_created', artifact: artifactToPublic(artifact, { includeMetadata: true }), runId, conversationId }));
+      }
+      return artifact;
+    } catch (err) {
+      console.error('Trace export error:', err.message);
+      return null;
+    }
+  }
+
   ws.on('message', async (data) => {
     try {
       const msg = JSON.parse(data.toString());
@@ -151,8 +173,9 @@ wss.on('connection', (ws) => {
             },
             // onToolResult — tool result
             (toolResult) => {
-              sendTrace(run.id,
-                { type: 'tool_result', ...toolResult, conversationId },
+              const payload = { type: 'tool_result', ...toolResult, conversationId };
+              const toolTrace = sendTrace(run.id,
+                payload,
                 {
                   type: 'tool.call.completed',
                   phase: 'tool',
@@ -162,6 +185,34 @@ wss.on('connection', (ws) => {
                   metadata: { toolCallId: toolResult.id },
                 }
               );
+
+              if (toolResult.name === 'show_preview_window') {
+                try {
+                  const resultObject = typeof toolResult.result === 'string' ? JSON.parse(toolResult.result) : toolResult.result;
+                  if (resultObject?.html_content) {
+                    const artifact = writePreviewArtifact({
+                      runId: run.id,
+                      conversationId,
+                      title: resultObject.title || 'Preview',
+                      htmlContent: resultObject.html_content,
+                      traceEventId: toolTrace?.id || null,
+                    });
+                    payload.artifact = artifactToPublic(artifact, { includeMetadata: true });
+                    trace(run.id, {
+                      type: 'artifact.created',
+                      phase: 'artifact',
+                      status: 'completed',
+                      outputPreview: artifact.title,
+                      metadata: { artifactId: artifact.id, source: 'show_preview_window' },
+                    });
+                    if (ws.readyState === ws.OPEN) {
+                      ws.send(JSON.stringify({ type: 'artifact_created', artifact: payload.artifact, runId: run.id, conversationId }));
+                    }
+                  }
+                } catch (err) {
+                  console.error('Preview artifact persistence error:', err.message);
+                }
+              }
             },
             // onError
             (error) => {
@@ -213,18 +264,21 @@ wss.on('connection', (ws) => {
               { type: 'response_end', conversationId },
               { type: 'run.stopped', phase: 'chat', status: 'stopped', outputPreview: 'Stopped by user' }
             );
+            exportTraceArtifact(run.id, conversationId);
           } else if (runHadError) {
             failRun(run.id, 'Completed with error');
             sendTrace(run.id,
               { type: 'response_end', conversationId },
               { type: 'run.failed', phase: 'chat', status: 'failed', outputPreview: 'Completed with error' }
             );
+            exportTraceArtifact(run.id, conversationId);
           } else {
             completeRun(run.id, 'Completed');
             sendTrace(run.id,
               { type: 'response_end', conversationId },
               { type: 'run.completed', phase: 'chat', status: 'completed', outputPreview: 'Completed' }
             );
+            exportTraceArtifact(run.id, conversationId);
           }
 
           currentRunId = null;

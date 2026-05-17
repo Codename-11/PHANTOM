@@ -8,7 +8,11 @@ import {
   getAllMemories, searchMemories,
   getMCPServers, addMCPServer, removeMCPServer,
   getRuns, getRun, getTraceEvents,
+  getArtifacts, getArtifact, getArtifactsForRun,
 } from '../memory/store.js';
+import { artifactToPublic } from '../artifacts/renderers.js';
+import { writeArtifact, exportEvidenceBundle } from '../artifacts/artifact-store.js';
+import { renderExecutiveSummary, renderPentestReport } from '../artifacts/report-renderers.js';
 import { buildSystemPrompt } from '../ai/system-prompt.js';
 import { getToolDefinitions } from '../tools/registry.js';
 import os from 'os';
@@ -84,13 +88,97 @@ router.get('/runs', (req, res) => {
 router.get('/runs/:id', (req, res) => {
   const run = getRun(req.params.id);
   if (!run) return res.status(404).json({ error: 'Run not found' });
-  res.json({ ...run, events: getTraceEvents(req.params.id) });
+  const artifacts = getArtifactsForRun(req.params.id).map(artifact => artifactToPublic(artifact));
+  res.json({ ...run, events: getTraceEvents(req.params.id), artifacts });
+});
+
+router.get('/runs/:id/artifacts', (req, res) => {
+  const run = getRun(req.params.id);
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  res.json(getArtifactsForRun(req.params.id).map(artifact => artifactToPublic(artifact)));
+});
+
+router.post('/runs/:id/artifacts/report', (req, res) => {
+  const run = getRun(req.params.id);
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  const events = getTraceEvents(req.params.id, { limit: 2000 });
+  const artifacts = getArtifactsForRun(req.params.id);
+  const artifact = writeArtifact({
+    runId: run.id,
+    conversationId: run.conversation_id,
+    type: 'markdown',
+    title: 'Pentest report',
+    mimeType: 'text/markdown',
+    extension: '.md',
+    content: renderPentestReport(run, events, artifacts),
+    metadata: { source: 'pentest_report', eventCount: events.length, artifactCount: artifacts.length },
+  });
+  res.json(artifactToPublic(artifact, { includeMetadata: true }));
+});
+
+router.post('/runs/:id/artifacts/summary', (req, res) => {
+  const run = getRun(req.params.id);
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  const events = getTraceEvents(req.params.id, { limit: 2000 });
+  const artifacts = getArtifactsForRun(req.params.id);
+  const artifact = writeArtifact({
+    runId: run.id,
+    conversationId: run.conversation_id,
+    type: 'markdown',
+    title: 'Executive summary',
+    mimeType: 'text/markdown',
+    extension: '.md',
+    content: renderExecutiveSummary(run, events, artifacts),
+    metadata: { source: 'executive_summary', eventCount: events.length, artifactCount: artifacts.length },
+  });
+  res.json(artifactToPublic(artifact, { includeMetadata: true }));
+});
+
+router.post('/runs/:id/artifacts/evidence', (req, res) => {
+  const run = getRun(req.params.id);
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  const events = getTraceEvents(req.params.id, { limit: 2000 });
+  const artifacts = getArtifactsForRun(req.params.id);
+  const artifact = exportEvidenceBundle(run, events, artifacts);
+  res.json(artifactToPublic(artifact, { includeMetadata: true }));
 });
 
 router.get('/runs/:id/events', (req, res) => {
   const run = getRun(req.params.id);
   if (!run) return res.status(404).json({ error: 'Run not found' });
   res.json(getTraceEvents(req.params.id, { limit: req.query.limit || 500 }));
+});
+
+// ─── Artifacts ───
+router.get('/artifacts', (req, res) => {
+  const artifacts = getArtifacts({
+    limit: req.query.limit || 100,
+    runId: req.query.runId || null,
+    conversationId: req.query.conversationId || null,
+    type: req.query.type || null,
+  });
+  res.json(artifacts.map(artifact => artifactToPublic(artifact)));
+});
+
+router.get('/artifacts/:id', (req, res) => {
+  const artifact = getArtifact(req.params.id);
+  if (!artifact) return res.status(404).json({ error: 'Artifact not found' });
+  res.json(artifactToPublic(artifact, { includeMetadata: true }));
+});
+
+router.get('/artifacts/:id/content', (req, res) => {
+  const artifact = getArtifact(req.params.id);
+  if (!artifact) return res.status(404).json({ error: 'Artifact not found' });
+  if (!existsSync(artifact.path)) return res.status(404).json({ error: 'Artifact content not found' });
+  res.type(artifact.mime_type);
+  res.sendFile(artifact.path);
+});
+
+router.get('/artifacts/:id/download', (req, res) => {
+  const artifact = getArtifact(req.params.id);
+  if (!artifact) return res.status(404).json({ error: 'Artifact not found' });
+  if (!existsSync(artifact.path)) return res.status(404).json({ error: 'Artifact content not found' });
+  res.download(artifact.path, basename(artifact.path));
 });
 
 // ─── Conversations ───

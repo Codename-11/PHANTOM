@@ -38,6 +38,7 @@
   Settings.init();
   window.SettingsPage?.init?.();
   window.RunsPage?.init?.();
+  window.ArtifactsPage?.init?.();
   Management.init();
   initMatrix();
   connectWebSocket();
@@ -48,19 +49,36 @@
   // ─── WebSocket ───
   // ─── Preview Panel Logic ───
   let lastPreviewHtml = '';
+  let lastPreviewArtifact = null;
   const previewPanel = document.getElementById('preview-panel');
   const previewIframe = document.getElementById('preview-iframe');
   const previewTitle = document.getElementById('preview-title');
+  const previewOpenArtifactBtn = document.getElementById('preview-open-artifact-btn');
 
-  window.showPreview = function showPreview(htmlContent, title) {
+  window.showPreview = function showPreview(htmlContent, title, artifact = null) {
     if (!previewPanel) return;
-    lastPreviewHtml = htmlContent;
+    lastPreviewHtml = htmlContent || '';
+    lastPreviewArtifact = artifact || lastPreviewArtifact;
 
     if (title) previewTitle.textContent = title;
 
-    // Instead of directly writing to the document (which gets blocked without allow-same-origin),
-    // we use a Data URI or srcdoc to safely render the content in the sandboxed iframe.
-    previewIframe.srcdoc = htmlContent;
+    if (artifact?.contentUrl) {
+      previewIframe.removeAttribute('srcdoc');
+      previewIframe.src = artifact.contentUrl;
+      if (previewOpenArtifactBtn) {
+        previewOpenArtifactBtn.href = artifact.contentUrl;
+        previewOpenArtifactBtn.classList.remove('hidden');
+      }
+    } else {
+      // Instead of directly writing to the document (which gets blocked without allow-same-origin),
+      // we use srcdoc to safely render the content in the sandboxed iframe while the server persists it as an artifact.
+      previewIframe.removeAttribute('src');
+      previewIframe.srcdoc = htmlContent || '';
+      if (previewOpenArtifactBtn) {
+        previewOpenArtifactBtn.removeAttribute('href');
+        previewOpenArtifactBtn.classList.add('hidden');
+      }
+    }
 
     previewPanel.classList.remove('hidden');
 
@@ -78,7 +96,8 @@
 
   document.getElementById('preview-close-btn')?.addEventListener('click', hidePreview);
   document.getElementById('preview-refresh-btn')?.addEventListener('click', () => {
-    if (lastPreviewHtml) showPreview(lastPreviewHtml, previewTitle.textContent);
+    if (lastPreviewArtifact?.contentUrl) window.showPreview('', lastPreviewArtifact.title || previewTitle.textContent, lastPreviewArtifact);
+    else if (lastPreviewHtml) window.showPreview(lastPreviewHtml, previewTitle.textContent);
   });
 
   // ─── WebSocket ───
@@ -134,6 +153,9 @@
     if (msg.runId) {
       window.dispatchEvent(new CustomEvent('phantom:trace', { detail: msg }));
     }
+    if (msg.type === 'artifact_created' && msg.artifact) {
+      window.dispatchEvent(new CustomEvent('phantom:artifact', { detail: msg }));
+    }
 
     // Session isolation: only render messages for the active conversation
     if (msg.conversationId && currentConversationId && msg.conversationId !== currentConversationId) {
@@ -176,15 +198,23 @@
             try {
               const resObj = typeof msg.result === 'string' ? JSON.parse(msg.result) : msg.result;
               if (resObj.html_content) {
-                window.showPreview(resObj.html_content, resObj.title || 'Preview');
+                window.showPreview(resObj.html_content, resObj.title || 'Preview', msg.artifact || null);
                 // modify msg.result to only show success message in chat
-                msg.result = resObj.message;
+                msg.result = msg.artifact
+                  ? `${resObj.message}\nArtifact saved: ${msg.artifact.title || msg.artifact.id}`
+                  : resObj.message;
               }
             } catch (e) {
               console.error('Failed to parse show_preview_window result:', e);
             }
           }
         Chat.addToolResult(msg);
+        break;
+
+      case 'artifact_created':
+        if (msg.artifact?.type === 'html' && msg.artifact?.metadata?.source === 'show_preview_window') {
+          window.showPreview('', msg.artifact.title || 'Preview', msg.artifact);
+        }
         break;
 
       case 'response_end':
