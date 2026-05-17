@@ -1,5 +1,31 @@
 # PHANTOM DEVLOG
 
+## 2026-05-17 16:32 EDT — Phase 8 Asset Registry and Mitigation Reruns
+
+- Added first-class operational asset persistence for networks, devices, services, web apps, URLs/domains, owners, environments, tags, notes, service/address records, and redacted credential references.
+- Upgraded scopes so `targets.assetIds` can reference saved assets while preserving raw host/domain/CIDR/URL targets; policy evaluation expands asset targets before authorizing risky tool actions.
+- Added durable findings/results linked to assets, runs, scopes, trace events, artifacts, and baseline snapshots.
+- Added asset baseline/health snapshots with status, health score, finding counts, observations, artifact links, and captured timestamps.
+- Added mitigation rerun templates and materialized rerun records that preserve source run/scope/profile metadata while reusing governed run safety checks instead of blindly replaying commands.
+- Added before/after comparison APIs for snapshot deltas: health score, ports, finding counts, added/resolved findings, and summary text.
+- Added REST APIs for assets, findings, snapshots, run templates, materialized reruns, and comparisons.
+- Rebuilt the former Targets / Scope page into a desktop-first responsive Assets + Scope workspace with 3-panel layout, asset list/search/filter, asset detail inspector, findings/history/services/targets sections, scope builder with asset selection, and comparison view.
+- Added Runs page action for creating a mitigation rerun from an existing run.
+- Validation passed:
+  - RED tests added first for asset CRUD/redaction, asset-backed scopes, findings/snapshots/comparisons, rerun templates, and API behavior.
+  - `npm test` — 35/35 passing
+  - `npm run build` — passing (legacy non-module script warnings remain)
+  - `find server frontend/js -name '*.js' -print0 | xargs -0 -n1 node --check` — passing
+  - `python3 tests/smoke_test.py` — 4/4 passing against Hermes routed proxy
+  - Live Asset Registry API/DB smoke passed and cleaned fixtures.
+  - Playwright Assets + Scope UI smoke passed for asset detail, scope list, and comparison view.
+  - `git diff --check` — passing
+
+Notes:
+- Credential reference inputs are redacted before persistence/display; API/UI responses expose `[REDACTED]` only.
+- Reruns create governed run records/templates for mitigation verification; they do not bypass policy/scope evaluation or replay destructive commands directly.
+- Graph integration is currently via run/snapshot links and existing run graph pages; richer asset/finding graph modes remain a later enhancement.
+
 ## 2026-05-17 15:25 EDT — Phase 7 Replay Guarantees
 
 - Added restart/reopen regression coverage proving runs, ordered trace events, artifacts, scope metadata, and redacted prompt snapshots survive DB close/reopen.

@@ -188,6 +188,113 @@ describe('API Routes Integration', () => {
     assert.strictEqual(res.status, 200);
   });
 
+  test('Asset, finding, baseline, rerun, and comparison APIs expose operational security workspace state', async () => {
+    let res = await fetch(`${baseUrl}/assets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'web_app',
+        name: 'API Portal',
+        owner: 'Security',
+        environment: 'staging',
+        credentialRefs: ['vault:portal-ref'],
+        addresses: [{ kind: 'url', value: 'https://portal.example.test' }],
+        services: [{ name: 'https', protocol: 'tcp', port: 443, url: 'https://portal.example.test', status: 'open' }],
+        tags: ['staging', 'portal'],
+      }),
+    });
+    assert.strictEqual(res.status, 200);
+    const asset = await res.json();
+    assert.strictEqual(asset.name, 'API Portal');
+    assert.ok(!JSON.stringify(asset).includes('vault:portal-ref'));
+    assert.strictEqual(asset.services[0].port, 443);
+
+    res = await fetch(`${baseUrl}/assets?query=portal&tag=staging`);
+    assert.strictEqual(res.status, 200);
+    const assets = await res.json();
+    assert.ok(assets.some(item => item.id === asset.id));
+
+    res = await fetch(`${baseUrl}/scopes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'API asset scope', targets: { assetIds: [asset.id] }, allowedActions: ['recon'] }),
+    });
+    assert.strictEqual(res.status, 200);
+    const scope = await res.json();
+    assert.deepStrictEqual(scope.raw_targets.assetIds, [asset.id]);
+    assert.ok(scope.targets.urls.includes('https://portal.example.test'));
+
+    const conv = createConversation('Asset API run');
+    const run = createRun({ conversationId: conv.id, title: 'Asset API run', goal: 'Check API Portal', model: 'grok-4.3', providerRoute: 'hermes-proxy', scopeId: scope.id });
+    const event = addTraceEvent(run.id, { type: 'tool.call.completed', phase: 'tool', status: 'completed', toolName: 'web_request', outputPreview: 'Server header exposed' });
+
+    res = await fetch(`${baseUrl}/findings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assetId: asset.id, runId: run.id, traceEventId: event.id, scopeId: scope.id, title: 'Server header exposed', severity: 'medium', evidence: 'Server: nginx', recommendation: 'Disable version header' }),
+    });
+    assert.strictEqual(res.status, 200);
+    const finding = await res.json();
+    assert.strictEqual(finding.status, 'open');
+
+    res = await fetch(`${baseUrl}/assets/${asset.id}/snapshots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scopeId: scope.id, runId: run.id, title: 'Before mitigation', status: 'degraded', healthScore: 55, observations: { ports: [443] }, findingCounts: { open: 1, mitigated: 0 }, artifactIds: [] }),
+    });
+    assert.strictEqual(res.status, 200);
+    const before = await res.json();
+
+    await fetch(`${baseUrl}/findings/${finding.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'mitigated' }),
+    });
+
+    res = await fetch(`${baseUrl}/assets/${asset.id}/snapshots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scopeId: scope.id, runId: run.id, title: 'After mitigation', status: 'healthy', healthScore: 95, observations: { ports: [443] }, findingCounts: { open: 0, mitigated: 1 }, artifactIds: [] }),
+    });
+    assert.strictEqual(res.status, 200);
+    const after = await res.json();
+
+    res = await fetch(`${baseUrl}/comparisons`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseSnapshotId: before.id, compareSnapshotId: after.id, title: 'Mitigation comparison' }),
+    });
+    assert.strictEqual(res.status, 200);
+    const comparison = await res.json();
+    assert.strictEqual(comparison.diff.healthDelta, 40);
+    assert.strictEqual(comparison.diff.resolvedFindings, 1);
+
+    res = await fetch(`${baseUrl}/run-templates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceRunId: run.id, name: 'Portal rerun', assetIds: [asset.id] }),
+    });
+    assert.strictEqual(res.status, 200);
+    const template = await res.json();
+    assert.strictEqual(template.source_run_id, run.id);
+
+    res = await fetch(`${baseUrl}/run-templates/${template.id}/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId: conv.id, title: 'API rerun' }),
+    });
+    assert.strictEqual(res.status, 200);
+    const rerun = await res.json();
+    assert.strictEqual(rerun.scope_id, scope.id);
+
+    res = await fetch(`${baseUrl}/assets/${asset.id}`);
+    assert.strictEqual(res.status, 200);
+    const detail = await res.json();
+    assert.ok(detail.findings.some(item => item.id === finding.id));
+    assert.ok(detail.snapshots.length >= 2);
+    assert.ok(!JSON.stringify(detail).includes('vault:portal-ref'));
+  });
+
   test('Artifact endpoints list metadata and serve artifact content', async () => {
     const conv = createConversation('Artifact API test');
     const run = createRun({

@@ -24,6 +24,13 @@ import {
 } from '../prompts/prompt-store.js';
 import { getToolDefinitions } from '../tools/registry.js';
 import { buildRunReplay } from '../runs/replay.js';
+import {
+  createAsset, getAsset, getAssets, updateAsset, archiveAsset,
+  createFinding, getFindings, updateFinding,
+  createAssetSnapshot, getAssetSnapshots,
+  createRunTemplateFromRun, getRunTemplates, materializeRunFromTemplate,
+  compareAssetSnapshots, getRunComparisons,
+} from '../assets/asset-store.js';
 import os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -150,6 +157,101 @@ router.post('/scopes/:id/evaluate', (req, res) => {
   const scope = getScope(req.params.id);
   if (!scope) return res.status(404).json({ error: 'Scope not found' });
   res.json(evaluateToolAction({ toolName: req.body?.toolName, args: req.body?.args || {}, scope }));
+});
+
+// ─── Assets, Findings, Baselines, Reruns ───
+function assetDetail(asset) {
+  if (!asset) return null;
+  return {
+    ...asset,
+    findings: getFindings({ assetId: asset.id, limit: 200 }),
+    snapshots: getAssetSnapshots({ assetId: asset.id, limit: 100 }),
+  };
+}
+
+router.get('/assets', (req, res) => {
+  res.json(getAssets({
+    includeArchived: req.query.includeArchived === 'true',
+    query: req.query.query || '',
+    type: req.query.type || null,
+    tag: req.query.tag || null,
+    limit: req.query.limit || 100,
+  }));
+});
+
+router.post('/assets', (req, res) => {
+  try { res.json(createAsset(req.body || {})); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+router.get('/assets/:id', (req, res) => {
+  const asset = getAsset(req.params.id);
+  if (!asset) return res.status(404).json({ error: 'Asset not found' });
+  res.json(assetDetail(asset));
+});
+
+router.put('/assets/:id', (req, res) => {
+  try {
+    const asset = updateAsset(req.params.id, req.body || {});
+    if (!asset) return res.status(404).json({ error: 'Asset not found' });
+    res.json(asset);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+router.post('/assets/:id/archive', (req, res) => {
+  const asset = archiveAsset(req.params.id);
+  if (!asset) return res.status(404).json({ error: 'Asset not found' });
+  res.json(asset);
+});
+router.delete('/assets/:id', (req, res) => {
+  const asset = archiveAsset(req.params.id);
+  if (!asset) return res.status(404).json({ error: 'Asset not found' });
+  res.json(asset);
+});
+
+router.get('/assets/:id/snapshots', (req, res) => {
+  const asset = getAsset(req.params.id);
+  if (!asset) return res.status(404).json({ error: 'Asset not found' });
+  res.json(getAssetSnapshots({ assetId: req.params.id, limit: req.query.limit || 100 }));
+});
+router.post('/assets/:id/snapshots', (req, res) => {
+  const asset = getAsset(req.params.id);
+  if (!asset) return res.status(404).json({ error: 'Asset not found' });
+  try { res.json(createAssetSnapshot({ ...(req.body || {}), assetId: req.params.id })); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+router.get('/findings', (req, res) => {
+  res.json(getFindings({ assetId: req.query.assetId || null, runId: req.query.runId || null, status: req.query.status || null, severity: req.query.severity || null, limit: req.query.limit || 100 }));
+});
+router.post('/findings', (req, res) => {
+  try { res.json(createFinding(req.body || {})); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+router.put('/findings/:id', (req, res) => {
+  try {
+    const finding = updateFinding(req.params.id, req.body || {});
+    if (!finding) return res.status(404).json({ error: 'Finding not found' });
+    res.json(finding);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+router.get('/run-templates', (req, res) => {
+  res.json(getRunTemplates({ sourceRunId: req.query.sourceRunId || null, limit: req.query.limit || 100 }));
+});
+router.post('/run-templates', (req, res) => {
+  try { res.json(createRunTemplateFromRun(req.body?.sourceRunId, req.body || {})); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+router.post('/run-templates/:id/runs', (req, res) => {
+  try { res.json(materializeRunFromTemplate(req.params.id, req.body || {})); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+router.get('/comparisons', (req, res) => res.json(getRunComparisons({ limit: req.query.limit || 100 })));
+router.post('/comparisons', (req, res) => {
+  try { res.json(compareAssetSnapshots(req.body || {})); }
+  catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 // ─── Runs + Trace Events ───

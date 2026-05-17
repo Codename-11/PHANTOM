@@ -161,6 +161,150 @@ export function initDB(dbPath = config.db.path) {
       FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL
     );
 
+    CREATE TABLE IF NOT EXISTS assets (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL DEFAULT 'device',
+      name TEXT NOT NULL,
+      description TEXT,
+      owner TEXT,
+      environment TEXT,
+      status TEXT DEFAULT 'active',
+      criticality TEXT DEFAULT 'medium',
+      notes TEXT,
+      credential_refs_json TEXT,
+      metadata_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      archived_at DATETIME
+    );
+
+    CREATE TABLE IF NOT EXISTS asset_addresses (
+      id TEXT PRIMARY KEY,
+      asset_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      value TEXT NOT NULL,
+      label TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS asset_services (
+      id TEXT PRIMARY KEY,
+      asset_id TEXT NOT NULL,
+      name TEXT,
+      protocol TEXT,
+      port INTEGER,
+      url TEXT,
+      status TEXT DEFAULT 'unknown',
+      metadata_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS asset_tags (
+      id TEXT PRIMARY KEY,
+      asset_id TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS asset_relationships (
+      id TEXT PRIMARY KEY,
+      from_asset_id TEXT NOT NULL,
+      to_asset_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      metadata_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (from_asset_id) REFERENCES assets(id) ON DELETE CASCADE,
+      FOREIGN KEY (to_asset_id) REFERENCES assets(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS findings (
+      id TEXT PRIMARY KEY,
+      asset_id TEXT,
+      service_id TEXT,
+      run_id TEXT,
+      trace_event_id TEXT,
+      scope_id TEXT,
+      title TEXT NOT NULL,
+      severity TEXT DEFAULT 'low',
+      status TEXT DEFAULT 'open',
+      description TEXT,
+      evidence TEXT,
+      recommendation TEXT,
+      first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      fixed_at DATETIME,
+      metadata_json TEXT,
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE SET NULL,
+      FOREIGN KEY (service_id) REFERENCES asset_services(id) ON DELETE SET NULL,
+      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE SET NULL,
+      FOREIGN KEY (trace_event_id) REFERENCES trace_events(id) ON DELETE SET NULL,
+      FOREIGN KEY (scope_id) REFERENCES scopes(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS finding_evidence (
+      id TEXT PRIMARY KEY,
+      finding_id TEXT NOT NULL,
+      artifact_id TEXT,
+      trace_event_id TEXT,
+      note TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (finding_id) REFERENCES findings(id) ON DELETE CASCADE,
+      FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE SET NULL,
+      FOREIGN KEY (trace_event_id) REFERENCES trace_events(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS asset_snapshots (
+      id TEXT PRIMARY KEY,
+      asset_id TEXT NOT NULL,
+      scope_id TEXT,
+      run_id TEXT,
+      title TEXT NOT NULL,
+      status TEXT DEFAULT 'unknown',
+      health_score INTEGER,
+      summary TEXT,
+      observations_json TEXT,
+      finding_counts_json TEXT,
+      artifact_ids_json TEXT,
+      captured_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE,
+      FOREIGN KEY (scope_id) REFERENCES scopes(id) ON DELETE SET NULL,
+      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS run_templates (
+      id TEXT PRIMARY KEY,
+      source_run_id TEXT NOT NULL,
+      scope_id TEXT,
+      name TEXT NOT NULL,
+      goal TEXT,
+      prompt_profile_id TEXT,
+      config_snapshot_json TEXT,
+      asset_ids_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (source_run_id) REFERENCES runs(id) ON DELETE CASCADE,
+      FOREIGN KEY (scope_id) REFERENCES scopes(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS run_comparisons (
+      id TEXT PRIMARY KEY,
+      base_snapshot_id TEXT,
+      compare_snapshot_id TEXT,
+      base_run_id TEXT,
+      compare_run_id TEXT,
+      title TEXT NOT NULL,
+      summary TEXT,
+      diff_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (base_snapshot_id) REFERENCES asset_snapshots(id) ON DELETE SET NULL,
+      FOREIGN KEY (compare_snapshot_id) REFERENCES asset_snapshots(id) ON DELETE SET NULL,
+      FOREIGN KEY (base_run_id) REFERENCES runs(id) ON DELETE SET NULL,
+      FOREIGN KEY (compare_run_id) REFERENCES runs(id) ON DELETE SET NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
     CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
     CREATE INDEX IF NOT EXISTS idx_memories_key ON memories(key);
@@ -173,6 +317,19 @@ export function initDB(dbPath = config.db.path) {
     CREATE INDEX IF NOT EXISTS idx_trace_events_run_seq ON trace_events(run_id, seq);
     CREATE INDEX IF NOT EXISTS idx_artifacts_run ON artifacts(run_id);
     CREATE INDEX IF NOT EXISTS idx_artifacts_conversation ON artifacts(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(type);
+    CREATE INDEX IF NOT EXISTS idx_assets_status ON assets(status);
+    CREATE INDEX IF NOT EXISTS idx_assets_archived ON assets(archived_at);
+    CREATE INDEX IF NOT EXISTS idx_asset_addresses_asset ON asset_addresses(asset_id);
+    CREATE INDEX IF NOT EXISTS idx_asset_addresses_value ON asset_addresses(value);
+    CREATE INDEX IF NOT EXISTS idx_asset_services_asset ON asset_services(asset_id);
+    CREATE INDEX IF NOT EXISTS idx_asset_tags_asset ON asset_tags(asset_id);
+    CREATE INDEX IF NOT EXISTS idx_asset_tags_tag ON asset_tags(tag);
+    CREATE INDEX IF NOT EXISTS idx_findings_asset ON findings(asset_id);
+    CREATE INDEX IF NOT EXISTS idx_findings_status ON findings(status);
+    CREATE INDEX IF NOT EXISTS idx_findings_run ON findings(run_id);
+    CREATE INDEX IF NOT EXISTS idx_asset_snapshots_asset ON asset_snapshots(asset_id);
+    CREATE INDEX IF NOT EXISTS idx_run_templates_source ON run_templates(source_run_id);
   `);
 
   ensureColumn('runs', 'prompt_snapshot_json', 'TEXT');

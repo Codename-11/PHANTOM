@@ -1,17 +1,35 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getDB } from '../memory/store.js';
+import { extractAssetTargets } from '../assets/asset-store.js';
 
 function parseJSON(value, fallback) {
   if (!value) return fallback;
   try { return JSON.parse(value); } catch { return fallback; }
 }
 
+function expandScopeTargets(targets = {}) {
+  const expanded = { ...targets };
+  if (Array.isArray(targets.assetIds) && targets.assetIds.length) {
+    try {
+      const assetTargets = extractAssetTargets(targets.assetIds);
+      for (const key of ['hosts', 'domains', 'cidrs', 'urls']) {
+        expanded[key] = [...new Set([...(targets[key] || []), ...(assetTargets[key] || [])])];
+      }
+    } catch {
+      // Asset schema may not exist during partial migrations; raw scope targets still work.
+    }
+  }
+  return expanded;
+}
+
 function normalizeScope(row) {
   if (!row) return null;
+  const targets = parseJSON(row.targets_json, {});
   return {
     id: row.id,
     name: row.name,
-    targets: parseJSON(row.targets_json, {}),
+    targets: expandScopeTargets(targets),
+    raw_targets: targets,
     allowed_actions: parseJSON(row.allowed_actions_json, []),
     blocked_actions: parseJSON(row.blocked_actions_json, []),
     credential_refs: parseJSON(row.credential_refs_json, []),

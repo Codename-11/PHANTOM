@@ -86,6 +86,7 @@ window.RunsPage = {
           <button class="btn btn-secondary btn-sm" data-run-action="report">Generate pentest report</button>
           <button class="btn btn-secondary btn-sm" data-run-action="summary">Generate executive summary</button>
           <button class="btn btn-secondary btn-sm" data-run-action="evidence">Export evidence bundle</button>
+          <button class="btn btn-secondary btn-sm" data-run-action="rerun">Create mitigation rerun</button>
           <button class="btn btn-secondary btn-sm" data-run-action="local-preview" ${this.hasHtmlArtifact(run) ? '' : 'disabled'}>Local preview</button>
           <button class="btn btn-secondary btn-sm" data-run-action="graph">Open graph</button>
           <button class="btn btn-secondary btn-sm" disabled title="Publishing is intentionally later-phase work">Publish preview</button>
@@ -172,6 +173,34 @@ window.RunsPage = {
     if (action === 'local-preview') {
       const artifact = (run.artifacts || []).find(item => item.type === 'html' && item.contentUrl);
       if (artifact) window.showPreview?.('', artifact.title || 'Preview', artifact);
+      return;
+    }
+
+    if (action === 'rerun') {
+      const original = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Creating rerun…';
+      try {
+        const templateRes = await fetch('/api/run-templates', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sourceRunId: run.id, name: `Rerun ${run.title || run.id}` }),
+        });
+        if (!templateRes.ok) throw new Error(`HTTP ${templateRes.status}`);
+        const template = await templateRes.json();
+        const runRes = await fetch(`/api/run-templates/${encodeURIComponent(template.id)}/runs`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversationId: run.conversation_id, title: `After mitigation: ${run.title || 'rerun'}` }),
+        });
+        if (!runRes.ok) throw new Error(`HTTP ${runRes.status}`);
+        const rerun = await runRes.json();
+        await this.loadRuns(rerun.id);
+      } catch (err) {
+        button.textContent = `Failed: ${err.message}`;
+        setTimeout(() => { button.textContent = original; button.disabled = false; }, 1800);
+        return;
+      }
+      button.textContent = original;
+      button.disabled = false;
       return;
     }
 
