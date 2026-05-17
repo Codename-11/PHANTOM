@@ -34,7 +34,10 @@
 
   // ─── Initialize ───
   Chat.init();
+  window.Router?.init?.();
   Settings.init();
+  window.SettingsPage?.init?.();
+  window.RunsPage?.init?.();
   Management.init();
   initMatrix();
   connectWebSocket();
@@ -128,6 +131,10 @@
 
   // ─── Message Handler ───
   function handleMessage(msg) {
+    if (msg.runId) {
+      window.dispatchEvent(new CustomEvent('phantom:trace', { detail: msg }));
+    }
+
     // Session isolation: only render messages for the active conversation
     if (msg.conversationId && currentConversationId && msg.conversationId !== currentConversationId) {
       if (msg.type !== 'conversation_created' && msg.type !== 'title_updated' && msg.type !== 'pong') {
@@ -434,6 +441,7 @@ Start the investigation immediately!`;
   }
 
   async function selectConversation(id) {
+    window.Router?.navigate?.('chat');
     currentConversationId = id;
     renderConversationList();
 
@@ -461,6 +469,7 @@ Start the investigation immediately!`;
   }
 
   function newChat() {
+    window.Router?.navigate?.('chat');
     currentConversationId = null;
     Chat.clear();
     Chat.showWelcome();

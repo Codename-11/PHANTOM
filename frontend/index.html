@@ -30,6 +30,15 @@
         </button>
       </div>
 
+      <nav class="sidebar-nav" aria-label="Primary navigation">
+        <button class="sidebar-nav-item active" data-route="chat">💬 <span>Chat</span></button>
+        <button class="sidebar-nav-item" data-route="runs">🧾 <span>Runs</span></button>
+        <button class="sidebar-nav-item" data-route="graph">🕸️ <span>Graph</span></button>
+        <button class="sidebar-nav-item" data-route="artifacts">📦 <span>Artifacts</span></button>
+        <button class="sidebar-nav-item" data-route="scope">🎯 <span>Targets / Scope</span></button>
+        <button class="sidebar-nav-item" data-route="settings">⚙️ <span>Settings</span></button>
+      </nav>
+
       <div class="sidebar-search">
         <input type="text" id="search-conversations" placeholder="Search conversations..." />
       </div>
@@ -62,6 +71,9 @@
           </svg>
         </button>
         <div class="top-bar-actions">
+          <button class="btn btn-sm btn-secondary" data-route="chat" title="Chat">💬 Chat</button>
+          <button class="btn btn-sm btn-secondary" data-route="runs" title="Run history">🧾 Runs</button>
+          <button id="quick-model-btn" class="btn btn-sm btn-secondary" title="Quick model switch">🔷 Model</button>
           <button id="manage-btn" class="btn btn-sm btn-secondary" title="MCP &amp; Skills">🧩 Manage</button>
         </div>
         <div class="top-bar-info">
@@ -145,6 +157,84 @@
           <span class="input-hint">PHANTOM has full system access • Unlimited iterations • 🖼️ Drop image for OSINT • Use responsibly</span>
         </div>
       </div>
+
+      <!-- Routed Pages -->
+      <div id="page-container" class="page-container hidden">
+        <section class="app-page" data-page="runs" id="runs-page">
+          <div class="page-header">
+            <div>
+              <p class="eyebrow">Audit trail</p>
+              <h1>Runs</h1>
+              <p>Persistent execution history backed by append-only trace events.</p>
+            </div>
+            <button id="refresh-runs-btn" class="btn btn-secondary">↻ Refresh</button>
+          </div>
+          <div class="runs-layout">
+            <aside id="runs-list" class="runs-list"></aside>
+            <section id="run-detail" class="run-detail"></section>
+          </div>
+        </section>
+
+        <section class="app-page placeholder-page" data-page="graph">
+          <div class="page-header"><div><p class="eyebrow">Planned</p><h1>Graph</h1><p>Graph visualization arrives after the trace substrate hardens.</p></div></div>
+        </section>
+
+        <section class="app-page placeholder-page" data-page="artifacts">
+          <div class="page-header"><div><p class="eyebrow">Planned</p><h1>Artifacts</h1><p>Durable artifacts are intentionally out of scope for this slice.</p></div></div>
+        </section>
+
+        <section class="app-page placeholder-page" data-page="scope">
+          <div class="page-header"><div><p class="eyebrow">Planned</p><h1>Targets / Scope</h1><p>Explicit authorization and target scope will be implemented in a later phase.</p></div></div>
+        </section>
+
+        <section class="app-page" data-page="settings" id="settings-page">
+          <div class="page-header">
+            <div>
+              <p class="eyebrow">Admin</p>
+              <h1>Settings</h1>
+              <p>Dedicated configuration surface for models, behavior, prompts, security, tools, and advanced controls.</p>
+            </div>
+          </div>
+          <div class="settings-page-layout">
+            <nav class="settings-page-tabs" aria-label="Settings sections">
+              <button class="settings-page-tab active" data-settings-tab="models">Models</button>
+              <button class="settings-page-tab" data-settings-tab="general">General</button>
+              <button class="settings-page-tab" data-settings-tab="behavior">Agent Behavior</button>
+              <button class="settings-page-tab" data-settings-tab="prompts">Prompts</button>
+              <button class="settings-page-tab" data-settings-tab="security">Security / Scope</button>
+              <button class="settings-page-tab" data-settings-tab="tools">Tools / MCP / Skills</button>
+              <button class="settings-page-tab" data-settings-tab="advanced">Advanced</button>
+            </nav>
+            <div class="settings-page-panels">
+              <section class="settings-tab-panel active" data-settings-panel="models">
+                <div id="settings-page-form-mount"></div>
+              </section>
+              <section class="settings-tab-panel" data-settings-panel="general">
+                <div class="placeholder-card">General workspace and interface settings live here as the admin surface expands.</div>
+              </section>
+              <section class="settings-tab-panel" data-settings-panel="behavior">
+                <div class="placeholder-card">Agent behavior controls are read-only placeholders for this phase.</div>
+              </section>
+              <section class="settings-tab-panel" data-settings-panel="prompts">
+                <div class="prompt-preview-header">
+                  <div><h3>System Prompt Preview</h3><p id="system-prompt-meta">read-only</p></div>
+                  <button id="refresh-prompt-preview" class="btn btn-secondary btn-sm">Refresh</button>
+                </div>
+                <pre id="system-prompt-preview" class="prompt-preview">Open Settings to load the current prompt.</pre>
+              </section>
+              <section class="settings-tab-panel" data-settings-panel="security">
+                <div class="placeholder-card">Scope/authorization controls are intentionally not implemented yet.</div>
+              </section>
+              <section class="settings-tab-panel" data-settings-panel="tools">
+                <div class="placeholder-card">Use the existing Manage drawer for MCP servers and skills in this slice.</div>
+              </section>
+              <section class="settings-tab-panel" data-settings-panel="advanced">
+                <div class="placeholder-card">Advanced internals will be split into focused panels as needed.</div>
+              </section>
+            </div>
+          </div>
+        </section>
+      </div>
     </main>
 
     <!-- Sudo Password Modal -->
@@ -177,6 +267,20 @@
               <path d="M18 6L6 18M6 6l12 12"/>
             </svg>
           </button>
+        </div>
+
+        <div class="settings-quick-body">
+          <p class="settings-note">Quick model/status drawer. Full configuration now lives on the Settings page.</p>
+          <div class="proxy-card">
+            <div class="proxy-status-row">
+              <span class="proxy-dot"></span>
+              <div>
+                <strong id="quick-model-label">Model route</strong>
+                <small id="quick-endpoint-label">http://127.0.0.1:8648/v1</small>
+              </div>
+            </div>
+            <button class="btn btn-primary" data-route="settings" id="open-settings-page-btn">Open Settings Page</button>
+          </div>
         </div>
 
         <div class="settings-body">
@@ -445,7 +549,10 @@
 
   <script src="js/markdown.js"></script>
   <script src="js/chat.js"></script>
+  <script src="js/router.js"></script>
   <script src="js/settings.js"></script>
+  <script src="js/pages/settings-page.js"></script>
+  <script src="js/pages/runs-page.js"></script>
   <script src="js/management.js"></script>
   <script src="js/app.js"></script>
 </body>

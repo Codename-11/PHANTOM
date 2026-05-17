@@ -13,6 +13,7 @@ phantom.db-shm
 # Workspace data (user-specific)
 workspace/
 !workspace/.gitkeep
+.hermes/
 
 # OS files
 .DS_Store

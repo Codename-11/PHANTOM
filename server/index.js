@@ -7,7 +7,10 @@ import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
 
 import config, { loadPersistedSettings } from './config.js';
-import { initDB, closeDB, createConversation, getMessages, updateConversationTitle, getSetting } from './memory/store.js';
+import {
+  initDB, closeDB, createConversation, getMessages, updateConversationTitle, getSetting,
+  createRun, addTraceEvent, completeRun, failRun, updateRunStatus,
+} from './memory/store.js';
 import { processMessage } from './ai/llm-client.js';
 import apiRouter from './routes/api.js';
 
@@ -50,6 +53,35 @@ wss.on('connection', (ws) => {
 
   // Track abort controller per connection for stop functionality
   let currentAbortController = null;
+  let currentRunId = null;
+  let currentRunStopped = false;
+
+  function providerRoute() {
+    return (config.api.baseUrl || '').includes('127.0.0.1:8648') ? 'hermes-proxy' : config.api.baseUrl;
+  }
+
+  function preview(value, max = 1200) {
+    if (value === undefined || value === null) return '';
+    const text = typeof value === 'string' ? value : JSON.stringify(value);
+    return text.length > max ? `${text.substring(0, max)}…` : text;
+  }
+
+  function trace(runId, event) {
+    try {
+      return addTraceEvent(runId, event);
+    } catch (err) {
+      console.error('Trace persistence error:', err.message);
+      return null;
+    }
+  }
+
+  function sendTrace(runId, payload, event) {
+    const traceEvent = trace(runId, event);
+    if (ws.readyState === ws.OPEN) {
+      ws.send(JSON.stringify({ ...payload, runId, traceEventId: traceEvent?.id, traceSeq: traceEvent?.seq }));
+    }
+    return traceEvent;
+  }
 
   ws.on('message', async (data) => {
     try {
@@ -66,53 +98,101 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({ type: 'conversation_created', conversationId }));
           }
 
+          const run = createRun({
+            conversationId,
+            title: (msg.content || 'New Run').substring(0, 80),
+            goal: msg.content,
+            model: config.api.model,
+            providerRoute: providerRoute(),
+          });
+          currentRunId = run.id;
+          currentRunStopped = false;
+          let runHadError = false;
+
           // Create a new AbortController for this request
           currentAbortController = new AbortController();
           const abortSignal = currentAbortController.signal;
 
           // Signal start of response
-          ws.send(JSON.stringify({ type: 'response_start', conversationId }));
+          sendTrace(run.id,
+            { type: 'response_start', conversationId },
+            {
+              type: 'run.started',
+              phase: 'chat',
+              status: 'started',
+              outputPreview: preview(msg.content),
+              metadata: { conversationId, model: config.api.model, providerRoute: providerRoute() },
+            }
+          );
 
           await processMessage(
             conversationId,
             msg.content,
             // onChunk — stream text
             (chunk) => {
-              if (ws.readyState === ws.OPEN) {
-                ws.send(JSON.stringify({ type: 'chunk', content: chunk, conversationId }));
-              }
+              sendTrace(run.id,
+                { type: 'chunk', content: chunk, conversationId },
+                { type: 'assistant.chunk', phase: 'assistant', status: 'completed', outputPreview: preview(chunk) }
+              );
             },
             // onToolCall — tool being called
             (toolCall) => {
-              if (ws.readyState === ws.OPEN) {
-                ws.send(JSON.stringify({ type: 'tool_call', ...toolCall, conversationId }));
-              }
+              sendTrace(run.id,
+                { type: 'tool_call', ...toolCall, conversationId },
+                {
+                  type: 'tool.call.started',
+                  phase: 'tool',
+                  status: 'started',
+                  toolName: toolCall.name,
+                  input: toolCall.args,
+                  metadata: { toolCallId: toolCall.id },
+                }
+              );
             },
             // onToolResult — tool result
             (toolResult) => {
-              if (ws.readyState === ws.OPEN) {
-                ws.send(JSON.stringify({ type: 'tool_result', ...toolResult, conversationId }));
-              }
+              sendTrace(run.id,
+                { type: 'tool_result', ...toolResult, conversationId },
+                {
+                  type: 'tool.call.completed',
+                  phase: 'tool',
+                  status: 'completed',
+                  toolName: toolResult.name,
+                  outputPreview: preview(toolResult.result),
+                  metadata: { toolCallId: toolResult.id },
+                }
+              );
             },
             // onError
             (error) => {
-              if (ws.readyState === ws.OPEN) {
-                ws.send(JSON.stringify({ type: 'error', message: error, conversationId }));
-              }
+              runHadError = true;
+              sendTrace(run.id,
+                { type: 'error', message: error, conversationId },
+                { type: 'run.error', phase: 'error', status: 'failed', outputPreview: preview(error) }
+              );
             },
             // onThinking — AI reasoning/thinking tokens
             (thinkingChunk) => {
-              if (ws.readyState === ws.OPEN) {
-                ws.send(JSON.stringify({ type: 'thinking', content: thinkingChunk, conversationId }));
-              }
+              sendTrace(run.id,
+                { type: 'thinking', content: thinkingChunk, conversationId },
+                { type: 'assistant.thinking', phase: 'assistant', status: 'completed', outputPreview: preview(thinkingChunk) }
+              );
             },
             // abortSignal
             abortSignal,
             // onToolProgress — live tool output streaming
             (progress) => {
-              if (ws.readyState === ws.OPEN) {
-                ws.send(JSON.stringify({ type: 'tool_progress', ...progress, conversationId }));
-              }
+              sendTrace(run.id,
+                { type: 'tool_progress', ...progress, conversationId },
+                {
+                  type: 'tool.progress',
+                  phase: 'tool',
+                  status: 'running',
+                  toolName: progress.name,
+                  outputPreview: preview(progress.text),
+                  metadata: { toolCallId: progress.id },
+                }
+              );
             }
           );
 
@@ -127,10 +207,28 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({ type: 'title_updated', conversationId, title }));
           }
 
-          // Signal end of response
-          if (ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify({ type: 'response_end', conversationId }));
+          if (currentRunStopped) {
+            updateRunStatus(run.id, 'stopped', { summary: 'Stopped by user' });
+            sendTrace(run.id,
+              { type: 'response_end', conversationId },
+              { type: 'run.stopped', phase: 'chat', status: 'stopped', outputPreview: 'Stopped by user' }
+            );
+          } else if (runHadError) {
+            failRun(run.id, 'Completed with error');
+            sendTrace(run.id,
+              { type: 'response_end', conversationId },
+              { type: 'run.failed', phase: 'chat', status: 'failed', outputPreview: 'Completed with error' }
+            );
+          } else {
+            completeRun(run.id, 'Completed');
+            sendTrace(run.id,
+              { type: 'response_end', conversationId },
+              { type: 'run.completed', phase: 'chat', status: 'completed', outputPreview: 'Completed' }
+            );
           }
+
+          currentRunId = null;
+          currentRunStopped = false;
           break;
         }
 
@@ -138,6 +236,16 @@ wss.on('connection', (ws) => {
           // Abort the current operation
           if (currentAbortController) {
             console.log('⏹ Stop requested by user');
+            currentRunStopped = true;
+            if (currentRunId) {
+              updateRunStatus(currentRunId, 'stopped', { summary: 'Stop requested by user' });
+              trace(currentRunId, {
+                type: 'run.stop_requested',
+                phase: 'chat',
+                status: 'stopped',
+                outputPreview: 'Stop requested by user',
+              });
+            }
             currentAbortController.abort();
             currentAbortController = null;
           }
@@ -153,9 +261,20 @@ wss.on('connection', (ws) => {
       }
     } catch (err) {
       console.error('WebSocket error:', err);
-      if (ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({ type: 'error', message: err.message }));
+      if (currentRunId) {
+        failRun(currentRunId, err.message);
+        trace(currentRunId, {
+          type: 'run.error',
+          phase: 'error',
+          status: 'failed',
+          outputPreview: preview(err.message),
+        });
       }
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({ type: 'error', message: err.message, runId: currentRunId || undefined }));
+      }
+      currentRunId = null;
+      currentRunStopped = false;
     }
   });
 
@@ -163,6 +282,16 @@ wss.on('connection', (ws) => {
     console.log('🔌 Client disconnected');
     // Abort any running operation when client disconnects
     if (currentAbortController) {
+      currentRunStopped = true;
+      if (currentRunId) {
+        updateRunStatus(currentRunId, 'stopped', { summary: 'Client disconnected' });
+        trace(currentRunId, {
+          type: 'run.stopped',
+          phase: 'chat',
+          status: 'stopped',
+          outputPreview: 'Client disconnected',
+        });
+      }
       currentAbortController.abort();
       currentAbortController = null;
     }

@@ -11,9 +11,14 @@ window.Settings = {
   init() {
     this.panel = document.getElementById('settings-panel');
 
-    // Open/close
-    document.getElementById('settings-btn').addEventListener('click', () => this.open());
-    document.getElementById('welcome-settings-btn')?.addEventListener('click', () => this.open());
+    // Dedicated Settings page + quick drawer
+    document.getElementById('settings-btn').addEventListener('click', () => window.Router?.navigate?.('settings'));
+    document.getElementById('welcome-settings-btn')?.addEventListener('click', () => window.Router?.navigate?.('settings'));
+    document.getElementById('quick-model-btn')?.addEventListener('click', () => this.open());
+    document.getElementById('open-settings-page-btn')?.addEventListener('click', () => {
+      this.close();
+      window.Router?.navigate?.('settings');
+    });
     document.getElementById('settings-close').addEventListener('click', () => this.close());
     document.getElementById('settings-overlay').addEventListener('click', () => this.close());
 
@@ -86,6 +91,8 @@ window.Settings = {
       document.getElementById('setting-workspace').value = data.workspace || '';
       this.syncPresetFromModel(data.model || 'grok-4.3');
       document.getElementById('proxy-endpoint-label').textContent = data.baseUrl || this.HERMES_PROXY_URL;
+      document.getElementById('quick-endpoint-label').textContent = data.baseUrl || this.HERMES_PROXY_URL;
+      document.getElementById('quick-model-label').textContent = data.model || 'No Model';
 
       // Update model badge
       document.getElementById('current-model').textContent = data.model || 'No Model';
@@ -123,6 +130,8 @@ window.Settings = {
       if (res.ok) {
         document.getElementById('current-model').textContent = settings.model || 'No Model';
         document.getElementById('proxy-endpoint-label').textContent = settings.baseUrl;
+        document.getElementById('quick-endpoint-label').textContent = settings.baseUrl;
+        document.getElementById('quick-model-label').textContent = settings.model || 'No Model';
 
         const btn = document.getElementById('save-settings');
         btn.textContent = '✓ Saved';
@@ -157,6 +166,7 @@ window.Settings = {
     customGroup.style.display = 'none';
     modelInput.value = value;
     document.getElementById('current-model').textContent = value;
+    document.getElementById('quick-model-label').textContent = value;
   },
 
   syncPresetFromModel(model) {

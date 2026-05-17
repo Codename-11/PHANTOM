@@ -7,7 +7,9 @@ import {
   getAllSettings, getSetting, setSetting,
   getAllMemories, searchMemories,
   getMCPServers, addMCPServer, removeMCPServer,
+  getRuns, getRun, getTraceEvents,
 } from '../memory/store.js';
+import { buildSystemPrompt } from '../ai/system-prompt.js';
 import { getToolDefinitions } from '../tools/registry.js';
 import os from 'os';
 import { exec } from 'child_process';
@@ -57,6 +59,38 @@ router.put('/settings', (req, res) => {
 router.post('/settings/test', async (req, res) => {
   const result = await testConnection();
   res.json(result);
+});
+
+// ─── Prompt Preview ───
+router.get('/prompts/preview', (req, res) => {
+  const content = buildSystemPrompt();
+  res.json({
+    id: 'system-default',
+    mode: 'read-only',
+    content,
+    length: content.length,
+  });
+});
+
+// ─── Runs + Trace Events ───
+router.get('/runs', (req, res) => {
+  res.json(getRuns({
+    limit: req.query.limit || 50,
+    conversationId: req.query.conversationId || null,
+    includeCompleted: req.query.includeCompleted !== 'false',
+  }));
+});
+
+router.get('/runs/:id', (req, res) => {
+  const run = getRun(req.params.id);
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  res.json({ ...run, events: getTraceEvents(req.params.id) });
+});
+
+router.get('/runs/:id/events', (req, res) => {
+  const run = getRun(req.params.id);
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  res.json(getTraceEvents(req.params.id, { limit: req.query.limit || 500 }));
 });
 
 // ─── Conversations ───
