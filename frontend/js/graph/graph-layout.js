@@ -1,17 +1,17 @@
 (function attachGraphLayout(global) {
-  const NODE_WIDTH = 172;
-  const NODE_HEIGHT = 58;
+  const NODE_WIDTH = 224;
+  const NODE_HEIGHT = 74;
   const COLUMN_X = {
     run: 32,
-    tool: 280,
-    command: 280,
-    host: 560,
-    url: 560,
-    port: 840,
-    artifact: 840,
-    error: 840,
+    tool: 312,
+    command: 312,
+    host: 640,
+    url: 640,
+    port: 960,
+    artifact: 960,
+    error: 960,
   };
-  const ROW_GAP = 92;
+  const ROW_GAP = 108;
   const TOP_PADDING = 36;
   const RIGHT_PADDING = 96;
   const BOTTOM_PADDING = 80;

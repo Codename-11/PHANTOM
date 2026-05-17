@@ -1,5 +1,25 @@
 # PHANTOM DEVLOG
 
+## 2026-05-17 17:28 EDT — Graph Replay and Readability Pass
+
+- Added replay presentation steps to `/api/runs/:id/replay`: ordered trace steps now include readable titles, primary graph node IDs, related node/edge IDs, output previews, policy explanations, risk metadata, and linked artifacts without exposing secrets.
+- Upgraded the Graph page with replay prev/play/next controls, a replay timeline strip, active node/edge following, output preview cards, and artifact chips so operators can walk the actual trace path instead of only viewing the static graph.
+- Added graph presentation helpers for human-readable tool names, readable edge explanations, wrapped/titled node labels, and redacted metadata rows.
+- Improved long-node handling by widening graph nodes and rendering labels across two SVG lines with full labels preserved in titles/details.
+- Enhanced the graph smoke test to verify replay controls, readable Shell command labels, active replay highlighting, output previews, and wrapped node labels.
+
+Validation passed:
+- `npm test` — 42/42 passing
+- `npm run build` — passing (legacy non-module script warnings remain)
+- `find server frontend/js -name '*.js' -print0 | xargs -0 -n1 node --check` — passing
+- `python3 tests/smoke_test.py` — 4/4 passing against Hermes routed proxy
+- `python3 tests/graph_viewer_smoke.py` — passing; screenshot at `/tmp/phantom-graph-viewer-first-class.png`
+- `git diff --check` — passing
+
+Notes:
+- Replay remains trace-derived; no second graph source of truth or materialized graph table was added.
+- Metadata display is summarized/redacted for operator readability while raw replay bundles still use the existing sanitized API objects.
+
 ## 2026-05-17 17:08 EDT — Graph Viewer Operational Canvas
 
 - Promoted the Graph page from a scrollable SVG panel into a first-class operational viewer with a fitted pan/zoom canvas, fit/reset controls, zoom controls, and no internal canvas scrollbars.

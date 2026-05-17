@@ -543,8 +543,10 @@ html, body {
 .graph-edge.called { stroke: rgba(148,163,184,0.58); }
 .graph-edge.connected_to { stroke: rgba(125,211,252,0.42); }
 .graph-edge.blocked_by, .graph-edge.blocked_by_policy { stroke: #f87171; stroke-dasharray: 7 5; stroke-width: 2.2; }
+.graph-edge.replay-active { stroke: #facc15; stroke-width: 3; filter: drop-shadow(0 0 8px rgba(250,204,21,.35)); }
 .graph-edge.dimmed, .graph-node.dimmed { opacity: 0.28; }
 .graph-edge.related { opacity: 1; }
+.graph-edge-label { fill: #dbeafe; paint-order: stroke; stroke: rgba(3,7,18,.92); stroke-width: 4px; font-family: var(--font-mono); font-size: 10px; pointer-events: none; }
 #graph-arrow path { fill: rgba(148,163,184,0.72); }
 .graph-node { cursor: pointer; outline: none; transition: opacity 0.12s ease; }
 .graph-node rect {
@@ -552,6 +554,7 @@ html, body {
   filter: drop-shadow(0 8px 18px rgba(0,0,0,0.24));
 }
 .graph-node:hover rect, .graph-node.selected rect { stroke: var(--accent-secondary); stroke-width: 1.8; }
+.graph-node.replay-active rect { stroke: #facc15; stroke-width: 2; filter: drop-shadow(0 0 10px rgba(250,204,21,.28)); }
 .graph-node circle { fill: var(--accent-secondary); filter: drop-shadow(0 0 8px rgba(59,184,240,0.45)); }
 .graph-node.run circle { fill: var(--accent); }
 .graph-node.tool circle, .graph-node.command circle { fill: var(--warning); }
@@ -577,6 +580,30 @@ html, body {
 .node-detail-section ul { padding-left: 18px; color: var(--text-secondary); font-size: 12px; }
 .node-detail-section li { margin-bottom: 6px; word-break: break-word; }
 .node-detail-section pre { max-height: 240px; overflow: auto; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 10px; color: var(--text-secondary); font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+.graph-replay-panel {
+  position: absolute; left: 12px; right: 334px; top: 12px; z-index: 3;
+  display: grid; grid-template-columns: minmax(180px, 320px) minmax(0, 1fr); gap: 12px; align-items: center;
+  padding: 10px 12px; border: 1px solid rgba(59,184,240,.28); border-radius: var(--radius-md);
+  background: rgba(3,7,18,.82); backdrop-filter: blur(10px); box-shadow: var(--shadow-md);
+}
+.graph-replay-summary { display: grid; gap: 2px; min-width: 0; }
+.graph-replay-summary strong { font-size: 12px; color: var(--accent-secondary); }
+.graph-replay-summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-primary); }
+.graph-replay-summary small, .graph-replay-status { color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; }
+.graph-replay-track { display: flex; align-items: center; gap: 5px; overflow-x: auto; padding: 3px 1px; }
+.graph-replay-dot { flex: 0 0 auto; width: 13px; height: 13px; border-radius: 999px; border: 1px solid rgba(148,163,184,.45); background: rgba(15,23,42,.95); cursor: pointer; }
+.graph-replay-dot.completed { background: rgba(34,197,94,.45); border-color: rgba(34,197,94,.85); }
+.graph-replay-dot.blocked, .graph-replay-dot.skipped { background: rgba(248,113,113,.45); border-color: rgba(248,113,113,.85); }
+.graph-replay-dot.failed { background: rgba(239,68,68,.7); border-color: #fecaca; }
+.graph-replay-dot.active { width: 18px; border-color: #facc15; background: #facc15; box-shadow: 0 0 12px rgba(250,204,21,.45); }
+.replay-step-card { border: 1px solid rgba(148,163,184,.18); border-radius: var(--radius-sm); padding: 10px; background: rgba(15,23,42,.32); }
+.replay-step-card.active { border-color: rgba(250,204,21,.5); background: rgba(113,63,18,.20); }
+.replay-step-card strong { display: block; margin-bottom: 5px; }
+.metadata-list { display: grid; grid-template-columns: minmax(88px, auto) minmax(0, 1fr); gap: 6px 10px; font-size: 12px; }
+.metadata-list dt { color: var(--text-muted); font-family: var(--font-mono); }
+.metadata-list dd { color: var(--text-secondary); min-width: 0; word-break: break-word; white-space: pre-wrap; }
+.artifact-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.artifact-chip { display: inline-flex; padding: 4px 8px; border: 1px solid rgba(167,139,250,.4); border-radius: 999px; color: #ddd6fe; text-decoration: none; font-size: 11px; }
 .run-live-pill { align-self: center; padding: 3px 7px; border-radius: 999px; color: #bbf7d0; background: rgba(22,101,52,0.22); font-family: var(--font-mono); font-size: 10px; }
 
 /* ─── Mobile ─── */
@@ -594,6 +621,7 @@ html, body {
   .settings-page-layout, .runs-layout, .artifacts-layout, .graph-layout { grid-template-columns: 1fr; }
   .graph-operational-layout { height: auto; min-height: 0; }
   .graph-workspace { grid-template-columns: 1fr; min-height: 720px; }
+  .graph-replay-panel { position: static; grid-template-columns: 1fr; margin-bottom: 8px; }
   .graph-canvas { min-height: 480px; }
   .graph-node-detail { min-height: 220px; }
   .graph-actions { justify-content: flex-start; }

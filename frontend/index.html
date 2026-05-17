@@ -192,6 +192,9 @@
               <span id="graph-live-indicator" class="graph-live-indicator idle">Historical</span>
               <span id="graph-stats" class="graph-stats">No graph loaded</span>
               <button id="graph-follow-btn" class="btn btn-secondary" aria-pressed="true">⏱ Following live</button>
+              <button id="graph-replay-prev-btn" class="btn btn-secondary" aria-label="Previous replay step">⟵ Step</button>
+              <button id="graph-replay-play-btn" class="btn btn-secondary" aria-pressed="false">▶ Replay</button>
+              <button id="graph-replay-next-btn" class="btn btn-secondary" aria-label="Next replay step">Step ⟶</button>
               <button id="graph-fit-btn" class="btn btn-secondary">Fit</button>
               <button id="graph-reset-btn" class="btn btn-secondary">Reset</button>
               <button id="export-graph-btn" class="btn btn-secondary">Export snapshot</button>
@@ -201,6 +204,7 @@
           <div class="graph-layout graph-operational-layout">
             <aside id="graph-runs-list" class="runs-list graph-runs-list" aria-label="Runs with graphs"></aside>
             <section class="graph-workspace">
+              <div id="graph-replay-panel" class="graph-replay-panel" aria-label="Replay timeline"></div>
               <div id="graph-canvas" class="graph-canvas" role="region" aria-label="Operational graph viewer"></div>
               <div id="graph-zoom-controls" class="graph-zoom-controls" aria-label="Graph zoom controls">
                 <button id="graph-zoom-in-btn" class="btn btn-secondary btn-sm" aria-label="Zoom in">+</button>
@@ -656,6 +660,7 @@
   <script src="js/pages/settings-page.js"></script>
   <script src="js/pages/runs-page.js"></script>
   <script src="js/graph/graph-layout.js"></script>
+  <script src="js/graph/graph-presenter.js"></script>
   <script src="js/pages/graph-page.js"></script>
   <script src="js/pages/artifacts-page.js"></script>
   <script src="js/pages/scope-page.js"></script>

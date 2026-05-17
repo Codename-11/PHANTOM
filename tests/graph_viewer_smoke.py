@@ -17,10 +17,15 @@ run_id = fixture['runId']
 with urlopen(f'{BASE_URL}/api/runs/{run_id}/graph', timeout=10) as res:
     graph = json.loads(res.read().decode())
 
+with urlopen(f'{BASE_URL}/api/runs/{run_id}/replay', timeout=10) as res:
+    replay = json.loads(res.read().decode())
+
 assert graph['stats']['events'] >= 6, graph['stats']
 assert any(node['type'] == 'artifact' for node in graph['nodes'])
 assert any(node.get('status') == 'blocked' for node in graph['nodes'])
 assert any(edge['type'] == 'blocked_by_policy' for edge in graph['edges'])
+assert replay['replay']['steps'][2]['title'] == 'Shell command completed'
+assert 'HTTP/1.1 200 OK' in replay['replay']['steps'][2]['outputPreview']
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
@@ -48,8 +53,30 @@ with sync_playwright() as p:
     assert page.locator('#graph-fit-btn').is_visible()
     assert page.locator('#graph-reset-btn').is_visible()
     assert page.locator('#graph-follow-btn').is_visible()
+    assert page.locator('#graph-replay-panel').is_visible()
+    assert page.locator('#graph-replay-prev-btn').is_visible()
+    assert page.locator('#graph-replay-play-btn').is_visible()
+    assert page.locator('#graph-replay-next-btn').is_visible()
     assert page.locator('#graph-zoom-in-btn').is_visible()
     assert page.locator('#graph-zoom-out-btn').is_visible()
+
+    assert page.locator('#graph-replay-panel').inner_text(timeout=10000).startswith('Replay 1/')
+    page.locator('#graph-replay-next-btn').click()
+    page.locator('#graph-replay-next-btn').click()
+    detail_text = page.locator('#graph-node-detail').inner_text(timeout=10000)
+    assert 'Shell command completed' in detail_text, detail_text
+    assert 'HTTP/1.1 200 OK' in detail_text, detail_text
+    assert page.locator('#graph-canvas .graph-node.replay-active').count() >= 1
+    assert page.locator('#graph-canvas .graph-edge-label').count() >= 1
+
+    tool_type_text = page.locator('#graph-canvas .graph-node.tool .graph-node-type').first.text_content(timeout=10000) or ''
+    assert 'SHELL COMMAND' in tool_type_text.upper(), tool_type_text
+    assert page.locator('#graph-canvas .graph-node-label tspan').count() >= 2
+
+    page.locator('#graph-replay-play-btn').click()
+    assert 'pause' in page.locator('#graph-replay-play-btn').inner_text(timeout=10000).lower()
+    page.locator('#graph-replay-play-btn').click()
+    assert 'replay' in page.locator('#graph-replay-play-btn').inner_text(timeout=10000).lower()
 
     first_path = page.locator('#graph-canvas .graph-edge').first.get_attribute('d')
     assert first_path and ' H ' in first_path and ' V ' in first_path and ' C ' not in first_path, first_path
