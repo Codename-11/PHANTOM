@@ -7,6 +7,7 @@ window.SettingsPage = {
     this.mountExistingSettingsBody();
     this.initTabs();
     this.initPromptPreview();
+    this.renderStaticPanels();
 
     window.addEventListener('phantom:route', (event) => {
       if (event.detail?.route === 'settings') {
@@ -34,6 +35,8 @@ window.SettingsPage = {
         tabs.forEach(t => t.classList.toggle('active', t === tab));
         panels.forEach(panel => panel.classList.toggle('active', panel.dataset.settingsPanel === target));
         if (target === 'prompts') this.loadPromptAdmin();
+        if (target === 'tools' || target === 'security') this.loadToolpacks();
+        if (target === 'general' || target === 'behavior' || target === 'advanced') this.renderStaticPanels();
       });
     });
   },
@@ -50,8 +53,35 @@ window.SettingsPage = {
     document.getElementById('prompt-fragment-select')?.addEventListener('change', () => this.populateFragmentForm());
   },
 
+  renderStaticPanels() {
+    const presenter = window.SettingsPagePresenter;
+    if (!presenter) return;
+    const settings = {
+      baseUrl: document.getElementById('setting-base-url')?.value,
+      model: document.getElementById('setting-model')?.value,
+      workspace: document.getElementById('setting-workspace')?.value,
+    };
+    const general = document.getElementById('settings-general-overview');
+    const behavior = document.getElementById('settings-behavior-overview');
+    const advanced = document.getElementById('settings-advanced-overview');
+    if (general) general.innerHTML = presenter.renderGeneralOverview(settings);
+    if (behavior) behavior.innerHTML = presenter.renderBehaviorOverview();
+    if (advanced) advanced.innerHTML = presenter.renderAdvancedOverview();
+  },
+
+  async fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+
   async loadPromptAdmin() {
     await Promise.all([this.loadProfiles(), this.loadFragments(), this.loadToolpacks()]);
+    this.renderStaticPanels();
     this.loadPromptPreview();
   },
 
@@ -138,21 +168,20 @@ window.SettingsPage = {
     const target = document.getElementById('toolpack-settings-list');
     const security = document.getElementById('settings-scope-policy');
     try {
-      const res = await fetch('/api/toolpacks');
+      const res = await this.fetchWithTimeout('/api/toolpacks');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       this.toolpacks = await res.json();
-      if (target) {
-        target.innerHTML = this.toolpacks.map(pack => `
+      if (target) target.innerHTML = window.SettingsPagePresenter?.renderToolpackCards(this.toolpacks) || this.toolpacks.map(pack => `
           <article class="toolpack-card">
             <div><strong>${this.escapeHtml(pack.name)}</strong><p>${this.escapeHtml(pack.summary)}</p></div>
             <div class="asset-chip-row"><span class="asset-chip">Risks: ${this.escapeHtml((pack.risks || []).join(', '))}</span><span class="asset-chip">${pack.policy?.scopeRequired ? 'Scope required' : 'Scope optional'}</span></div>
             <details><summary>${(pack.tools || []).length} tools</summary>${(pack.tools || []).map(tool => `<div class="target-row"><span>${this.escapeHtml(tool.name)} · ${this.escapeHtml(tool.risk)}</span><strong>${this.escapeHtml(tool.installHint || 'installed externally')}</strong></div>`).join('')}</details>
           </article>`).join('');
-      }
-      if (security) security.innerHTML = `<strong>Governed execution</strong><p>Risky tools are blocked before execution unless selected scope policy allows the risk class and every extracted target is in scope.</p><div class="asset-chip-row">${this.toolpacks.map(pack => `<span class="asset-chip">${this.escapeHtml(pack.name)}</span>`).join('')}</div>`;
+      if (security) security.innerHTML = window.SettingsPagePresenter?.renderSecurityOverview(this.toolpacks) || `<strong>Governed execution</strong><p>Risky tools are blocked before execution unless selected scope policy allows the risk class and every extracted target is in scope.</p><div class="asset-chip-row">${this.toolpacks.map(pack => `<span class="asset-chip">${this.escapeHtml(pack.name)}</span>`).join('')}</div>`;
       window.ScopePage?.renderToolpackSelector?.();
     } catch (err) {
-      if (target) target.innerHTML = `<div class="empty-msg">Failed to load toolpacks: ${this.escapeHtml(err.message)}</div>`;
+      if (target) target.innerHTML = window.SettingsPagePresenter?.renderToolpackError(err.name === 'AbortError' ? 'Timed out loading /api/toolpacks' : err.message) || `<div class="empty-msg danger">Failed to load toolpacks: ${this.escapeHtml(err.message)}</div>`;
+      if (security) security.innerHTML = window.SettingsPagePresenter?.renderSecurityOverview(this.toolpacks) || security.innerHTML;
     }
   },
 

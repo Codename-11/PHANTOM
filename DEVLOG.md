@@ -1,5 +1,22 @@
 # PHANTOM DEVLOG
 
+## 2026-05-17 21:13 EDT — Settings Admin Panel Population Fix
+
+- Fixed the empty-looking Settings tabs after the governed toolpack phase by adding explicit presenter-rendered content for General, Agent Behavior, Security / Scope, Tools / MCP / Skills, and Advanced.
+- Added a Settings page presenter with unit coverage so admin panels render non-empty operator-facing cards instead of placeholders.
+- Added a timeout/error state for `/api/toolpacks` so a stale backend process shows an actionable restart message instead of leaving the Tools panel blank.
+- Restarted the PHANTOM dev service so Express reloaded the new `/api/toolpacks` route; live API now returns six toolpacks.
+- Verified the Settings page with Playwright: all settings tabs render populated content and Tools shows six toolpack cards.
+
+Validation passed:
+- `node --test frontend/js/pages/settings-page-presenter.test.js`
+- Playwright settings tab smoke against `http://127.0.0.1:5173/#settings`
+- `npm test` — 53/53 passing
+- `npm run build` — passing (legacy non-module script warnings remain)
+- `find server frontend/js -name '*.js' -print0 | xargs -0 -n1 node --check` — passing
+- `python3 tests/smoke_test.py` — 4/4 passing against Hermes routed proxy
+- `git diff --check` — passing
+
 ## 2026-05-17 20:31 EDT — Scope Builder and Security Toolpacks
 
 - Upgraded the Assets / Scope workspace into a guided governed Scope Builder with intent templates, smart pasted-target parsing, editable target chips, asset-backed and raw target fields, toolpack defaults, and dry-run policy preview using the same evaluator that gates real tool execution.

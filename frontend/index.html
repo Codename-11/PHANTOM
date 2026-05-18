@@ -304,10 +304,10 @@
                 <div id="settings-page-form-mount"></div>
               </section>
               <section class="settings-tab-panel" data-settings-panel="general">
-                <div class="placeholder-card">General workspace and interface settings live here as the admin surface expands.</div>
+                <div id="settings-general-overview" class="settings-overview-panel">Loading general settings…</div>
               </section>
               <section class="settings-tab-panel" data-settings-panel="behavior">
-                <div class="placeholder-card">Agent behavior controls are read-only placeholders for this phase.</div>
+                <div id="settings-behavior-overview" class="settings-overview-panel">Loading agent behavior…</div>
               </section>
               <section class="settings-tab-panel" data-settings-panel="prompts">
                 <div class="prompt-preview-header">
@@ -342,7 +342,7 @@
                 <div id="toolpack-settings-list" class="toolpack-settings-list"></div>
               </section>
               <section class="settings-tab-panel" data-settings-panel="advanced">
-                <div class="placeholder-card">Advanced internals will be split into focused panels as needed.</div>
+                <div id="settings-advanced-overview" class="settings-overview-panel">Loading advanced settings…</div>
               </section>
             </div>
           </div>
@@ -665,6 +665,7 @@
   <script src="js/chat.js"></script>
   <script src="js/router.js"></script>
   <script src="js/settings.js"></script>
+  <script src="js/pages/settings-page-presenter.js"></script>
   <script src="js/pages/settings-page.js"></script>
   <script src="js/pages/runs-page.js"></script>
   <script src="js/graph/graph-layout.js"></script>

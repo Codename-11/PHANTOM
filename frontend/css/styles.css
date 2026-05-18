@@ -1113,3 +1113,32 @@ html, body {
   .scope-builder-form .scope-builder-steps { grid-template-columns: 1fr; }
   .scope-summary { max-width: 100%; }
 }
+
+/* Settings admin overview cards */
+.settings-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.settings-info-card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: rgba(15, 23, 42, 0.62);
+  padding: 16px;
+  min-height: 132px;
+}
+.settings-info-card.wide {
+  grid-column: 1 / -1;
+}
+.settings-info-card h3 {
+  margin: 4px 0 8px;
+  color: var(--text-primary);
+}
+.settings-info-card p {
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.settings-info-card code {
+  color: var(--accent-cyan);
+  word-break: break-all;
+}
