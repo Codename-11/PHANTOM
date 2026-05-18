@@ -42,7 +42,7 @@
   window.ArtifactsPage?.init?.();
   window.ScopePage?.init?.();
   Management.init();
-  initMatrix();
+  initCommandPalette();
   connectWebSocket();
   loadConversations();
   checkSudoStatus();
@@ -657,10 +657,90 @@ Start the investigation immediately!`;
     messageInput.style.height = Math.min(messageInput.scrollHeight, 200) + 'px';
   }
 
-  // ─── Matrix Background (very subtle) ───
+  // ─── PHANTOM SEC command palette ───
+  function initCommandPalette() {
+    const palette = document.getElementById('command-palette');
+    const trigger = document.getElementById('command-palette-trigger');
+    const input = document.getElementById('command-palette-input');
+    const results = document.getElementById('command-palette-results');
+    if (!palette || !input || !results) return;
+
+    const commands = [
+      { id: 'chat', label: 'Open Chat', detail: 'Start or continue a governed operation', route: 'chat', code: 'route:chat' },
+      { id: 'runs', label: 'Open Runs', detail: 'Review trace history, snapshots, policy decisions', route: 'runs', code: 'route:runs' },
+      { id: 'graph', label: 'Open Graph', detail: 'Replay operational graph and blocked paths', route: 'graph', code: 'route:graph' },
+      { id: 'artifacts', label: 'Open Artifacts', detail: 'Evidence, previews, exports, reports', route: 'artifacts', code: 'route:artifacts' },
+      { id: 'scope', label: 'Open Assets / Scope', detail: 'Scope builder, assets, policy dry-run', route: 'scope', code: 'route:scope' },
+      { id: 'settings', label: 'Open Settings', detail: 'Models, prompts, toolpacks, governance settings', route: 'settings', code: 'route:settings' },
+      { id: 'new-chat', label: 'New chat', detail: 'Create a fresh operation context', action: () => newChatBtn?.click(), code: 'action:new' },
+      { id: 'manage', label: 'Open Management', detail: 'MCP servers and skills', action: () => document.getElementById('manage-btn')?.click(), code: 'panel:manage' },
+    ];
+    let activeIndex = 0;
+    let rendered = commands;
+
+    function openPalette() {
+      palette.classList.remove('hidden');
+      input.value = '';
+      renderCommands('');
+      requestAnimationFrame(() => input.focus());
+    }
+    function closePalette() {
+      palette.classList.add('hidden');
+    }
+    function runCommand(command) {
+      if (!command) return;
+      closePalette();
+      if (command.route) window.Router?.navigate?.(command.route);
+      if (command.action) command.action();
+    }
+    function renderCommands(query) {
+      const needle = query.trim().toLowerCase();
+      rendered = commands.filter((command) => !needle || `${command.label} ${command.detail} ${command.code}`.toLowerCase().includes(needle));
+      activeIndex = Math.min(activeIndex, Math.max(rendered.length - 1, 0));
+      results.innerHTML = rendered.length ? rendered.map((command, index) => `
+        <button class="command-result ${index === activeIndex ? 'active' : ''}" data-command-id="${escapeHtml(command.id)}" role="option" aria-selected="${index === activeIndex}">
+          <span class="nav-glyph" aria-hidden="true">${escapeHtml(command.id.slice(0, 3).toUpperCase())}</span>
+          <span><strong>${escapeHtml(command.label)}</strong><span>${escapeHtml(command.detail)}</span></span>
+          <code>${escapeHtml(command.code)}</code>
+        </button>`).join('') : '<div class="empty-msg">No commands match this query.</div>';
+      results.querySelectorAll('[data-command-id]').forEach((button) => {
+        button.addEventListener('click', () => runCommand(rendered.find((command) => command.id === button.dataset.commandId)));
+      });
+    }
+
+    trigger?.addEventListener('click', openPalette);
+    palette.querySelectorAll('[data-command-close]').forEach((el) => el.addEventListener('click', closePalette));
+    input.addEventListener('input', () => renderCommands(input.value));
+    document.addEventListener('keydown', (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        openPalette();
+        return;
+      }
+      if (palette.classList.contains('hidden')) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closePalette();
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        activeIndex = Math.min(activeIndex + 1, rendered.length - 1);
+        renderCommands(input.value);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        activeIndex = Math.max(activeIndex - 1, 0);
+        renderCommands(input.value);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        runCommand(rendered[activeIndex]);
+      }
+    });
+  }
+
+  // ─── Legacy decorative background hook intentionally disabled by the SEC UI kit ───
   function initMatrix() {
     const canvas = document.getElementById('matrix-bg');
     if (!canvas) return;
+    return;
     const ctx = canvas.getContext('2d');
 
     function resize() {

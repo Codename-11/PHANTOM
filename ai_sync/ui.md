@@ -2,8 +2,8 @@
 
 ## What we have
 
-- Vanilla JS + Vite frontend with a dark glassmorphism/matrix-inspired design system.
-- Primary navigation for Chat, Runs, Graph, Artifacts, Targets / Scope, and Settings.
+- Vanilla JS + Vite frontend with the implemented PHANTOM SEC UI kit: cool-slate SOC command-center shell, cyan system accent, operator-dense 13px body scale, compact cards/tables, restrained elevation, line/mono glyphs, and no matrix/emoji hacker chrome.
+- Primary navigation for Chat, Runs, Graph, Artifacts, Assets / Scope, and Settings, plus a keyboard-friendly `Ctrl/⌘+K` command palette for core routes/actions.
 - Chat command center with real-time markdown streaming over WebSocket, active scope selector, active toolpack visibility, and live tool output.
 - Runs page with historical run list/detail, persisted event timeline, artifacts, scope/profile/toolpack metadata, blocked policy decisions, replay completeness, and mitigation-rerun CTAs.
 - Artifacts page for durable reports, previews, trace exports, graph snapshots, summaries, and evidence bundles.

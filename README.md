@@ -51,7 +51,7 @@ PHANTOM is intended for **authorized security testing, lab work, research, and d
 | 🗂️ **Assets & Scope Builder** | Saved assets, smart target parsing, asset-backed scopes, raw target chips, intent templates, and dry-run policy previews. |
 | 🧠 **Memory, MCP & Skills** | Persistent local memory plus MCP server and skill-package management for extended capabilities. |
 | ⚙️ **Settings/Admin UI** | Dedicated settings tabs for General, Models, Behavior, Prompts, Security/Scope, Tools/MCP/Skills, and Advanced diagnostics. |
-| 🎨 **Dark Operational UI** | Vanilla JS frontend with glassmorphism, matrix-inspired background, responsive admin surfaces, and live WebSocket updates. |
+| 🎨 **PHANTOM SEC UI Kit** | Vanilla JS frontend with a cool-slate SOC command-center shell, cyan system accent, operator-dense cards/tables, keyboard command palette, responsive admin surfaces, and live WebSocket updates. |
 
 ## 🚀 Quick Start
 

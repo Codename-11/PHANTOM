@@ -3,24 +3,23 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="PHANTOM — AI-Powered Pentesting Command Center. Your Swiss-army knife for red teaming and ethical hacking.">
-  <title>PHANTOM — AI Pentesting Command Center</title>
+  <meta name="description" content="PHANTOM — Governed AI Security-Ops Cockpit for authorized security research.">
+  <title>PHANTOM — Governed Security-Ops Cockpit</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👻</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='16' y='16' width='68' height='68' rx='10' fill='%230a0c10'/><path d='M24 30h52M24 50h52M24 70h32' stroke='%235fb6ff' stroke-width='7' stroke-linecap='round'/></svg>">
 </head>
 <body>
-  <!-- Matrix Rain Background -->
-  <canvas id="matrix-bg"></canvas>
+  <!-- PHANTOM SEC UI kit: calm dark operational shell, no decorative matrix layer. -->
 
   <div id="app">
     <!-- Sidebar -->
     <aside id="sidebar" class="sidebar">
       <div class="sidebar-header">
         <div class="logo">
-          <span class="logo-icon">👻</span>
+          <span class="logo-icon" aria-hidden="true">PH</span>
           <span class="logo-text">PHANTOM</span>
         </div>
         <button id="new-chat-btn" class="btn-icon" title="New Chat">
@@ -31,12 +30,12 @@
       </div>
 
       <nav class="sidebar-nav" aria-label="Primary navigation">
-        <button class="sidebar-nav-item active" data-route="chat">💬 <span>Chat</span></button>
-        <button class="sidebar-nav-item" data-route="runs">🧾 <span>Runs</span></button>
-        <button class="sidebar-nav-item" data-route="graph">🕸️ <span>Graph</span></button>
-        <button class="sidebar-nav-item" data-route="artifacts">📦 <span>Artifacts</span></button>
-        <button class="sidebar-nav-item" data-route="scope">🗂️ <span>Assets / Scope</span></button>
-        <button class="sidebar-nav-item" data-route="settings">⚙️ <span>Settings</span></button>
+        <button class="sidebar-nav-item active" data-route="chat"><span class="nav-glyph" aria-hidden="true">CMD</span><span>Chat</span></button>
+        <button class="sidebar-nav-item" data-route="runs"><span class="nav-glyph" aria-hidden="true">RUN</span><span>Runs</span></button>
+        <button class="sidebar-nav-item" data-route="graph"><span class="nav-glyph" aria-hidden="true">MAP</span><span>Graph</span></button>
+        <button class="sidebar-nav-item" data-route="artifacts"><span class="nav-glyph" aria-hidden="true">EVD</span><span>Artifacts</span></button>
+        <button class="sidebar-nav-item" data-route="scope"><span class="nav-glyph" aria-hidden="true">SCP</span><span>Assets / Scope</span></button>
+        <button class="sidebar-nav-item" data-route="settings"><span class="nav-glyph" aria-hidden="true">CFG</span><span>Settings</span></button>
       </nav>
 
       <div class="sidebar-search">
@@ -71,12 +70,15 @@
           </svg>
         </button>
         <div class="top-bar-actions">
-          <button class="btn btn-sm btn-secondary" data-route="chat" title="Chat">💬 Chat</button>
-          <button class="btn btn-sm btn-secondary" data-route="runs" title="Run history">🧾 Runs</button>
-          <button class="btn btn-sm btn-secondary" data-route="artifacts" title="Saved artifacts">📦 Artifacts</button>
-          <button class="btn btn-sm btn-secondary" data-route="scope" title="Assets and scope">🗂️ Assets</button>
-          <button id="quick-model-btn" class="btn btn-sm btn-secondary" title="Quick model switch">🔷 Model</button>
-          <button id="manage-btn" class="btn btn-sm btn-secondary" title="MCP &amp; Skills">🧩 Manage</button>
+          <button id="command-palette-trigger" class="command-trigger" title="Open command palette (Ctrl/⌘+K)">
+            <span>Search commands, runs, scopes</span><kbd>⌘K</kbd>
+          </button>
+          <button class="btn btn-sm btn-secondary" data-route="chat" title="Chat">Chat</button>
+          <button class="btn btn-sm btn-secondary" data-route="runs" title="Run history">Runs</button>
+          <button class="btn btn-sm btn-secondary" data-route="artifacts" title="Saved artifacts">Artifacts</button>
+          <button class="btn btn-sm btn-secondary" data-route="scope" title="Assets and scope">Assets</button>
+          <button id="quick-model-btn" class="btn btn-sm btn-secondary" title="Quick model switch">Model</button>
+          <button id="manage-btn" class="btn btn-sm btn-secondary" title="MCP &amp; Skills">Manage</button>
         </div>
         <div class="top-bar-info">
           <span id="current-model" class="model-badge">No Model</span>
@@ -89,44 +91,44 @@
         <!-- Drop overlay -->
         <div class="drop-overlay" id="drop-overlay">
           <div class="drop-overlay-inner">
-            <span style="font-size:48px;">🖼️</span>
-            <p>Drop image for OSINT Investigation</p>
+            <span class="drop-mark">IMG</span>
+            <p>Drop image for OSINT investigation</p>
           </div>
         </div>
 
         <!-- Welcome Screen -->
         <div id="welcome-screen" class="welcome-screen">
-          <div class="welcome-ghost">👻</div>
+          <div class="welcome-mark" aria-hidden="true">PH</div>
           <h1 class="welcome-title">PHANTOM</h1>
-          <p class="welcome-subtitle">AI-Powered Pentesting Command Center</p>
+          <p class="welcome-subtitle">Governed AI Security-Ops Cockpit</p>
           <div class="welcome-features">
             <div class="feature-card">
-              <span class="feature-icon">🔍</span>
-              <span class="feature-text">Network Scanning &amp; Recon</span>
+              <span class="feature-icon">NET</span>
+              <span class="feature-text">Scoped Recon &amp; Discovery</span>
             </div>
             <div class="feature-card">
-              <span class="feature-icon">💉</span>
-              <span class="feature-text">Exploitation &amp; Payloads</span>
+              <span class="feature-icon">POL</span>
+              <span class="feature-text">Policy-Gated Tooling</span>
             </div>
             <div class="feature-card">
-              <span class="feature-icon">🌐</span>
-              <span class="feature-text">Web Access &amp; Research</span>
+              <span class="feature-icon">WEB</span>
+              <span class="feature-text">Web Recon &amp; Research</span>
             </div>
             <div class="feature-card">
-              <span class="feature-icon">🔐</span>
-              <span class="feature-text">Password Cracking</span>
+              <span class="feature-icon">AUD</span>
+              <span class="feature-text">Offline Password Audit</span>
             </div>
             <div class="feature-card">
-              <span class="feature-icon">🕵️</span>
-              <span class="feature-text">OSINT &amp; Image Search</span>
+              <span class="feature-icon">OSINT</span>
+              <span class="feature-text">OSINT &amp; Evidence Capture</span>
             </div>
             <div class="feature-card">
-              <span class="feature-icon">♾️</span>
-              <span class="feature-text">Unlimited Tool Iterations</span>
+              <span class="feature-icon">TRC</span>
+              <span class="feature-text">Trace Replay &amp; Audit</span>
             </div>
           </div>
-          <p class="welcome-hint">Hermes OAuth Proxy is preconfigured. Choose a Grok/Codex model in <button id="welcome-settings-btn" class="inline-link">Settings</button> when needed.</p>
-          <p class="welcome-hint" style="margin-top:4px; color: var(--text-muted);">🖼️ Drag &amp; drop an image to start OSINT investigation</p>
+          <p class="welcome-hint">Select a governed scope, prompt profile, and toolpack before running risky actions. Configure models in <button id="welcome-settings-btn" class="inline-link">Settings</button>.</p>
+          <p class="welcome-hint" style="margin-top:4px; color: var(--text-muted);">Drop images for authorized OSINT workflows; PHANTOM redacts sensitive metadata in run snapshots.</p>
         </div>
 
         <!-- Messages Container -->
@@ -140,7 +142,7 @@
           <!-- image-osint-btn injected by app.js before textarea -->
           <textarea
             id="message-input"
-            placeholder="Ask PHANTOM anything... or drop an image for OSINT (Ctrl+Enter to send)"
+            placeholder="Ask PHANTOM for authorized security research or drop an image for OSINT (Ctrl+Enter to send)"
             rows="1"
             autofocus
           ></textarea>
@@ -156,7 +158,7 @@
           </button>
         </div>
         <div class="input-footer">
-          <span class="input-hint">PHANTOM has full system access • Scope gates risky tools • 🖼️ Drop image for OSINT • Use responsibly</span>
+          <span class="input-hint">Governed tools • Scope gates risky actions • Drop images for OSINT • Authorized targets only</span>
           <label class="active-scope-control">Scope
             <select id="active-scope-select" aria-label="Active run scope"><option value="">No scope selected</option></select>
           </label>
@@ -359,16 +361,16 @@
     <div id="sudo-modal" class="sudo-modal" style="display:none;">
       <div class="sudo-modal-backdrop"></div>
       <div class="sudo-modal-content">
-        <div class="sudo-modal-icon">🔑</div>
+        <div class="sudo-modal-icon">KEY</div>
         <h2 class="sudo-modal-title">Sudo Access</h2>
         <p class="sudo-modal-desc">Enter your sudo password to grant PHANTOM elevated privileges for tool installation and system operations. This is validated once and stored in memory only.</p>
         <div class="sudo-modal-input-wrap">
           <input type="password" id="sudo-modal-password" placeholder="Enter sudo password..." autocomplete="off" />
-          <button id="sudo-modal-toggle-eye" class="btn-icon-sm" title="Show/Hide">👁️</button>
+          <button id="sudo-modal-toggle-eye" class="btn-icon-sm" title="Show/Hide">Show</button>
         </div>
         <div id="sudo-modal-feedback" class="sudo-modal-feedback"></div>
         <div class="sudo-modal-actions">
-          <button id="sudo-modal-validate" class="btn btn-primary">🔓 Validate &amp; Grant Access</button>
+          <button id="sudo-modal-validate" class="btn btn-primary">Validate &amp; Grant Access</button>
           <button id="sudo-modal-skip" class="btn btn-secondary">Skip for now</button>
         </div>
       </div>
@@ -379,7 +381,7 @@
       <div class="settings-overlay" id="settings-overlay"></div>
       <div class="settings-drawer">
         <div class="settings-header">
-          <h2>⚙️ Settings</h2>
+          <h2>Settings</h2>
           <button id="settings-close" class="btn-icon" aria-label="Close settings">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M18 6L6 18M6 6l12 12"/>
@@ -404,18 +406,18 @@
         <div class="settings-body">
           <!-- AI Doctor Section -->
           <section class="settings-section">
-            <h3>🏥 AI Doctor</h3>
+            <h3>AI Doctor</h3>
             <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;line-height:1.6;">
               A temporary AI assistant with its own API credentials that diagnoses and fixes system issues. Your main API key is not used.
             </p>
             <button id="ai-doctor-btn" class="btn btn-secondary" style="width:100%;justify-content:center;">
-              🏥 Launch AI Doctor
+              Launch AI Doctor
             </button>
           </section>
 
           <!-- Hermes Proxy Configuration -->
           <section class="settings-section proxy-settings">
-            <h3>🔷 Hermes OAuth Proxy</h3>
+            <h3>Hermes OAuth Proxy</h3>
             <p class="settings-note">
               PHANTOM is wired to the local Hermes proxy. Pick a model; Hermes routes it to the right subscription provider (Grok, Codex, Nous) and injects OAuth automatically.
             </p>
@@ -462,7 +464,7 @@
                   <label for="setting-api-key">Bearer Token</label>
                   <div class="input-with-toggle">
                     <input type="password" id="setting-api-key" placeholder="hermes-proxy" />
-                    <button id="toggle-api-key" class="btn-icon-sm" title="Show/Hide">👁️</button>
+                    <button id="toggle-api-key" class="btn-icon-sm" title="Show/Hide">Show</button>
                   </div>
                   <small>Any value works. The proxy replaces it with your real OAuth token.</small>
                 </div>
@@ -480,19 +482,19 @@
               </div>
             </div>
             <div class="form-actions">
-              <button id="test-connection" class="btn btn-secondary">🔌 Test Proxy</button>
+              <button id="test-connection" class="btn btn-secondary">Test Proxy</button>
               <span id="test-result" class="test-result"></span>
             </div>
           </section>
 
           <!-- System Access -->
           <section class="settings-section">
-            <h3>🔑 System Access</h3>
+            <h3>System Access</h3>
             <div class="form-group">
               <label for="setting-sudo-password">Sudo Password</label>
               <div class="input-with-toggle">
                 <input type="password" id="setting-sudo-password" placeholder="For tool installation &amp; privileged commands" />
-                <button id="toggle-sudo-pass" class="btn-icon-sm" title="Show/Hide">👁️</button>
+                <button id="toggle-sudo-pass" class="btn-icon-sm" title="Show/Hide">Show</button>
               </div>
               <small>Persisted securely in local database across restarts</small>
             </div>
@@ -500,7 +502,7 @@
 
           <!-- Workspace -->
           <section class="settings-section">
-            <h3>📁 Workspace</h3>
+            <h3>Workspace</h3>
             <div class="form-group">
               <label for="setting-workspace">Workspace Directory</label>
               <input type="text" id="setting-workspace" placeholder="/home/user/phantom-workspace" />
@@ -510,7 +512,7 @@
 
           <!-- MCP Servers -->
           <section class="settings-section">
-            <h3>🔌 MCP Servers</h3>
+            <h3>MCP Servers</h3>
             <div id="mcp-server-list" class="mcp-list">
               <p class="mcp-empty">No MCP servers configured</p>
             </div>
@@ -519,7 +521,7 @@
 
           <!-- Save Button -->
           <div class="settings-footer">
-            <button id="save-settings" class="btn btn-primary">💾 Save Settings</button>
+            <button id="save-settings" class="btn btn-primary">Save Settings</button>
           </div>
         </div>
       </div>
@@ -532,7 +534,7 @@
         <h2 id="preview-title" class="preview-title">Preview</h2>
         <div class="preview-actions">
           <a id="preview-open-artifact-btn" class="btn-icon hidden" title="Open artifact" target="_blank" rel="noopener">↗</a>
-          <button id="preview-refresh-btn" class="btn-icon" title="Refresh">🔄</button>
+          <button id="preview-refresh-btn" class="btn-icon" title="Refresh">↻</button>
           <button id="preview-close-btn" class="btn-icon" title="Close">✕</button>
         </div>
       </div>
@@ -547,7 +549,7 @@
       <div class="ai-doctor-dialog">
         <div class="ai-doctor-header">
           <div class="ai-doctor-title-row">
-            <span class="ai-doctor-icon">🏥</span>
+            <span class="ai-doctor-icon">DOC</span>
             <div>
               <h2 class="ai-doctor-title">AI Doctor</h2>
               <p class="ai-doctor-subtitle">Temporary AI system diagnostics & repair</p>
@@ -563,7 +565,7 @@
         <!-- Config Screen -->
         <div id="doctor-config-screen" class="doctor-config-screen">
           <p class="doctor-config-desc">
-            🔒 Enter temporary API credentials — separate from your main PHANTOM config. These are used only for this session.
+            Enter temporary API credentials — separate from your main PHANTOM config. These are used only for this session.
           </p>
           <div class="form-group">
             <label for="doctor-base-url">Base URL</label>
@@ -572,8 +574,8 @@
           <div class="form-group">
             <label for="doctor-api-key">API Key</label>
             <div class="input-with-toggle">
-              <input type="password" id="doctor-api-key" placeholder="sk-..." />
-              <button id="doctor-toggle-key" class="btn-icon-sm" title="Show/Hide">👁️</button>
+              <input type="password" id="doctor-api-key" placeholder="[REDACTED]" />
+              <button id="doctor-toggle-key" class="btn-icon-sm" title="Show/Hide">Show</button>
             </div>
           </div>
           <div class="form-group">
@@ -582,7 +584,7 @@
           </div>
           <div id="doctor-config-feedback" class="doctor-config-feedback"></div>
           <button id="doctor-start-btn" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px;">
-            🏥 Start Diagnosis
+            Start Diagnosis
           </button>
         </div>
 
@@ -609,7 +611,7 @@
       <div class="manage-overlay" id="manage-overlay"></div>
       <div class="manage-drawer">
         <div class="manage-header">
-          <h2>🧩 Management</h2>
+          <h2>Management</h2>
           <button id="manage-close" class="btn-icon" aria-label="Close management panel">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M18 6L6 18M6 6l12 12"/>
@@ -619,8 +621,8 @@
 
         <!-- Tabs -->
         <div class="manage-tabs">
-          <button class="manage-tab active" data-tab="mcp-tab">🔌 MCP Servers</button>
-          <button class="manage-tab" data-tab="skills-tab">🧠 Skills</button>
+          <button class="manage-tab active" data-tab="mcp-tab">MCP Servers</button>
+          <button class="manage-tab" data-tab="skills-tab">Skills</button>
         </div>
 
         <div class="manage-body">
@@ -645,7 +647,7 @@
                 </select>
               </div>
               <div class="form-actions">
-                <button id="mcp-save-btn" class="btn btn-primary btn-sm">💾 Save Server</button>
+                <button id="mcp-save-btn" class="btn btn-primary btn-sm">Save Server</button>
                 <button id="mcp-cancel-btn" class="btn btn-secondary btn-sm">Cancel</button>
               </div>
             </div>
@@ -657,7 +659,7 @@
             <p class="tab-desc">Import and manage AI skills. Skills are stored in your workspace.</p>
             <div id="manage-skills-list" class="manage-list"></div>
             <div class="manage-skill-actions">
-              <label class="btn btn-secondary btn-sm" for="skill-zip-input">📦 Import Skill (.zip)</label>
+              <label class="btn btn-secondary btn-sm" for="skill-zip-input">Import Skill (.zip)</label>
               <input type="file" id="skill-zip-input" accept=".zip" style="display:none;" />
             </div>
           </div>
@@ -665,6 +667,24 @@
       </div>
     </div>
   </div>
+
+
+    <div id="command-palette" class="command-palette hidden" role="dialog" aria-modal="true" aria-labelledby="command-palette-title">
+      <div class="command-palette-backdrop" data-command-close></div>
+      <div class="command-palette-panel">
+        <div class="command-palette-head">
+          <p class="eyebrow">Command</p>
+          <h2 id="command-palette-title">PHANTOM command palette</h2>
+          <button class="btn-icon" data-command-close aria-label="Close command palette">×</button>
+        </div>
+        <label class="command-search">
+          <span>⌕</span>
+          <input id="command-palette-input" type="search" placeholder="Search routes, settings, scopes, evidence…" autocomplete="off">
+        </label>
+        <div id="command-palette-results" class="command-results" role="listbox" aria-label="Command results"></div>
+        <p class="command-palette-foot"><kbd>Enter</kbd> run command <kbd>Esc</kbd> close</p>
+      </div>
+    </div>
 
   <script src="js/markdown.js"></script>
   <script src="js/chat.js"></script>
