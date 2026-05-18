@@ -168,6 +168,8 @@ Scopes are first-class authorization boundaries stored in SQLite. A scope can de
 
 Before risky tool execution, PHANTOM extracts target hints such as URL, IP, domain, host, and port, classifies the action risk, and evaluates it against the selected scope. Blocked actions are returned to the run as policy results and persisted as blocked trace events; they do **not** execute.
 
+For local testing and fixture validation, Chat exposes a per-run **Operator Override** mode. It bypasses scope/target gates for the current run only, but PHANTOM still classifies the action, redacts the override reason, snapshots `policyMode: operator-override`, and persists a `tool.call.override` trace event before execution. Default operation remains governed.
+
 ## 🧩 Prompt Profiles & Resolution
 
 Prompts are no longer just one raw mutable system prompt. PHANTOM resolves prompts from layered fragments:
@@ -200,8 +202,8 @@ Toolpacks include availability checks, install hints, input metadata, policy met
 
 | Page | Purpose |
 |---|---|
-| **Chat** | Main operator control plane with active scope/toolpack selectors and live tool output. |
-| **Runs** | Historical run list/detail, timeline, artifacts, scope/profile metadata, blocked decisions, and replay bundle data. |
+| **Chat** | Main operator control plane with active scope/toolpack selectors, per-run Operator Override for local testing, and live tool output. |
+| **Runs** | Historical run list/detail, timeline, artifacts, scope/profile/policy metadata, blocked/override decisions, and replay bundle data. |
 | **Graph** | Trace-derived operational graph with pan/zoom, live follow, replay controls, node detail, policy markers, and artifact links. |
 | **Artifacts** | Durable previews, reports, summaries, traces, graph snapshots, and evidence bundles. |
 | **Targets / Scope** | Asset registry, saved findings/baselines, Scope Builder, smart target chips, policy dry-runs, and comparisons. |

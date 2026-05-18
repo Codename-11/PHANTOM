@@ -35,7 +35,7 @@
     const names = toolpacks.map(pack => `<span class="asset-chip">${escapeHtml(pack.name)}</span>`).join('');
     return `
       <div class="settings-card-grid">
-        <article class="settings-info-card wide"><p class="eyebrow">Security / Scope</p><h3>Governed execution</h3><p>Expired, denied, out-of-scope, destructive, online brute-force, and credentialed actions are blocked unless the selected scope explicitly permits the risk class and target.</p></article>
+        <article class="settings-info-card wide"><p class="eyebrow">Security / Scope</p><h3>Governed execution</h3><p>Expired, denied, out-of-scope, destructive, online brute-force, and credentialed actions are blocked unless the selected scope explicitly permits the risk class and target. Operator Override can be enabled per run for local testing; it bypasses scope gates while preserving risk classification and audit trace events.</p></article>
         <article class="settings-info-card"><p class="eyebrow">Scope Builder</p><h3>Targets / Scope page</h3><p>Use the guided builder to parse URLs, domains, IPs, CIDRs, and host:port targets into editable governed scopes.</p></article>
         <article class="settings-info-card"><p class="eyebrow">Policy preview</p><h3>Dry-run validation</h3><p>Draft scopes can test a proposed command against the same evaluator used by real tool execution.</p></article>
         <article class="settings-info-card wide"><p class="eyebrow">Available toolpacks</p><div class="asset-chip-row">${names || '<span class="asset-chip">Loading toolpacks…</span>'}</div></article>

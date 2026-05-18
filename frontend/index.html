@@ -162,6 +162,11 @@
           </label>
           <span id="active-scope-warning" class="scope-warning">Risky tools require a selected scope.</span>
           <span id="active-scope-summary" class="scope-summary">No active scope</span>
+          <label class="active-scope-control operator-override-control" title="Bypass governed scope gates for this test run. Risk classification and audit trace events are still recorded.">
+            <input type="checkbox" id="operator-override-enabled" aria-label="Enable Operator Override for this run">
+            Operator Override
+          </label>
+          <input id="operator-override-reason" class="operator-override-reason" type="text" placeholder="Override reason" aria-label="Operator Override reason" disabled>
           <label class="active-scope-control">Toolpacks
             <select id="active-toolpack-select" aria-label="Active security toolpacks" multiple size="1"></select>
           </label>

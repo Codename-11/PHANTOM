@@ -118,6 +118,38 @@ describe('scope policy evaluator', () => {
     assert.strictEqual(john.allowed, false);
   });
 
+  test('allows explicit Operator Override mode without a selected scope for test runs', () => {
+    const decision = evaluateToolAction({
+      toolName: 'execute_command',
+      args: { command: 'nmap -sV 10.0.0.5' },
+      scope: null,
+      operatorOverride: { enabled: true, reason: 'integration test fixture' },
+    });
+
+    assert.strictEqual(decision.allowed, true);
+    assert.strictEqual(decision.risk, 'network-scan');
+    assert.strictEqual(decision.policyMode, 'operator-override');
+    assert.match(decision.reason, /Operator Override/i);
+    assert.deepStrictEqual(decision.operatorOverride, {
+      enabled: true,
+      reason: 'integration test fixture',
+    });
+  });
+
+  test('redacts secrets in Operator Override audit metadata', () => {
+    const decision = evaluateToolAction({
+      toolName: 'execute_command',
+      args: { command: 'nmap -sV 10.0.0.5' },
+      operatorOverride: { enabled: true, reason: 'debug token=secret-123 password hunter2' },
+    });
+
+    assert.strictEqual(decision.allowed, true);
+    assert.match(decision.operatorOverride.reason, /token=\[REDACTED\]/);
+    assert.match(decision.operatorOverride.reason, /password=\[REDACTED\]/);
+    assert.ok(!JSON.stringify(decision).includes('secret-123'));
+    assert.ok(!JSON.stringify(decision).includes('hunter2'));
+  });
+
   test('blocks risky target outside selected scope', () => {
     const decision = evaluateToolAction({ toolName: 'execute_command', args: { command: 'nmap -sV 10.0.0.5' }, scope: activeScope });
     assert.strictEqual(decision.allowed, false);

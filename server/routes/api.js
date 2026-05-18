@@ -16,7 +16,7 @@ import { renderExecutiveSummary, renderPentestReport } from '../artifacts/report
 import { deriveRunGraph } from '../graph/graph-derive.js';
 import { buildSystemPrompt } from '../ai/system-prompt.js';
 import { createScope, getScope, getScopes, updateScope, archiveScope } from '../scope/scope-store.js';
-import { evaluateToolAction } from '../scope/policy.js';
+import { evaluateToolAction, normalizeOperatorOverride } from '../scope/policy.js';
 import { parseTargetInput, targetsToScopeFields } from '../scope/target-parser.js';
 import { getScopeTemplates } from '../scope/templates.js';
 import {
@@ -148,7 +148,12 @@ router.post('/scopes/evaluate-draft', (req, res) => {
     blocked_actions: req.body?.scope?.blockedActions || req.body?.scope?.blocked_actions || [],
     expires_at: req.body?.scope?.expiresAt || req.body?.scope?.expires_at || null,
   };
-  res.json(evaluateToolAction({ toolName: req.body?.toolName || 'execute_command', args: req.body?.args || {}, scope }));
+  res.json(evaluateToolAction({
+    toolName: req.body?.toolName || 'execute_command',
+    args: req.body?.args || {},
+    scope,
+    operatorOverride: normalizeOperatorOverride(req.body?.operatorOverride),
+  }));
 });
 router.post('/scopes', (req, res) => {
   try { res.json(createScope(req.body || {})); }
@@ -179,7 +184,12 @@ router.delete('/scopes/:id', (req, res) => {
 router.post('/scopes/:id/evaluate', (req, res) => {
   const scope = getScope(req.params.id);
   if (!scope) return res.status(404).json({ error: 'Scope not found' });
-  res.json(evaluateToolAction({ toolName: req.body?.toolName, args: req.body?.args || {}, scope }));
+  res.json(evaluateToolAction({
+    toolName: req.body?.toolName,
+    args: req.body?.args || {},
+    scope,
+    operatorOverride: normalizeOperatorOverride(req.body?.operatorOverride),
+  }));
 });
 
 // ─── Assets, Findings, Baselines, Reruns ───

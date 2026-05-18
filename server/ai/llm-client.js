@@ -1,6 +1,7 @@
 import { getToolDefinitions } from '../tools/registry.js';
 import { executeTool } from '../tools/executor.js';
 import { buildSystemPrompt } from './system-prompt.js';
+import { normalizeOperatorOverride } from '../scope/policy.js';
 import { addMessage, getMessages, saveMemory, searchMemories, saveToolResult } from '../memory/store.js';
 import config, { updateConfig } from '../config.js';
 import OpenAI from 'openai';
@@ -30,6 +31,8 @@ export function resetClient() {
  *  - Live tool output streaming via onToolProgress
  */
 export async function processMessage(conversationId, userMessage, onChunk, onToolCall, onToolResult, onError, onThinking, abortSignal, onToolProgress, options = {}) {
+  const operatorOverride = normalizeOperatorOverride(options.operatorOverride);
+
   // Get conversation history
   const history = getMessages(conversationId);
 
@@ -39,6 +42,13 @@ export async function processMessage(conversationId, userMessage, onChunk, onToo
   ];
 
   // Add memory context
+  if (operatorOverride.enabled) {
+    messages.push({
+      role: 'system',
+      content: `## OPERATOR OVERRIDE MODE\nThe operator has explicitly enabled Operator Override for this test run. PHANTOM will still classify risk and persist audit trace events, but scope/target policy gates are bypassed before tool execution. Reason: ${operatorOverride.reason}`,
+    });
+  }
+
   try {
     const relevantMemories = searchMemories(userMessage);
     if (relevantMemories.length > 0) {
@@ -232,6 +242,7 @@ export async function processMessage(conversationId, userMessage, onChunk, onToo
             }, {
               scope: options.scope || null,
               enforceScope: options.enforceScope !== false,
+              operatorOverride,
               trace: options.trace,
               emitLifecycle: false,
               toolCallId: tc.id,

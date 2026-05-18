@@ -9,6 +9,7 @@
   - Separates `offline-password-audit` from `online-bruteforce` so local John/Hashcat/hash workflows can use wordlists without authorizing live login attempts.
   - Blocks expired scopes, explicit denials, missing allowlist permissions, unknown risky actions, and out-of-scope targets before execution.
   - Persists blocked actions as `tool.call.blocked` trace events so audits can prove the command/request did not run.
+  - Supports per-run **Operator Override** for local testing/fixtures; override bypasses scope gates but still records risk classification, redacted reason metadata, and a `tool.call.override` trace before execution.
 - Scope CRUD and archive support for authorization boundaries, rules of engagement, expiry, allowed/blocked action classes, target lists, and redacted credential references.
 - Prompt profiles/fragments with profile/scope/toolpack-aware prompt resolution and redacted per-run snapshots.
 - Curated security toolpacks with risk classes, scope requirements, install hints, availability checks, policy metadata, blocked-by-default classes, Basic/Kali capability levels, and prompt fragments.
@@ -28,5 +29,6 @@
 
 - Governed Runs substrate is implemented and tested with Node's built-in test runner.
 - Risky tool actions are evaluated before execution; blocked actions are persisted and visible in Runs/Graph.
+- Operator Override is available per run for local testing without scope, with redacted audit metadata and explicit `tool.call.override` events.
 - Scopes, prompt profiles/fragments, toolpacks, run snapshots, and redaction surfaces are available through REST APIs and the vanilla JS UI.
 - Settings now shows populated Security/Scope and Tools/MCP/Skills admin panels instead of empty placeholders.

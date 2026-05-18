@@ -15,6 +15,7 @@ import { processMessage } from './ai/llm-client.js';
 import { buildSystemPrompt } from './ai/system-prompt.js';
 import { getScope } from './scope/scope-store.js';
 import { resolvePrompt } from './prompts/prompt-store.js';
+import { normalizeOperatorOverride } from './scope/policy.js';
 import { writePreviewArtifact, exportRunTrace } from './artifacts/artifact-store.js';
 import { artifactToPublic } from './artifacts/renderers.js';
 import apiRouter from './routes/api.js';
@@ -126,6 +127,10 @@ wss.on('connection', (ws) => {
           const selectedScope = msg.scopeId ? getScope(msg.scopeId) : null;
           const selectedProfileId = msg.profileId || null;
           const selectedToolpackIds = Array.isArray(msg.toolpackIds) ? msg.toolpackIds : (msg.toolpackIds ? String(msg.toolpackIds).split(',') : []);
+          const operatorOverride = normalizeOperatorOverride(msg.operatorOverride);
+          const governanceSnapshot = operatorOverride.enabled
+            ? { policyMode: 'operator-override', operatorOverride }
+            : { policyMode: 'governed' };
           const resolvedPrompt = resolvePrompt({
             basePrompt: buildSystemPrompt({ raw: true }),
             profileId: selectedProfileId,
@@ -142,6 +147,7 @@ wss.on('connection', (ws) => {
             scopeId: selectedScope?.id || null,
             promptSnapshot: {
               ...resolvedPrompt.snapshot,
+              governance: governanceSnapshot,
               model: config.api.model,
               providerRoute: providerRoute(),
             },
@@ -162,7 +168,16 @@ wss.on('connection', (ws) => {
               phase: 'chat',
               status: 'started',
               outputPreview: preview(msg.content),
-              metadata: { conversationId, model: config.api.model, providerRoute: providerRoute(), scopeId: selectedScope?.id || null, profileId: selectedProfileId, toolpackIds: selectedToolpackIds },
+              metadata: {
+                conversationId,
+                model: config.api.model,
+                providerRoute: providerRoute(),
+                scopeId: selectedScope?.id || null,
+                profileId: selectedProfileId,
+                toolpackIds: selectedToolpackIds,
+                policyMode: governanceSnapshot.policyMode,
+                ...(operatorOverride.enabled ? { operatorOverride } : {}),
+              },
             }
           );
 
@@ -267,6 +282,7 @@ wss.on('connection', (ws) => {
             {
               scope: selectedScope,
               profileId: selectedProfileId,
+              operatorOverride,
               enforceScope: true,
               trace: (event) => trace(run.id, event),
             }

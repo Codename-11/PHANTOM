@@ -46,6 +46,7 @@
   connectWebSocket();
   loadConversations();
   checkSudoStatus();
+  initOperatorOverrideControl();
   initImageDrop();
 
   // ─── WebSocket ───
@@ -278,7 +279,8 @@ Start the investigation immediately!`;
           conversationId: currentConversationId,
           scopeId: document.getElementById('active-scope-select')?.value || null,
           profileId: document.getElementById('prompt-profile-select')?.value || null,
-        toolpackIds: selectedToolpackIds(),
+          operatorOverride: operatorOverridePayload(),
+          toolpackIds: selectedToolpackIds(),
         }));
       } else {
         Chat.addErrorMessage('Not connected to server. Trying to reconnect...');
@@ -299,6 +301,7 @@ Start the investigation immediately!`;
         conversationId: currentConversationId,
         scopeId: document.getElementById('active-scope-select')?.value || null,
         profileId: document.getElementById('prompt-profile-select')?.value || null,
+        operatorOverride: operatorOverridePayload(),
         toolpackIds: selectedToolpackIds(),
       }));
     } else {
@@ -309,6 +312,26 @@ Start the investigation immediately!`;
 
   function selectedToolpackIds() {
     return Array.from(document.getElementById('active-toolpack-select')?.selectedOptions || []).map(option => option.value).filter(Boolean);
+  }
+
+  function initOperatorOverrideControl() {
+    const checkbox = document.getElementById('operator-override-enabled');
+    const reason = document.getElementById('operator-override-reason');
+    if (!checkbox || !reason) return;
+    const sync = () => {
+      reason.disabled = !checkbox.checked;
+      document.body.classList.toggle('operator-override-active', checkbox.checked);
+      if (checkbox.checked && !reason.value.trim()) reason.value = 'Local testing / fixture validation';
+    };
+    checkbox.addEventListener('change', sync);
+    sync();
+  }
+
+  function operatorOverridePayload() {
+    const checkbox = document.getElementById('operator-override-enabled');
+    if (!checkbox?.checked) return { enabled: false };
+    const reason = document.getElementById('operator-override-reason')?.value?.trim() || 'Local testing / fixture validation';
+    return { enabled: true, reason };
   }
 
   // ─── Stop AI ───

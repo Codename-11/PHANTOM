@@ -76,6 +76,7 @@ window.RunsPage = {
           <div><span>Route</span><strong>${this.escapeHtml(run.provider_route || '—')}</strong></div>
           <div><span>Scope</span><strong>${this.escapeHtml(run.scope?.name || 'No scope')}</strong></div>
           <div><span>Prompt profile</span><strong>${this.escapeHtml(run.prompt_snapshot?.profile?.name || 'Default')}</strong></div>
+          <div><span>Policy mode</span><strong>${this.escapeHtml(this.policyModeLabel(run.prompt_snapshot?.governance))}</strong></div>
           <div><span>Toolpacks</span><strong>${this.escapeHtml((run.prompt_snapshot?.toolpacks || []).map(pack => pack.name).join(', ') || 'None')}</strong></div>
           <div><span>Started</span><strong>${this.escapeHtml(run.started_at || '—')}</strong></div>
           <div><span>Ended</span><strong>${this.escapeHtml(run.ended_at || '—')}</strong></div>
@@ -113,6 +114,14 @@ window.RunsPage = {
     document.getElementById('run-detail').innerHTML = '<div class="empty-msg">Select a run to inspect the trace timeline.</div>';
   },
 
+  policyModeLabel(governance = {}) {
+    if (governance?.policyMode === 'operator-override') {
+      const reason = governance.operatorOverride?.reason ? ` · ${governance.operatorOverride.reason}` : '';
+      return `Operator Override${reason}`;
+    }
+    return 'Governed';
+  },
+
   renderReplaySummary(replay) {
     if (!replay) return '<div class="empty-msg">Replay metadata unavailable.</div>';
     const pillClass = replay.complete ? 'completed' : 'failed';
@@ -142,6 +151,7 @@ window.RunsPage = {
           </div>
           ${preview ? `<pre>${this.escapeHtml(preview)}</pre>` : ''}
           ${event.metadata?.decision ? `<small class="policy-note">Risk: ${this.escapeHtml(event.metadata.risk || event.metadata.decision.risk || 'unknown')} · ${this.escapeHtml(event.metadata.decision.reason || 'policy decision')}</small>` : ''}
+          ${event.type === 'tool.call.override' ? `<small class="policy-note">Operator Override · ${this.escapeHtml(event.metadata?.operatorOverride?.reason || 'test run')}</small>` : ''}
         </div>
       </div>
     `;

@@ -51,4 +51,40 @@ describe('governed run integration', () => {
     assert.ok(events.some(event => event.type === 'tool.call.blocked'));
     assert.strictEqual(events.find(event => event.type === 'tool.call.blocked').metadata.risk, 'network-scan');
   });
+
+  test('Operator Override runs risky commands without scope and persists override audit event', async () => {
+    initDB(':memory:');
+    const conv = createConversation('Override run');
+    const run = createRun({
+      conversationId: conv.id,
+      goal: 'override scan smoke',
+      promptSnapshot: {
+        governance: {
+          policyMode: 'operator-override',
+          operatorOverride: { enabled: true, reason: 'local integration testing' },
+        },
+      },
+    });
+
+    const result = await executeTool('execute_command', { command: 'printf OPERATOR_OVERRIDE_RAN && nmap 10.0.0.5' }, null, {
+      scope: null,
+      runId: run.id,
+      operatorOverride: { enabled: true, reason: 'local integration testing' },
+      trace: (event) => addTraceEvent(run.id, event),
+    });
+
+    assert.match(result, /OPERATOR_OVERRIDE_RAN/);
+    const events = getTraceEvents(run.id);
+    const overrideEvent = events.find(event => event.type === 'tool.call.override');
+    assert.ok(overrideEvent, 'expected an explicit override audit trace event');
+    assert.strictEqual(overrideEvent.metadata.policyMode, 'operator-override');
+    assert.strictEqual(overrideEvent.metadata.decision.allowed, true);
+    assert.strictEqual(overrideEvent.metadata.decision.risk, 'network-scan');
+    assert.strictEqual(overrideEvent.metadata.operatorOverride.reason, 'local integration testing');
+    assert.ok(!events.some(event => event.type === 'tool.call.blocked'));
+
+    const saved = getRun(run.id);
+    assert.strictEqual(saved.prompt_snapshot.governance.policyMode, 'operator-override');
+    assert.strictEqual(saved.prompt_snapshot.governance.operatorOverride.reason, 'local integration testing');
+  });
 });

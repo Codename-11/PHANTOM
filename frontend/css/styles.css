@@ -931,7 +931,13 @@ html, body {
 /* Governed Runs */
 .input-footer { gap: 10px; flex-wrap: wrap; }
 .active-scope-control { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; }
-.active-scope-control select, .prompt-admin-grid input, .prompt-admin-grid select, .prompt-admin-grid textarea, .scope-editor input, .scope-editor textarea { background: rgba(5,10,20,.72); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; padding: 8px 10px; }
+.active-scope-control select, .prompt-admin-grid input, .prompt-admin-grid select, .prompt-admin-grid textarea, .scope-editor input, .scope-editor textarea, .operator-override-reason { background: rgba(5,10,20,.72); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 8px; padding: 8px 10px; }
+.operator-override-control { border: 1px solid rgba(251,191,36,.28); border-radius: 999px; padding: 4px 8px; background: rgba(251,191,36,.06); }
+.operator-override-control input { accent-color: #f59e0b; }
+.operator-override-reason { min-width: 180px; max-width: 260px; font-size: 12px; }
+.operator-override-reason:disabled { opacity: .45; }
+.operator-override-active .input-area { box-shadow: 0 -10px 34px rgba(245,158,11,.14); }
+.operator-override-active .scope-warning { color: #f59e0b; }
 .scope-warning { color: var(--warning, #fbbf24); font-size: 12px; }
 .scope-layout { display: grid; grid-template-columns: minmax(220px, 320px) 1fr; gap: 16px; min-height: 0; }
 .scope-editor { display: grid; gap: 10px; }

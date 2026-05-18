@@ -1,5 +1,22 @@
 # PHANTOM DEVLOG
 
+## 2026-05-17 22:08 EDT — Operator Override Test Mode
+
+- Added a per-run **Operator Override** policy mode for local testing/fixture validation. It intentionally bypasses scope/target gates while still classifying risk, redacting override reasons, and persisting `tool.call.override` audit trace events before execution.
+- Kept the default path governed: missing scopes, expired scopes, explicit denials, and out-of-scope risky actions still block unless the operator explicitly enables override for that run.
+- Surfaced the override toggle + reason in Chat, persisted governance metadata in run prompt snapshots, exposed policy mode in Runs detail, and documented the terminology in Settings.
+- Added regression coverage for scope-free risky execution under Operator Override, explicit override audit events, no `tool.call.blocked` false positives, and secret redaction in override reasons.
+
+Validation passed:
+- RED: `node --test server/scope/policy.test.js server/governed-runs.test.js` failed before implementation on missing override allowance and missing override audit event.
+- GREEN targeted: `node --test server/scope/policy.test.js server/governed-runs.test.js frontend/js/pages/settings-page-presenter.test.js` — 16/16 passing.
+- `npm test` — 61/61 passing.
+- `npm run build` — passing with existing Vite non-module warnings.
+- `find server frontend/js -name '*.js' -print0 | xargs -0 -n1 node --check` — passing.
+- `python3 tests/smoke_test.py` — 4/4 passing.
+- Restarted `phantom.service`; post-restart `python3 tests/smoke_test.py` — 4/4 passing.
+- `git diff --check` — passing.
+
 ## 2026-05-17 21:44 EDT — Password Audit Capability Split
 
 - Split password-audit governance into distinct `offline-password-audit` and `online-bruteforce` risk classes so local John/Hashcat/hashid/name-that-hash workflows can use hash files and wordlists without granting live login/brute-force capability.

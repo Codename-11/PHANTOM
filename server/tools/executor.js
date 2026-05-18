@@ -5,7 +5,7 @@ import { dirname, resolve } from 'path';
 import os from 'os';
 import { saveMemory, searchMemories } from '../memory/store.js';
 import { getSetting } from '../memory/store.js';
-import { evaluateToolAction } from '../scope/policy.js';
+import { evaluateToolAction, normalizeOperatorOverride } from '../scope/policy.js';
 import config from '../config.js';
 
 /**
@@ -56,7 +56,14 @@ export async function executeTool(name, args, onProgress, options = {}) {
   const startedAt = new Date().toISOString();
   const startedMs = Date.now();
   const toolCallId = options.toolCallId || options.tool_call_id || options.id || `direct:${startedMs}:${name}`;
-  const baseMetadata = { toolCallId, scopeId: options.scope?.id || null };
+  const operatorOverride = normalizeOperatorOverride(options.operatorOverride);
+  const policyMode = operatorOverride.enabled ? 'operator-override' : 'governed';
+  const baseMetadata = {
+    toolCallId,
+    scopeId: options.scope?.id || null,
+    policyMode,
+    ...(operatorOverride.enabled ? { operatorOverride } : {}),
+  };
   let startedEvent = null;
 
   if (emitLifecycle) {
@@ -72,7 +79,7 @@ export async function executeTool(name, args, onProgress, options = {}) {
   }
 
   if (options.enforceScope || Object.prototype.hasOwnProperty.call(options, 'scope')) {
-    const decision = evaluateToolAction({ toolName: name, args, scope: options.scope || null });
+    const decision = evaluateToolAction({ toolName: name, args, scope: options.scope || null, operatorOverride });
     if (!decision.allowed) {
       const message = `Blocked by PHANTOM scope policy: ${decision.reason}`;
       options.trace?.({
@@ -83,12 +90,34 @@ export async function executeTool(name, args, onProgress, options = {}) {
         toolName: name,
         input: args,
         outputPreview: message,
-        metadata: { ...baseMetadata, decision, risk: decision.risk, targets: decision.targets },
+        metadata: { ...baseMetadata, decision, risk: decision.risk, targets: decision.targets, policyMode: decision.policyMode || policyMode },
         startedAt,
         endedAt: new Date().toISOString(),
         durationMs: Date.now() - startedMs,
       });
       return message;
+    }
+    if (decision.policyMode === 'operator-override') {
+      options.trace?.({
+        parentEventId: startedEvent?.id || null,
+        type: 'tool.call.override',
+        phase: 'policy',
+        status: 'completed',
+        toolName: name,
+        input: args,
+        outputPreview: decision.reason,
+        metadata: {
+          ...baseMetadata,
+          decision,
+          risk: decision.risk,
+          targets: decision.targets,
+          policyMode: decision.policyMode,
+          operatorOverride: decision.operatorOverride,
+        },
+        startedAt,
+        endedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedMs,
+      });
     }
   }
 

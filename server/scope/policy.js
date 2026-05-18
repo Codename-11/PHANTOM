@@ -1,6 +1,8 @@
 const SAFE_RISKS = new Set(['read/local']);
 const RISKY_RISKS = new Set(['recon', 'network-scan', 'exploit', 'destructive', 'credentialed', 'offline-password-audit', 'online-bruteforce', 'unknown']);
 const BLOCKED_CREDENTIAL_SUBRISKS = new Set(['offline-password-audit', 'online-bruteforce']);
+const DEFAULT_OPERATOR_OVERRIDE_REASON = 'Operator-enabled test run';
+const SECRET_VALUE_RE = /\b(api[_-]?key|token|password|passwd|secret|authorization|bearer)\b\s*[:=]?\s*([^\s,;]+)/gi;
 
 const IPV4_RE = /\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g;
 const URL_RE = /https?:\/\/[^\s'"<>),]+/gi;
@@ -169,24 +171,50 @@ function allowedActionMatches(actions, risk) {
   return actions.has(risk);
 }
 
-export function evaluateToolAction({ toolName, args = {}, scope = null, now = new Date() }) {
+function redactText(text) {
+  return String(text || '').replace(SECRET_VALUE_RE, (_match, key) => `${key}=[REDACTED]`);
+}
+
+export function normalizeOperatorOverride(operatorOverride = null) {
+  const enabled = operatorOverride === true || operatorOverride?.enabled === true;
+  if (!enabled) return { enabled: false };
+  const reason = redactText(operatorOverride?.reason || DEFAULT_OPERATOR_OVERRIDE_REASON).slice(0, 240);
+  return { enabled: true, reason: reason || DEFAULT_OPERATOR_OVERRIDE_REASON };
+}
+
+function operatorOverrideDecision({ risk, targets, operatorOverride }) {
+  const normalized = normalizeOperatorOverride(operatorOverride);
+  if (!normalized.enabled) return null;
+  return {
+    allowed: true,
+    reason: `Operator Override active: governed scope checks bypassed for this test run`,
+    risk,
+    targets,
+    policyMode: 'operator-override',
+    operatorOverride: normalized,
+  };
+}
+
+export function evaluateToolAction({ toolName, args = {}, scope = null, now = new Date(), operatorOverride = null }) {
   const risk = classifyRisk(toolName, args);
   const targets = extractTargets(args);
-  if (SAFE_RISKS.has(risk)) return { allowed: true, reason: 'Safe local/read action', risk, targets };
-  if (!RISKY_RISKS.has(risk)) return { allowed: false, reason: `Unknown risk class: ${risk}`, risk, targets };
-  if (!scope) return { allowed: false, reason: `No selected scope for ${risk} action`, risk, targets };
-  if (scope.archived_at) return { allowed: false, reason: `Scope "${scope.name}" is archived`, risk, targets };
+  if (SAFE_RISKS.has(risk)) return { allowed: true, reason: 'Safe local/read action', risk, targets, policyMode: 'governed' };
+  if (!RISKY_RISKS.has(risk)) return { allowed: false, reason: `Unknown risk class: ${risk}`, risk, targets, policyMode: 'governed' };
+  const overrideDecision = operatorOverrideDecision({ risk, targets, operatorOverride });
+  if (overrideDecision) return overrideDecision;
+  if (!scope) return { allowed: false, reason: `No selected scope for ${risk} action`, risk, targets, policyMode: 'governed' };
+  if (scope.archived_at) return { allowed: false, reason: `Scope "${scope.name}" is archived`, risk, targets, policyMode: 'governed' };
   if (scope.expires_at && new Date(scope.expires_at).getTime() < now.getTime()) {
-    return { allowed: false, reason: `Scope "${scope.name}" is expired`, risk, targets };
+    return { allowed: false, reason: `Scope "${scope.name}" is expired`, risk, targets, policyMode: 'governed' };
   }
   const blocked = normalizeActions(scope.blocked_actions || scope.blockedActions);
-  if (blockedActionMatches(blocked, risk)) return { allowed: false, reason: `${risk} is blocked by scope policy`, risk, targets };
+  if (blockedActionMatches(blocked, risk)) return { allowed: false, reason: `${risk} is blocked by scope policy`, risk, targets, policyMode: 'governed' };
   const allowed = normalizeActions(scope.allowed_actions || scope.allowedActions);
-  if (allowed.size && !allowedActionMatches(allowed, risk)) return { allowed: false, reason: `${risk} is not allowed by selected scope`, risk, targets };
-  if (targets.length === 0) return { allowed: true, reason: 'No explicit external target found', risk, targets };
+  if (allowed.size && !allowedActionMatches(allowed, risk)) return { allowed: false, reason: `${risk} is not allowed by selected scope`, risk, targets, policyMode: 'governed' };
+  if (targets.length === 0) return { allowed: true, reason: 'No explicit external target found', risk, targets, policyMode: 'governed' };
   const outside = targets.filter(target => !targetInScope(target, scope));
   if (outside.length > 0) {
-    return { allowed: false, reason: `Target ${outside[0]} is outside selected scope`, risk, targets };
+    return { allowed: false, reason: `Target ${outside[0]} is outside selected scope`, risk, targets, policyMode: 'governed' };
   }
-  return { allowed: true, reason: 'Action is inside selected scope', risk, targets };
+  return { allowed: true, reason: 'Action is inside selected scope', risk, targets, policyMode: 'governed' };
 }
