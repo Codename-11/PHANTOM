@@ -26,6 +26,8 @@
     outputPreview: 'Output',
     input: 'Input',
     phase: 'Phase',
+    promptProfile: 'Prompt profile',
+    toolpacks: 'Toolpacks',
     risk: 'Risk',
     scopeId: 'Scope',
     scopeStatus: 'Scope status',

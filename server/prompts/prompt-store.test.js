@@ -23,17 +23,20 @@ describe('prompt profile and fragment store', () => {
     const updated = updatePromptFragment(custom.id, { body: 'CUSTOM UPDATED' });
     assert.strictEqual(updated.body, 'CUSTOM UPDATED');
 
-    const resolved = resolvePrompt({ basePrompt: 'SYSTEM BASE', profileId: profile.id, scopeId: scope.id });
+    const resolved = resolvePrompt({ basePrompt: 'SYSTEM BASE', profileId: profile.id, scopeId: scope.id, toolpackIds: ['passive-osint', 'reporting'] });
     const content = resolved.content;
     assert.ok(content.includes('SYSTEM BASE'));
     assert.ok(content.indexOf('SYSTEM BASE') < content.indexOf('BASE FRAGMENT'));
     assert.ok(content.indexOf('BASE FRAGMENT') < content.indexOf('MODE FRAGMENT'));
     assert.ok(content.indexOf('MODE FRAGMENT') < content.indexOf('Scope: Scope A'));
     assert.ok(content.indexOf('Scope: Scope A') < content.indexOf('POLICY FRAGMENT'));
-    assert.ok(content.indexOf('POLICY FRAGMENT') < content.indexOf('CUSTOM UPDATED'));
+    assert.ok(content.indexOf('POLICY FRAGMENT') < content.indexOf('Passive OSINT'));
+    assert.ok(content.indexOf('Passive OSINT') < content.indexOf('CUSTOM UPDATED'));
     assert.ok(!content.includes('CUSTOM FRAGMENT'));
     assert.strictEqual(resolved.profile.name, 'Recon');
     assert.strictEqual(resolved.scope.name, 'Scope A');
+    assert.deepStrictEqual(resolved.toolpacks.map(pack => pack.id), ['passive-osint', 'reporting']);
     assert.ok(resolved.snapshot.fragmentIds.includes(updated.id));
+    assert.deepStrictEqual(resolved.snapshot.toolpacks.map(pack => pack.id), ['passive-osint', 'reporting']);
   });
 });

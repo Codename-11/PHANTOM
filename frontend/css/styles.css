@@ -1039,3 +1039,77 @@ html, body {
 @media (max-width: 480px) {
   .asset-metric-grid, .asset-detail-tabs { grid-template-columns: 1fr; }
 }
+
+/* Scope Builder + Toolpacks */
+.scope-summary {
+  color: var(--text-secondary);
+  font-size: 12px;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scope-builder-form .scope-builder-steps {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.target-chip-row,
+.asset-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.target-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 6px 8px;
+  background: rgba(59, 184, 240, 0.08);
+  color: var(--text-primary);
+  max-width: 100%;
+}
+.target-chip.public { border-color: rgba(251, 191, 36, 0.45); }
+.target-chip.private { border-color: rgba(52, 211, 153, 0.45); }
+.target-chip small {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-size: 10px;
+}
+.target-chip button {
+  border: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+.policy-preview {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.55);
+  margin: 8px 0;
+}
+.policy-preview.allowed { border-color: rgba(52, 211, 153, 0.55); }
+.policy-preview.blocked { border-color: rgba(248, 113, 113, 0.65); }
+.policy-preview strong { display: block; margin-bottom: 4px; }
+.compact-grid { grid-template-columns: 1fr; }
+.asset-checkbox.compact { align-items: flex-start; }
+.toolpack-settings-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+.toolpack-card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  background: rgba(15, 23, 42, 0.72);
+}
+.toolpack-card p { color: var(--text-secondary); margin: 6px 0 10px; }
+@media (max-width: 980px) {
+  .scope-builder-form .scope-builder-steps { grid-template-columns: 1fr; }
+  .scope-summary { max-width: 100%; }
+}

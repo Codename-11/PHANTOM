@@ -1,6 +1,7 @@
 window.SettingsPage = {
   profiles: [],
   fragments: [],
+  toolpacks: [],
 
   init() {
     this.mountExistingSettingsBody();
@@ -41,6 +42,7 @@ window.SettingsPage = {
     document.getElementById('refresh-prompt-preview')?.addEventListener('click', () => this.loadPromptPreview());
     document.getElementById('save-prompt-profile')?.addEventListener('click', () => this.saveProfile());
     document.getElementById('save-prompt-fragment')?.addEventListener('click', () => this.saveFragment());
+    document.getElementById('refresh-toolpacks-btn')?.addEventListener('click', () => this.loadToolpacks());
     document.getElementById('prompt-profile-select')?.addEventListener('change', () => {
       this.populateProfileForm();
       this.loadPromptPreview();
@@ -49,7 +51,7 @@ window.SettingsPage = {
   },
 
   async loadPromptAdmin() {
-    await Promise.all([this.loadProfiles(), this.loadFragments()]);
+    await Promise.all([this.loadProfiles(), this.loadFragments(), this.loadToolpacks()]);
     this.loadPromptPreview();
   },
 
@@ -132,6 +134,28 @@ window.SettingsPage = {
     this.loadPromptPreview();
   },
 
+  async loadToolpacks() {
+    const target = document.getElementById('toolpack-settings-list');
+    const security = document.getElementById('settings-scope-policy');
+    try {
+      const res = await fetch('/api/toolpacks');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      this.toolpacks = await res.json();
+      if (target) {
+        target.innerHTML = this.toolpacks.map(pack => `
+          <article class="toolpack-card">
+            <div><strong>${this.escapeHtml(pack.name)}</strong><p>${this.escapeHtml(pack.summary)}</p></div>
+            <div class="asset-chip-row"><span class="asset-chip">Risks: ${this.escapeHtml((pack.risks || []).join(', '))}</span><span class="asset-chip">${pack.policy?.scopeRequired ? 'Scope required' : 'Scope optional'}</span></div>
+            <details><summary>${(pack.tools || []).length} tools</summary>${(pack.tools || []).map(tool => `<div class="target-row"><span>${this.escapeHtml(tool.name)} · ${this.escapeHtml(tool.risk)}</span><strong>${this.escapeHtml(tool.installHint || 'installed externally')}</strong></div>`).join('')}</details>
+          </article>`).join('');
+      }
+      if (security) security.innerHTML = `<strong>Governed execution</strong><p>Risky tools are blocked before execution unless selected scope policy allows the risk class and every extracted target is in scope.</p><div class="asset-chip-row">${this.toolpacks.map(pack => `<span class="asset-chip">${this.escapeHtml(pack.name)}</span>`).join('')}</div>`;
+      window.ScopePage?.renderToolpackSelector?.();
+    } catch (err) {
+      if (target) target.innerHTML = `<div class="empty-msg">Failed to load toolpacks: ${this.escapeHtml(err.message)}</div>`;
+    }
+  },
+
   async loadPromptPreview() {
     const target = document.getElementById('system-prompt-preview');
     if (!target) return;
@@ -142,11 +166,13 @@ window.SettingsPage = {
       const qs = new URLSearchParams();
       if (profileId) qs.set('profileId', profileId);
       if (scopeId) qs.set('scopeId', scopeId);
+      const toolpackIds = Array.from(document.getElementById('active-toolpack-select')?.selectedOptions || []).map(option => option.value).filter(Boolean);
+      if (toolpackIds.length) qs.set('toolpackIds', toolpackIds.join(','));
       const res = await fetch(`/api/prompts/preview${qs.toString() ? `?${qs}` : ''}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       target.textContent = data.content || '';
-      document.getElementById('system-prompt-meta').textContent = `${data.length || 0} chars · ${data.profile?.name || 'default'} · ${data.scope?.name || 'no scope'}`;
+      document.getElementById('system-prompt-meta').textContent = `${data.length || 0} chars · ${data.profile?.name || 'default'} · ${data.scope?.name || 'no scope'} · ${(data.toolpacks || []).map(pack => pack.name).join(', ') || 'no toolpacks'}`;
     } catch (err) {
       target.textContent = `Failed to load prompt preview: ${err.message}`;
     }

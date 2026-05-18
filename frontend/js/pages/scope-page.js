@@ -2,6 +2,8 @@ window.ScopePage = {
   assets: [],
   scopes: [],
   comparisons: [],
+  scopeTemplates: [],
+  toolpacks: [],
   selectedAssetId: null,
   selectedScopeId: null,
   mode: 'assets',
@@ -30,7 +32,7 @@ window.ScopePage = {
   },
 
   async loadAll() {
-    await Promise.all([this.loadAssets(false), this.loadScopes(false), this.loadComparisons(false)]);
+    await Promise.all([this.loadAssets(false), this.loadScopes(false), this.loadComparisons(false), this.loadScopeTemplates(false), this.loadToolpacks(false)]);
     await this.loadAssetOperationalDetails();
     this.renderCurrentMode();
     this.renderActiveSelector();
@@ -71,9 +73,19 @@ window.ScopePage = {
     if (render) this.renderCurrentMode();
   },
 
+  async loadScopeTemplates() {
+    const res = await fetch('/api/scopes/templates');
+    this.scopeTemplates = res.ok ? await res.json() : [];
+  },
+
+  async loadToolpacks() {
+    const res = await fetch('/api/toolpacks');
+    this.toolpacks = res.ok ? await res.json() : [];
+  },
+
   async loadScopesForSelector() {
     try {
-      await this.loadScopes(false);
+      await Promise.all([this.loadScopes(false), this.loadToolpacks(false)]);
       this.renderActiveSelector();
     } catch {}
   },
@@ -97,6 +109,26 @@ window.ScopePage = {
     const current = select.value;
     select.innerHTML = '<option value="">No scope selected</option>' + this.scopes.map(scope => `<option value="${this.escapeAttribute(scope.id)}">${this.escapeHtml(scope.name)}</option>`).join('');
     select.value = current || '';
+    select.onchange = () => this.renderActiveScopeSummary();
+    this.renderActiveScopeSummary();
+    this.renderToolpackSelector();
+  },
+
+  renderActiveScopeSummary() {
+    const summary = document.getElementById('active-scope-summary');
+    const select = document.getElementById('active-scope-select');
+    if (!summary || !select) return;
+    const scope = this.scopes.find(item => item.id === select.value);
+    if (!scope) { summary.textContent = 'No active scope'; return; }
+    const allowed = (scope.allowed_actions || []).join(', ') || 'default policy';
+    summary.textContent = `${scope.name} · ${(scope.targets?.hosts || []).length} hosts · allowed: ${allowed}`;
+  },
+
+  renderToolpackSelector() {
+    const select = document.getElementById('active-toolpack-select');
+    if (!select) return;
+    const selected = new Set(Array.from(select.selectedOptions || []).map(option => option.value));
+    select.innerHTML = this.toolpacks.map(pack => `<option value="${this.escapeAttribute(pack.id)}" ${selected.has(pack.id) ? 'selected' : ''}>${this.escapeHtml(pack.name)}</option>`).join('');
   },
 
   renderAssetsWorkspace() {
@@ -381,14 +413,29 @@ window.ScopePage = {
     this.selectedScopeId = id;
     this.renderScopeList();
     const selectedAssets = (scope.raw_targets?.assetIds || []).map(assetId => this.assets.find(asset => asset.id === assetId)).filter(Boolean);
+    const toolpackIds = scope.raw_targets?.toolpackIds || [];
     document.getElementById('asset-main').innerHTML = `
       <div class="asset-hero"><div><p class="eyebrow">Governed scope</p><h2>${this.escapeHtml(scope.name)}</h2><p>${this.escapeHtml(scope.notes || 'No ROE notes.')}</p></div><span class="run-pill running">active</span></div>
       <div class="asset-metric-grid"><div><span>Assets</span><strong>${selectedAssets.length}</strong></div><div><span>Hosts</span><strong>${(scope.targets?.hosts || []).length}</strong></div><div><span>Allowed</span><strong>${(scope.allowed_actions || []).join(', ') || 'default'}</strong></div><div><span>Blocked</span><strong>${(scope.blocked_actions || []).join(', ') || '—'}</strong></div></div>
       <section class="inspector-card"><h3>Included assets</h3>${selectedAssets.map(asset => `<span class="asset-chip">${this.iconForAsset(asset.type)} ${this.escapeHtml(asset.name)}</span>`).join('') || '<div class="empty-msg">Raw-target-only scope.</div>'}</section>
-      <section class="inspector-card"><h3>Expanded targets</h3>${this.renderTargetSummary(scope.targets || {})}</section>`;
-    document.getElementById('asset-inspector').innerHTML = `<div class="inspector-card"><h3>Scope actions</h3><div class="inspector-actions"><button class="btn btn-secondary btn-sm" id="use-scope-btn">Use for chat</button><button class="btn btn-secondary btn-sm" id="edit-scope-btn">Edit scope</button></div></div>`;
-    document.getElementById('use-scope-btn')?.addEventListener('click', () => { const select = document.getElementById('active-scope-select'); if (select) select.value = scope.id; });
+      <section class="inspector-card"><h3>Expanded targets</h3>${this.renderTargetSummary(scope.targets || {})}</section>
+      <section class="inspector-card"><h3>Toolpack defaults</h3>${toolpackIds.map(id => `<span class="asset-chip">${this.escapeHtml(this.toolpacks.find(pack => pack.id === id)?.name || id)}</span>`).join('') || '<div class="empty-msg">Select toolpacks from Chat or Settings.</div>'}</section>`;
+    document.getElementById('asset-inspector').innerHTML = `
+      <div class="inspector-card"><h3>Scope actions</h3><div class="inspector-actions"><button class="btn btn-secondary btn-sm" id="use-scope-btn">Use for chat</button><button class="btn btn-secondary btn-sm" id="edit-scope-btn">Edit scope</button></div></div>
+      <div class="inspector-card"><h3>Dry-run policy</h3><input id="detail-policy-command" placeholder="nmap -sV ${this.escapeAttribute((scope.targets?.hosts || scope.targets?.domains || ['target'])[0] || 'target')}" /><button class="btn btn-secondary btn-sm" id="detail-policy-check">Check command</button><div id="detail-policy-result">No check yet.</div></div>`;
+    document.getElementById('use-scope-btn')?.addEventListener('click', () => {
+      const select = document.getElementById('active-scope-select');
+      if (select) { select.value = scope.id; this.renderActiveScopeSummary(); }
+      const toolSelect = document.getElementById('active-toolpack-select');
+      if (toolSelect && toolpackIds.length) Array.from(toolSelect.options).forEach(option => { option.selected = toolpackIds.includes(option.value); });
+    });
     document.getElementById('edit-scope-btn')?.addEventListener('click', () => this.renderScopeEditor(scope));
+    document.getElementById('detail-policy-check')?.addEventListener('click', async () => {
+      const command = document.getElementById('detail-policy-command')?.value || '';
+      const result = document.getElementById('detail-policy-result');
+      const decision = await this.fetchJSON(`/api/scopes/${encodeURIComponent(scope.id)}/evaluate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ toolName: 'execute_command', args: { command } }) });
+      if (result) result.innerHTML = window.ScopeBuilder?.renderPolicyPreview(decision) || this.escapeHtml(decision.reason);
+    });
   },
 
   renderScopeEditor(scope = null, preselectedAssetIds = []) {
@@ -396,31 +443,79 @@ window.ScopePage = {
     document.querySelectorAll('[data-asset-mode]').forEach(button => button.classList.toggle('active', button.dataset.assetMode === 'scopes'));
     const raw = scope?.raw_targets || scope?.targets || {};
     const selected = new Set([...(raw.assetIds || []), ...preselectedAssetIds]);
+    const templateOptions = this.scopeTemplates.map(template => `<option value="${this.escapeAttribute(template.id)}">${this.escapeHtml(template.name)} — ${this.escapeHtml(template.summary)}</option>`).join('');
+    const toolpackOptions = this.toolpacks.map(pack => `<label class="asset-checkbox compact"><input type="checkbox" class="scope-toolpack" value="${this.escapeAttribute(pack.id)}" ${(raw.toolpackIds || []).includes(pack.id) ? 'checked' : ''}>${this.escapeHtml(pack.name)}<small>${this.escapeHtml(pack.summary)}</small></label>`).join('');
     document.getElementById('asset-main').innerHTML = `
-      <form id="scope-editor" class="asset-form">
-        <h2>${scope ? 'Edit scope' : 'New scope'}</h2>
-        <label>Name <input id="scope-name" value="${this.escapeAttribute(scope?.name || '')}" required></label>
-        <div class="asset-selector-grid">${this.assets.map(asset => `<label class="asset-checkbox"><input type="checkbox" value="${this.escapeAttribute(asset.id)}" ${selected.has(asset.id) ? 'checked' : ''}>${this.iconForAsset(asset.type)} ${this.escapeHtml(asset.name)}<small>${this.escapeHtml(asset.environment || asset.type)}</small></label>`).join('') || '<div class="empty-msg">Create assets first or enter raw targets below.</div>'}</div>
-        <label>Raw hosts <input id="scope-hosts" value="${this.escapeAttribute((raw.hosts || []).join(', '))}"></label>
-        <label>Raw domains <input id="scope-domains" value="${this.escapeAttribute((raw.domains || []).join(', '))}"></label>
-        <label>Raw CIDRs <input id="scope-cidrs" value="${this.escapeAttribute((raw.cidrs || []).join(', '))}"></label>
-        <label>Raw URLs <input id="scope-urls" value="${this.escapeAttribute((raw.urls || []).join(', '))}"></label>
-        <div class="form-row"><label>Allowed risks <input id="scope-allowed" value="${this.escapeAttribute((scope?.allowed_actions || []).join(', '))}" placeholder="recon, network-scan"></label><label>Blocked risks <input id="scope-blocked" value="${this.escapeAttribute((scope?.blocked_actions || []).join(', '))}" placeholder="exploit, destructive"></label></div>
-        <label>Expires <input id="scope-expires" placeholder="ISO timestamp" value="${this.escapeAttribute(scope?.expires_at || '')}"></label>
+      <form id="scope-editor" class="asset-form scope-builder-form">
+        <h2>${scope ? 'Edit governed scope' : 'New governed scope'}</h2>
+        <div class="scope-builder-steps">
+          <section class="inspector-card"><p class="eyebrow">1 · Intent</p><label>Template <select id="scope-template"><option value="">Custom governed scope</option>${templateOptions}</select></label><label>Name <input id="scope-name" value="${this.escapeAttribute(scope?.name || '')}" required></label></section>
+          <section class="inspector-card"><p class="eyebrow">2 · Targets</p><label>Paste targets <textarea id="scope-target-paste" rows="5" placeholder="https://app.example.com\nexample.com\n10.0.0.0/24\n192.168.1.10:22"></textarea></label><button type="button" class="btn btn-secondary btn-sm" id="parse-scope-targets">Parse targets</button><div id="scope-target-chips" class="target-chip-row">${window.ScopeBuilder?.renderTargetChips([]) || ''}</div></section>
+          <section class="inspector-card"><p class="eyebrow">3 · Assets</p><div class="asset-selector-grid">${this.assets.map(asset => `<label class="asset-checkbox"><input type="checkbox" value="${this.escapeAttribute(asset.id)}" ${selected.has(asset.id) ? 'checked' : ''}>${this.iconForAsset(asset.type)} ${this.escapeHtml(asset.name)}<small>${this.escapeHtml(asset.environment || asset.type)}</small></label>`).join('') || '<div class="empty-msg">Create assets first or enter raw targets.</div>'}</div></section>
+          <section class="inspector-card"><p class="eyebrow">4 · Policy</p><div class="form-row"><label>Allowed risks <input id="scope-allowed" value="${this.escapeAttribute((scope?.allowed_actions || []).join(', '))}" placeholder="recon, network-scan"></label><label>Blocked risks <input id="scope-blocked" value="${this.escapeAttribute((scope?.blocked_actions || []).join(', '))}" placeholder="exploit, destructive"></label></div><label>Toolpacks <div class="asset-selector-grid compact-grid">${toolpackOptions || '<div class="empty-msg">No toolpacks available.</div>'}</div></label></section>
+        </div>
+        <details open><summary>Raw target fields</summary><label>Raw hosts <input id="scope-hosts" value="${this.escapeAttribute((raw.hosts || []).join(', '))}"></label><label>Raw domains <input id="scope-domains" value="${this.escapeAttribute((raw.domains || []).join(', '))}"></label><label>Raw CIDRs <input id="scope-cidrs" value="${this.escapeAttribute((raw.cidrs || []).join(', '))}"></label><label>Raw URLs <input id="scope-urls" value="${this.escapeAttribute((raw.urls || []).join(', '))}"></label></details>
+        <div class="form-row"><label>Expires <input id="scope-expires" placeholder="ISO timestamp" value="${this.escapeAttribute(scope?.expires_at || '')}"></label><label>Dry-run command <input id="scope-policy-command" placeholder="nmap -sV example.com"></label></div>
         <label>ROE notes <textarea id="scope-notes" rows="4">${this.escapeHtml(scope?.notes || '')}</textarea></label>
-        <div class="form-actions"><button class="btn btn-primary" type="submit">Save scope</button></div>
+        <div id="scope-policy-preview">${window.ScopeBuilder?.renderPolicyPreview(null) || ''}</div>
+        <div class="form-actions"><button class="btn btn-primary" type="submit">Save scope</button><button class="btn btn-secondary" type="button" id="scope-dry-run-btn">Dry-run policy</button></div>
       </form>`;
-    document.getElementById('asset-inspector').innerHTML = '<div class="inspector-card">Scopes reference assets plus raw target strings. Risky tools are still checked at execution time.</div>';
+    document.getElementById('asset-inspector').innerHTML = '<div class="inspector-card">Scope Builder converts pasted targets into editable raw fields, applies intent templates, and previews the same policy gate used before tool execution.</div>';
     document.getElementById('scope-editor').addEventListener('submit', (event) => this.saveScope(event, scope?.id || null));
+    document.getElementById('scope-template')?.addEventListener('change', (event) => this.applyScopeTemplate(event.target.value));
+    document.getElementById('parse-scope-targets')?.addEventListener('click', () => this.parseScopeTargets());
+    document.getElementById('scope-dry-run-btn')?.addEventListener('click', () => this.previewScopePolicy());
   },
 
-  async saveScope(event, id = null) {
-    event.preventDefault();
-    const assetIds = Array.from(document.querySelectorAll('.asset-checkbox input:checked')).map(input => input.value);
-    const payload = {
+  async parseScopeTargets() {
+    const input = document.getElementById('scope-target-paste')?.value || '';
+    const parsed = await this.fetchJSON('/api/scopes/parse-targets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input }) });
+    const chips = document.getElementById('scope-target-chips');
+    if (chips) chips.innerHTML = window.ScopeBuilder?.renderTargetChips(parsed.targets || []) || '';
+    const fields = parsed.scopeFields || {};
+    this.appendCsv('scope-hosts', fields.hosts);
+    this.appendCsv('scope-domains', fields.domains);
+    this.appendCsv('scope-cidrs', fields.cidrs);
+    this.appendCsv('scope-urls', fields.urls);
+  },
+
+  applyScopeTemplate(id) {
+    const template = this.scopeTemplates.find(item => item.id === id);
+    if (!template) return;
+    const draft = window.ScopeBuilder?.templateToDraft(template) || template;
+    const name = document.getElementById('scope-name');
+    if (name && !name.value) name.value = draft.nameSuffix;
+    document.getElementById('scope-allowed').value = (draft.allowedActions || []).join(', ');
+    document.getElementById('scope-blocked').value = (draft.blockedActions || []).join(', ');
+    const notes = document.getElementById('scope-notes');
+    if (notes && !notes.value) notes.value = draft.notes || '';
+    document.querySelectorAll('.scope-toolpack').forEach(input => { input.checked = (draft.toolpackIds || []).includes(input.value); });
+  },
+
+  async previewScopePolicy() {
+    const command = document.getElementById('scope-policy-command')?.value || '';
+    const preview = document.getElementById('scope-policy-preview');
+    const scope = this.scopePayloadFromForm();
+    const decision = await this.fetchJSON('/api/scopes/evaluate-draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ toolName: 'execute_command', args: { command }, scope }) });
+    if (preview) preview.innerHTML = window.ScopeBuilder?.renderPolicyPreview(decision) || this.escapeHtml(decision.reason);
+  },
+
+  appendCsv(id, values = []) {
+    const input = document.getElementById(id);
+    if (!input || !values?.length) return;
+    const current = new Set(this.csvValue(input.value));
+    values.forEach(value => current.add(value));
+    input.value = Array.from(current).join(', ');
+  },
+
+  scopePayloadFromForm() {
+    const assetIds = Array.from(document.querySelectorAll('.asset-checkbox input:checked')).filter(input => !input.classList.contains('scope-toolpack')).map(input => input.value);
+    const toolpackIds = Array.from(document.querySelectorAll('.scope-toolpack:checked')).map(input => input.value);
+    return {
       name: document.getElementById('scope-name').value,
       targets: {
         assetIds,
+        toolpackIds,
         hosts: this.csv('scope-hosts'),
         domains: this.csv('scope-domains'),
         cidrs: this.csv('scope-cidrs'),
@@ -431,6 +526,11 @@ window.ScopePage = {
       expiresAt: document.getElementById('scope-expires').value || null,
       notes: document.getElementById('scope-notes').value,
     };
+  },
+
+  async saveScope(event, id = null) {
+    event.preventDefault();
+    const payload = this.scopePayloadFromForm();
     const res = await fetch(id ? `/api/scopes/${encodeURIComponent(id)}` : '/api/scopes', { method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const saved = await res.json();

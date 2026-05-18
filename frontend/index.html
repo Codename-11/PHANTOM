@@ -161,6 +161,10 @@
             <select id="active-scope-select" aria-label="Active run scope"><option value="">No scope selected</option></select>
           </label>
           <span id="active-scope-warning" class="scope-warning">Risky tools require a selected scope.</span>
+          <span id="active-scope-summary" class="scope-summary">No active scope</span>
+          <label class="active-scope-control">Toolpacks
+            <select id="active-toolpack-select" aria-label="Active security toolpacks" multiple size="1"></select>
+          </label>
         </div>
       </div>
 
@@ -328,10 +332,14 @@
                 <pre id="system-prompt-preview" class="prompt-preview">Open Settings to load the current prompt.</pre>
               </section>
               <section class="settings-tab-panel" data-settings-panel="security">
-                <div class="placeholder-card">Scope/authorization controls are intentionally not implemented yet.</div>
+                <div id="settings-scope-policy" class="placeholder-card">Scope/authorization controls load from the governed scope builder.</div>
               </section>
               <section class="settings-tab-panel" data-settings-panel="tools">
-                <div class="placeholder-card">Use the existing Manage drawer for MCP servers and skills in this slice.</div>
+                <div class="prompt-preview-header">
+                  <div><h3>Security Toolpacks</h3><p>Curated tools, risk classes, install hints, and policy gates.</p></div>
+                  <button id="refresh-toolpacks-btn" class="btn btn-secondary btn-sm">Refresh</button>
+                </div>
+                <div id="toolpack-settings-list" class="toolpack-settings-list"></div>
               </section>
               <section class="settings-tab-panel" data-settings-panel="advanced">
                 <div class="placeholder-card">Advanced internals will be split into focused panels as needed.</div>
@@ -663,6 +671,7 @@
   <script src="js/graph/graph-presenter.js"></script>
   <script src="js/pages/graph-page.js"></script>
   <script src="js/pages/artifacts-page.js"></script>
+  <script src="js/scope/scope-builder.js"></script>
   <script src="js/pages/scope-page.js"></script>
   <script src="js/management.js"></script>
   <script src="js/app.js"></script>

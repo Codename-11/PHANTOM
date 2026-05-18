@@ -160,6 +160,32 @@ describe('API Routes Integration', () => {
     assert.strictEqual(decision.allowed, false);
     assert.match(decision.reason, /outside selected scope/i);
 
+    res = await fetch(`${baseUrl}/scopes/parse-targets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: 'https://api.example.com 192.168.1.50:443' }),
+    });
+    assert.strictEqual(res.status, 200);
+    const parsedTargets = await res.json();
+    assert.ok(parsedTargets.targets.some(target => target.value === 'https://api.example.com'));
+    assert.ok(parsedTargets.scopeFields.hosts.includes('192.168.1.50'));
+
+    res = await fetch(`${baseUrl}/scopes/templates`);
+    assert.strictEqual(res.status, 200);
+    const templates = await res.json();
+    assert.ok(templates.some(template => template.id === 'web-recon'));
+
+    res = await fetch(`${baseUrl}/toolpacks`);
+    assert.strictEqual(res.status, 200);
+    const toolpacks = await res.json();
+    assert.ok(toolpacks.some(pack => pack.id === 'passive-osint' && pack.tools.length > 0));
+
+    res = await fetch(`${baseUrl}/toolpacks/network-discovery/availability`);
+    assert.strictEqual(res.status, 200);
+    const availability = await res.json();
+    assert.strictEqual(availability.id, 'network-discovery');
+    assert.ok(Array.isArray(availability.tools));
+
     res = await fetch(`${baseUrl}/prompts/profiles`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -177,11 +203,13 @@ describe('API Routes Integration', () => {
     const fragment = await res.json();
     assert.strictEqual(fragment.body, 'API MODE FRAGMENT');
 
-    res = await fetch(`${baseUrl}/prompts/preview?profileId=${profile.id}&scopeId=${scope.id}`);
+    res = await fetch(`${baseUrl}/prompts/preview?profileId=${profile.id}&scopeId=${scope.id}&toolpackIds=passive-osint,reporting`);
     assert.strictEqual(res.status, 200);
     const preview = await res.json();
     assert.ok(preview.content.includes('API MODE FRAGMENT'));
     assert.ok(preview.content.includes('Scope: API scope'));
+    assert.ok(preview.content.includes('Passive OSINT'));
+    assert.deepStrictEqual(preview.toolpacks.map(pack => pack.id), ['passive-osint', 'reporting']);
     assert.ok(!JSON.stringify(preview).includes('vault:api-ref'));
 
     res = await fetch(`${baseUrl}/scopes/${scope.id}/archive`, { method: 'POST' });

@@ -278,6 +278,7 @@ Start the investigation immediately!`;
           conversationId: currentConversationId,
           scopeId: document.getElementById('active-scope-select')?.value || null,
           profileId: document.getElementById('prompt-profile-select')?.value || null,
+        toolpackIds: selectedToolpackIds(),
         }));
       } else {
         Chat.addErrorMessage('Not connected to server. Trying to reconnect...');
@@ -298,11 +299,16 @@ Start the investigation immediately!`;
         conversationId: currentConversationId,
         scopeId: document.getElementById('active-scope-select')?.value || null,
         profileId: document.getElementById('prompt-profile-select')?.value || null,
+        toolpackIds: selectedToolpackIds(),
       }));
     } else {
       Chat.addErrorMessage('Not connected to server. Trying to reconnect...');
       connectWebSocket();
     }
+  }
+
+  function selectedToolpackIds() {
+    return Array.from(document.getElementById('active-toolpack-select')?.selectedOptions || []).map(option => option.value).filter(Boolean);
   }
 
   // ─── Stop AI ───

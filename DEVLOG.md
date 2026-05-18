@@ -1,5 +1,26 @@
 # PHANTOM DEVLOG
 
+## 2026-05-17 20:31 EDT — Scope Builder and Security Toolpacks
+
+- Upgraded the Assets / Scope workspace into a guided governed Scope Builder with intent templates, smart pasted-target parsing, editable target chips, asset-backed and raw target fields, toolpack defaults, and dry-run policy preview using the same evaluator that gates real tool execution.
+- Added conservative target parsing for URLs, domains, IPs, CIDRs, and host:port values, including public/private labels and scope-field expansion for API/UI import flows.
+- Added curated built-in security toolpacks for Passive OSINT, Web Recon, Network Discovery, Web Vulnerability Assessment, Offline Password Audit, and Reporting. Each registry entry declares tools, availability checks, install hints, risk classes, scope requirements, output parser names, playbook prompt text, and policy gates.
+- Extended prompt resolution and run snapshots with selected toolpack prompt fragments and redacted toolpack metadata while preserving the existing base + profile/mode + scope/rules + policy/tool/custom ordering.
+- Added `/api/scopes/templates`, `/api/scopes/parse-targets`, `/api/scopes/evaluate-draft`, `/api/toolpacks`, `/api/toolpacks/:id`, and `/api/toolpacks/:id/availability` for guided scope creation and toolpack administration.
+- Surfaced active scope and selected toolpacks across Chat, Settings prompt preview, Toolpacks/Security settings, Runs detail, and Graph metadata so operators can see which governance context produced a run.
+- Preserved scope/risk enforcement before execution: expired, denied, out-of-scope, destructive, online brute-force, and credentialed classes remain blocked unless scope policy explicitly allows them, and blocked actions persist trace events without running commands.
+
+Validation passed:
+- `npm test` — 51/51 passing
+- `npm run build` — passing (legacy non-module script warnings remain)
+- `find server frontend/js -name '*.js' -print0 | xargs -0 -n1 node --check` — passing
+- `python3 tests/smoke_test.py` — 4/4 passing against Hermes routed proxy
+- `git diff --check` — passing
+
+Notes:
+- Toolpack availability checks only report installed commands and install hints; they do not install or execute tools.
+- Secrets remain redacted in config/prompt/scope snapshots and UI metadata.
+
 ## 2026-05-17 17:28 EDT — Graph Replay and Readability Pass
 
 - Added replay presentation steps to `/api/runs/:id/replay`: ordered trace steps now include readable titles, primary graph node IDs, related node/edge IDs, output previews, policy explanations, risk metadata, and linked artifacts without exposing secrets.

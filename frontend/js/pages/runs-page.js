@@ -76,6 +76,7 @@ window.RunsPage = {
           <div><span>Route</span><strong>${this.escapeHtml(run.provider_route || '—')}</strong></div>
           <div><span>Scope</span><strong>${this.escapeHtml(run.scope?.name || 'No scope')}</strong></div>
           <div><span>Prompt profile</span><strong>${this.escapeHtml(run.prompt_snapshot?.profile?.name || 'Default')}</strong></div>
+          <div><span>Toolpacks</span><strong>${this.escapeHtml((run.prompt_snapshot?.toolpacks || []).map(pack => pack.name).join(', ') || 'None')}</strong></div>
           <div><span>Started</span><strong>${this.escapeHtml(run.started_at || '—')}</strong></div>
           <div><span>Ended</span><strong>${this.escapeHtml(run.ended_at || '—')}</strong></div>
         </div>

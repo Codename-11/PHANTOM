@@ -239,6 +239,7 @@ export function deriveRunGraph({ run, events = [], artifacts = [] }) {
       scopeId: run.scope_id || run.scope?.id || null,
       scopeName: run.scope?.name || null,
       promptProfile: run.prompt_snapshot?.profile?.name || null,
+      toolpacks: (run.prompt_snapshot?.toolpacks || []).map(pack => pack.name).join(', ') || null,
       riskLevel: run.risk_level,
     },
   });

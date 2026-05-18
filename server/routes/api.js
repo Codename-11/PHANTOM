@@ -17,12 +17,15 @@ import { deriveRunGraph } from '../graph/graph-derive.js';
 import { buildSystemPrompt } from '../ai/system-prompt.js';
 import { createScope, getScope, getScopes, updateScope, archiveScope } from '../scope/scope-store.js';
 import { evaluateToolAction } from '../scope/policy.js';
+import { parseTargetInput, targetsToScopeFields } from '../scope/target-parser.js';
+import { getScopeTemplates } from '../scope/templates.js';
 import {
   createPromptProfile, getPromptProfiles, getPromptProfile, updatePromptProfile,
   createPromptFragment, getPromptFragments, getPromptFragment, updatePromptFragment,
   resolvePrompt,
 } from '../prompts/prompt-store.js';
 import { getToolDefinitions } from '../tools/registry.js';
+import { getToolpacks, getToolpack, checkToolpackAvailability } from '../toolpacks/toolpack-registry.js';
 import { buildRunReplay } from '../runs/replay.js';
 import {
   createAsset, getAsset, getAssets, updateAsset, archiveAsset,
@@ -84,12 +87,14 @@ router.post('/settings/test', async (req, res) => {
 // ─── Prompt Preview + Profiles ───
 router.get('/prompts/preview', (req, res) => {
   const basePrompt = buildSystemPrompt({ raw: true });
-  const resolved = resolvePrompt({ basePrompt, profileId: req.query.profileId || null, scopeId: req.query.scopeId || null });
+  const toolpackIds = req.query.toolpackIds ? String(req.query.toolpackIds).split(',') : [];
+  const resolved = resolvePrompt({ basePrompt, profileId: req.query.profileId || null, scopeId: req.query.scopeId || null, toolpackIds });
   res.json({
     id: resolved.profile?.id || 'system-default',
     mode: resolved.profile?.mode || 'default',
     profile: resolved.profile,
     scope: resolved.scope ? { id: resolved.scope.id, name: resolved.scope.name, expires_at: resolved.scope.expires_at } : null,
+    toolpacks: resolved.toolpacks.map(pack => ({ id: pack.id, name: pack.name, summary: pack.summary, risks: pack.risks })),
     fragmentIds: resolved.snapshot.fragmentIds,
     content: resolved.content,
     length: resolved.content.length,
@@ -126,6 +131,24 @@ router.put('/prompts/fragments/:id', (req, res) => {
 // ─── Scopes ───
 router.get('/scopes', (req, res) => {
   res.json(getScopes({ includeArchived: req.query.includeArchived === 'true' }));
+});
+router.get('/scopes/templates', (req, res) => {
+  res.json(getScopeTemplates());
+});
+router.post('/scopes/parse-targets', (req, res) => {
+  const parsed = parseTargetInput(req.body?.input || '');
+  res.json({ ...parsed, scopeFields: targetsToScopeFields(parsed.targets) });
+});
+router.post('/scopes/evaluate-draft', (req, res) => {
+  const scope = {
+    id: 'draft',
+    name: req.body?.scope?.name || 'Draft scope',
+    targets: req.body?.scope?.targets || {},
+    allowed_actions: req.body?.scope?.allowedActions || req.body?.scope?.allowed_actions || [],
+    blocked_actions: req.body?.scope?.blockedActions || req.body?.scope?.blocked_actions || [],
+    expires_at: req.body?.scope?.expiresAt || req.body?.scope?.expires_at || null,
+  };
+  res.json(evaluateToolAction({ toolName: req.body?.toolName || 'execute_command', args: req.body?.args || {}, scope }));
 });
 router.post('/scopes', (req, res) => {
   try { res.json(createScope(req.body || {})); }
@@ -425,6 +448,20 @@ router.get('/tools', (req, res) => {
     name: t.function.name,
     description: t.function.description,
   })));
+});
+
+router.get('/toolpacks', (req, res) => {
+  res.json(getToolpacks());
+});
+router.get('/toolpacks/:id', (req, res) => {
+  const pack = getToolpack(req.params.id);
+  if (!pack) return res.status(404).json({ error: 'Toolpack not found' });
+  res.json(pack);
+});
+router.get('/toolpacks/:id/availability', (req, res) => {
+  const pack = checkToolpackAvailability(req.params.id);
+  if (!pack) return res.status(404).json({ error: 'Toolpack not found' });
+  res.json(pack);
 });
 
 // ─── Memory ───

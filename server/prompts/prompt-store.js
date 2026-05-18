@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getDB } from '../memory/store.js';
 import { getScope } from '../scope/scope-store.js';
+import { buildToolpackPrompt, getToolpack, normalizeToolpackIds } from '../toolpacks/toolpack-registry.js';
 
 const ORDER = { base: 10, mode: 20, scope: 30, policy: 40, tools: 50, custom: 60 };
 
@@ -142,27 +143,45 @@ function fragmentRank(fragment) {
   return (ORDER[fragment.kind] || 90) * 100000 + (fragment.position || 100);
 }
 
-export function resolvePrompt({ basePrompt, profileId = null, scopeId = null } = {}) {
+export function resolvePrompt({ basePrompt, profileId = null, scopeId = null, toolpackIds = [] } = {}) {
   const profile = profileId ? getPromptProfile(profileId) : getDefaultPromptProfile();
   const scope = scopeId ? getScope(scopeId) : null;
+  const selectedToolpackIds = normalizeToolpackIds(toolpackIds);
+  const toolpacks = selectedToolpackIds.map(getToolpack).filter(Boolean);
+  const toolpackPrompt = buildToolpackPrompt(selectedToolpackIds);
   const fragments = getPromptFragments({ profileId: profile?.id ?? undefined, enabled: true })
     .filter(fragment => !fragment.profile_id || fragment.profile_id === profile?.id)
     .sort((a, b) => fragmentRank(a) - fragmentRank(b));
   const sections = [basePrompt || ''];
+  let scopeInserted = false;
+  let toolpacksInserted = false;
+  const insertToolpacks = () => {
+    if (toolpackPrompt && !toolpacksInserted) {
+      sections.push(toolpackPrompt);
+      toolpacksInserted = true;
+    }
+  };
   for (const fragment of fragments) {
     if (fragment.kind === 'scope') continue;
+    if (fragment.kind === 'custom') insertToolpacks();
     if (fragment.body) sections.push(`## ${fragment.name}\n${fragment.body}`);
-    if (fragment.kind === 'mode' && scope) sections.push(scopePrompt(scope));
+    if (fragment.kind === 'mode' && scope) {
+      sections.push(scopePrompt(scope));
+      scopeInserted = true;
+    }
+    if (fragment.kind === 'tools') insertToolpacks();
   }
-  if (scope && !sections.some(section => section.includes('## SELECTED SCOPE'))) sections.push(scopePrompt(scope));
+  if (scope && !scopeInserted && !sections.some(section => section.includes('## SELECTED SCOPE'))) sections.push(scopePrompt(scope));
+  insertToolpacks();
   const content = sections.filter(Boolean).join('\n\n');
   const snapshot = {
     resolvedPrompt: content,
     profile: profile ? { id: profile.id, name: profile.name, mode: profile.mode, updated_at: profile.updated_at } : null,
     scope: scope ? { id: scope.id, name: scope.name, expires_at: scope.expires_at, targets: scope.targets, notes: scope.notes } : null,
+    toolpacks: toolpacks.map(pack => ({ id: pack.id, name: pack.name, risks: pack.risks, allowedActions: pack.allowedActions, blockedByDefault: pack.blockedByDefault })),
     fragmentIds: fragments.map(fragment => fragment.id),
     fragments: fragments.map(fragment => ({ id: fragment.id, name: fragment.name, kind: fragment.kind, updated_at: fragment.updated_at })),
     capturedAt: new Date().toISOString(),
   };
-  return { content, profile, scope, fragments, snapshot };
+  return { content, profile, scope, toolpacks, fragments, snapshot };
 }

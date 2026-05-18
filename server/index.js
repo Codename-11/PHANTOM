@@ -125,10 +125,12 @@ wss.on('connection', (ws) => {
 
           const selectedScope = msg.scopeId ? getScope(msg.scopeId) : null;
           const selectedProfileId = msg.profileId || null;
+          const selectedToolpackIds = Array.isArray(msg.toolpackIds) ? msg.toolpackIds : (msg.toolpackIds ? String(msg.toolpackIds).split(',') : []);
           const resolvedPrompt = resolvePrompt({
             basePrompt: buildSystemPrompt({ raw: true }),
             profileId: selectedProfileId,
             scopeId: selectedScope?.id || null,
+            toolpackIds: selectedToolpackIds,
           });
 
           const run = createRun({
@@ -160,7 +162,7 @@ wss.on('connection', (ws) => {
               phase: 'chat',
               status: 'started',
               outputPreview: preview(msg.content),
-              metadata: { conversationId, model: config.api.model, providerRoute: providerRoute(), scopeId: selectedScope?.id || null, profileId: selectedProfileId },
+              metadata: { conversationId, model: config.api.model, providerRoute: providerRoute(), scopeId: selectedScope?.id || null, profileId: selectedProfileId, toolpackIds: selectedToolpackIds },
             }
           );
 
