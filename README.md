@@ -2,90 +2,95 @@
 
 # 👻 PHANTOM
 
-### AI-Powered Pentesting Command Center
+### Governed AI Security-Ops Cockpit
 
 [![Node.js](https://img.shields.io/badge/Node.js-18+-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://www.linux.org/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen?style=for-the-badge)](https://github.com/pulls)
+[![Stack](https://img.shields.io/badge/Stack-Vanilla%20JS%20%2B%20Express%20%2B%20SQLite-26B3FC?style=for-the-badge)](#-architecture)
 
-**An autonomous AI assistant for penetration testing, security research, and general-purpose tasks.**  
-Real-time tool execution • Unlimited autonomous operations • Self-improving AI • Beautiful dark UI
+**A local-first command center for authorized security research with scoped autonomous runs, policy-gated tools, durable traces, artifacts, and graph replay.**
+
+Trace-first runs • Governed scopes • Prompt profiles • Security toolpacks • Durable evidence • Dark operational UI
 
 <img src="https://img.shields.io/badge/Status-Active-22c55e?style=flat-square" />
-<img src="https://img.shields.io/badge/Security-Offensive-ef4444?style=flat-square" />
-<img src="https://img.shields.io/badge/AI-Autonomous-6366f1?style=flat-square" />
+<img src="https://img.shields.io/badge/Security-Authorized%20Testing-ef4444?style=flat-square" />
+<img src="https://img.shields.io/badge/Governance-Policy%20Gated-6366f1?style=flat-square" />
 
 ---
 
 </div>
 
+## What PHANTOM Is
+
+PHANTOM started as an AI-powered pentesting command center. It is now evolving into a **governed security-operations cockpit**: every autonomous operation becomes a durable run with trace events, scope context, prompt/config snapshots, optional artifacts, and graph replay.
+
+The guiding idea is simple: powerful tools are useful only when operators can answer:
+
+- What was the agent authorized to touch?
+- Which prompt/profile/toolpack drove the behavior?
+- Which tool calls actually ran, which were blocked, and why?
+- What evidence/artifacts were produced?
+- Can the run be reopened, replayed, and audited after refresh or restart?
+
+PHANTOM is intended for **authorized security testing, lab work, research, and defensive validation**. It is not a license to test systems you do not own or have permission to assess.
+
 ## ✨ Features
 
-| Feature | Description |
-|---------|-------------|
-| 🤖 **Any LLM Backend** | OpenAI, OpenRouter, Ollama, LM Studio, DeepSeek, Claude — any OpenAI-compatible API |
-| ⚡ **Real-Time Streaming** | Live tool execution output, typing animations, and AI thinking display |
-| 🔓 **Unlimited Operations** | No tool call limits — PHANTOM runs autonomously until the task is done |
-| 🧠 **Self-Improving** | Creates its own tools, saves execution traces, learns from past runs |
-| 🔑 **Secure Sudo** | One-time sudo password with system validation — persisted securely |
-| 📁 **Workspace System** | Configurable workspace directory for scripts, reports, and file operations |
-| 🧩 **MCP Integration** | Model Context Protocol server management for extended capabilities |
-| 📦 **Skills System** | Import, manage, and create reusable skill packages (.zip import supported) |
-| 🌐 **Web Research** | Built-in web search and webpage scraping for real-time information |
-| 🕷️ **Scrapling Integration** | Anti-bot bypass, Cloudflare solving, JS rendering via [Scrapling](https://github.com/D4Vinci/Scrapling) |
-| 💾 **Persistent Memory** | Remembers targets, credentials, findings across sessions |
-| 🛑 **Emergency Stop** | Instant abort button to halt any running operation |
-| 🎨 **Premium Dark UI** | Glassmorphism, matrix background, smooth animations |
+| Area | Capability |
+|---|---|
+| 🤖 **OpenAI-Compatible LLMs** | Works with OpenAI-compatible APIs including OpenAI, OpenRouter, Ollama, LM Studio, DeepSeek, Claude-compatible proxies, and local routed providers. |
+| 🧭 **Governed Runs** | Each user operation creates a run with status, model, scope, prompt/profile metadata, timing, summary, and replayable trace history. |
+| 🛡️ **Scopes & Policy Gates** | SQLite-backed scopes define targets, action classes, rules of engagement, expiry, and blocked actions. Risky tool calls are evaluated before execution. |
+| 🚫 **Blocked Action Traces** | Expired, denied, unknown-risk, or out-of-scope actions do not execute and are persisted as trace events for auditability. |
+| 🧩 **Prompt Profiles & Fragments** | Prompts resolve from base + profile/mode + scope/rules + policy/tool fragments + custom fragments, with redacted snapshots per run. |
+| 🧰 **Security Toolpacks** | Curated packs for Passive OSINT, Web Recon, Network Discovery, Web Vulnerability Assessment, Offline Password Audit, and Reporting. |
+| 📈 **Runs Timeline** | Historical run list/detail views backed by persisted trace events, artifacts, scope/profile metadata, and policy decisions. |
+| 🕸️ **Graph Replay** | Trace-derived operational graph with pan/zoom, live follow, blocked-path styling, replay controls, readable labels, and output/artifact context. |
+| 📦 **Artifacts & Evidence** | Durable workspace-backed previews, reports, summaries, graph snapshots, trace exports, and evidence bundles. |
+| 🗂️ **Assets & Scope Builder** | Saved assets, smart target parsing, asset-backed scopes, raw target chips, intent templates, and dry-run policy previews. |
+| 🧠 **Memory, MCP & Skills** | Persistent local memory plus MCP server and skill-package management for extended capabilities. |
+| ⚙️ **Settings/Admin UI** | Dedicated settings tabs for General, Models, Behavior, Prompts, Security/Scope, Tools/MCP/Skills, and Advanced diagnostics. |
+| 🎨 **Dark Operational UI** | Vanilla JS frontend with glassmorphism, matrix-inspired background, responsive admin surfaces, and live WebSocket updates. |
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- **Node.js** 18+ ([install](https://nodejs.org))
-- **Python** 3.10+ (for Scrapling integration)
-- **npm** (comes with Node.js)
-- Any **OpenAI-compatible API** key
+- **Node.js** 18+
+- **npm**
+- **Python** 3.10+ for optional smoke tests and some scraping workflows
+- An **OpenAI-compatible API endpoint** and key/token, or a local model endpoint
 
 ### Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/OmYarewar/PHANTOM.git
+# Clone the maintained fork, or replace with your preferred remote
+git clone https://github.com/Codename-11/PHANTOM.git
 cd PHANTOM
 
 # Install dependencies
 npm install
 
-# Configure your API
+# Configure your model provider
 cp .env.example .env
-nano .env  # Add your API key and model
+nano .env
 ```
 
 ### Configuration
 
-Edit `.env` with your API provider:
+Edit `.env` with your provider. Never commit `.env`, API keys, local databases, traces, or workspace output.
 
 ```env
-# OpenAI
+# OpenAI-compatible endpoint
 API_BASE_URL=https://api.openai.com/v1
-API_KEY=sk-your-key-here
+API_KEY=[REDACTED]
 MODEL_ID=gpt-4o
 
-# OpenRouter (access to 100+ models)
-API_BASE_URL=https://openrouter.ai/api/v1
-API_KEY=sk-or-your-key-here
-MODEL_ID=deepseek/deepseek-chat
-
-# Ollama (local, free)
-API_BASE_URL=http://localhost:11434/v1
-API_KEY=ollama
-MODEL_ID=llama3
-
-# LM Studio (local)
-API_BASE_URL=http://localhost:1234/v1
-API_KEY=lm-studio
-MODEL_ID=your-model-name
+# Local Ollama-compatible example
+# API_BASE_URL=http://localhost:11434/v1
+# API_KEY=[REDACTED]
+# MODEL_ID=llama3
 ```
 
 ### Run
@@ -94,141 +99,207 @@ MODEL_ID=your-model-name
 npm run dev
 ```
 
-Open **http://localhost:5173** in your browser. That's it! 🎉
+Open <http://localhost:5173>.
+
+For a production-style local server without the Vite dev process:
+
+```bash
+npm run build
+npm start
+```
 
 ## 🏗️ Architecture
 
-```
+```text
 PHANTOM/
-├── server/                 # Backend (Express + WebSocket)
-│   ├── ai/
-│   │   ├── llm-client.js   # LLM communication & streaming
-│   │   └── system-prompt.js # Dynamic system prompt builder
-│   ├── tools/
-│   │   ├── executor.js      # Tool execution engine (14 tools)
-│   │   └── registry.js      # Tool definitions for function calling
-│   ├── memory/
-│   │   └── store.js         # SQLite persistence layer
-│   ├── routes/
-│   │   └── api.js           # REST API endpoints
-│   ├── config.js            # Configuration management
-│   └── index.js             # Server entry point
-├── frontend/               # Frontend (Vanilla JS + Vite)
-│   ├── css/styles.css       # Dark theme design system
+├── server/                         # Express API + WebSocket backend
+│   ├── ai/                         # LLM client and layered prompt resolver
+│   ├── artifacts/                  # Workspace-backed artifact storage
+│   ├── assets/                     # Asset registry, findings, snapshots, comparisons
+│   ├── graph/                      # Trace-derived graph/replay helpers
+│   ├── memory/                     # SQLite persistence layer
+│   ├── policy/                     # Scope-aware action classification/evaluation
+│   ├── prompt/                     # Prompt profiles, fragments, redaction/snapshots
+│   ├── routes/                     # REST API endpoints
+│   ├── scope/                      # Scope CRUD, templates, target parsing
+│   ├── toolpacks/                  # Governed security toolpack registry
+│   └── tools/                      # Tool registry and policy-gated executor
+├── frontend/                       # Vanilla JS + Vite UI
+│   ├── css/                        # Dark design system
 │   ├── js/
-│   │   ├── app.js           # Main controller & WebSocket
-│   │   ├── chat.js          # Chat rendering & animations
-│   │   ├── settings.js      # Settings panel
-│   │   ├── management.js    # MCP & Skills management
-│   │   └── markdown.js      # Markdown renderer
-│   └── index.html           # Main page
-├── workspace/              # AI workspace (scripts, reports, skills)
-├── .env.example            # Configuration template
-├── vite.config.js          # Vite dev server config
+│   │   ├── graph/                  # Graph layout/replay presenters
+│   │   ├── pages/                  # Chat, Runs, Graph, Artifacts, Scope, Settings
+│   │   └── scope/                  # Scope Builder target parsing/chips UI
+│   └── index.html
+├── workspace/                      # Local run traces and generated artifacts
+│   └── runs/<run-id>/
+│       ├── trace.jsonl
+│       └── artifacts/
+├── ai_sync/                        # Lightweight repo-local implementation notes
+├── tests/                          # Python smoke tests
+├── phantom.db                      # Local SQLite database; ignored by git
 └── package.json
 ```
 
-## 🛠️ Available Tools
+Core runtime flow:
 
-PHANTOM has **15 built-in tools** that the AI uses autonomously:
+```text
+User request
+  -> create Run
+  -> resolve prompt/config/scope/toolpack snapshot with redaction
+  -> model/tool loop
+  -> classify risky tool action
+  -> scope/policy gate before execution
+  -> persist trace event before UI broadcast
+  -> derive timeline, graph, artifacts, and replay bundle from persisted data
+```
+
+## 🛡️ Governed Runs & Scope Policy
+
+Scopes are first-class authorization boundaries stored in SQLite. A scope can define:
+
+- Raw targets: URLs, domains, hosts, IPs, CIDRs, and host:port values
+- Asset-backed targets from the saved asset registry
+- Allowed action classes such as `read/local`, `recon`, `network-scan`, `exploit`, `destructive`, and `credentialed`
+- Explicit blocked action classes
+- Rules of engagement notes
+- Expiration time
+- Redacted credential references
+
+Before risky tool execution, PHANTOM extracts target hints such as URL, IP, domain, host, and port, classifies the action risk, and evaluates it against the selected scope. Blocked actions are returned to the run as policy results and persisted as blocked trace events; they do **not** execute.
+
+## 🧩 Prompt Profiles & Resolution
+
+Prompts are no longer just one raw mutable system prompt. PHANTOM resolves prompts from layered fragments:
+
+```text
+base
+  + profile / mode
+  + selected scope and rules of engagement
+  + policy and toolpack fragments
+  + custom fragments
+```
+
+Each run stores a redacted prompt/config/scope/toolpack snapshot so operators can inspect what context governed the run later without exposing secrets.
+
+## 🧰 Security Toolpacks
+
+Built-in governed toolpacks provide curated metadata and prompt fragments for common security workflows:
+
+- Passive OSINT
+- Web Recon
+- Network Discovery
+- Web Vulnerability Assessment
+- Offline Password Audit
+- Reporting
+
+Toolpacks include availability checks, install hints, input metadata, policy metadata, risk class, scope requirements, output parser names, blocked-by-default classes, and playbook prompt fragments.
+
+## 🖥️ Web UI Surfaces
+
+| Page | Purpose |
+|---|---|
+| **Chat** | Main operator control plane with active scope/toolpack selectors and live tool output. |
+| **Runs** | Historical run list/detail, timeline, artifacts, scope/profile metadata, blocked decisions, and replay bundle data. |
+| **Graph** | Trace-derived operational graph with pan/zoom, live follow, replay controls, node detail, policy markers, and artifact links. |
+| **Artifacts** | Durable previews, reports, summaries, traces, graph snapshots, and evidence bundles. |
+| **Targets / Scope** | Asset registry, saved findings/baselines, Scope Builder, smart target chips, policy dry-runs, and comparisons. |
+| **Settings** | General, Models, Behavior, Prompts, Security/Scope, Tools/MCP/Skills, and Advanced diagnostics. |
+
+## 🛠️ Built-In Tools
+
+The AI can call local tools for shell execution, file operations, web requests/search/scraping, Python execution, preview/artifact creation, memory, trace saving, source editing, MCP integrations, and skills. Tool execution is routed through the executor so governed policy checks can block risky actions before the underlying command or request runs.
+
+Representative tools include:
 
 | Tool | Purpose |
-|------|---------|
-| `execute_command` | Run shell commands with auto sudo injection |
-| `read_file` | Read file contents |
-| `write_file` | Write/create files |
-| `list_directory` | List directory contents |
-| `install_tool` | Auto-install packages (apt/pacman/pip/npm/go/cargo) |
-| `web_request` | HTTP requests for recon & API testing |
-| `search_web` | Web search via DuckDuckGo |
-| `scrape_webpage` | Fetch & parse webpage content |
-| `scrapling_fetch` | ⭐ Advanced scraping — anti-bot bypass, Cloudflare, JS rendering ([Scrapling](https://github.com/D4Vinci/Scrapling)) |
-| `python_execute` | Execute Python code directly |
-| `save_memory` | Store findings to persistent memory |
-| `recall_memory` | Search persistent memory |
-| `edit_source_code` | Self-modify PHANTOM's own code |
-| `save_trace` | Log execution traces for self-optimization |
+|---|---|
+| `execute_command` | Run local shell commands through the policy-gated executor. |
+| `read_file` / `write_file` / `list_directory` | Workspace and file operations. |
+| `web_request` / `search_web` / `scrape_webpage` / `scrapling_fetch` | Web research and recon workflows. |
+| `python_execute` | Execute Python snippets for analysis or automation. |
+| `show_preview_window` | Generate durable preview artifacts and live UI previews. |
+| `save_memory` / `recall_memory` | Local memory operations. |
+| `save_trace` | Persist explicit trace details. |
+| `edit_source_code` | Modify PHANTOM source files inside the project boundary. |
+
+## 📋 API Overview
+
+| Endpoint | Method | Description |
+|---|---:|---|
+| `/api/settings` | GET/PUT | Configuration management. |
+| `/api/prompts/preview` | GET | Resolve and preview layered prompts. |
+| `/api/prompts/profiles` | GET/POST/PUT | Prompt profile CRUD. |
+| `/api/prompts/fragments` | GET/POST/PUT | Prompt fragment CRUD. |
+| `/api/scopes` | GET/POST/PUT/DELETE | Scope CRUD and archival. |
+| `/api/scopes/templates` | GET | Scope Builder templates. |
+| `/api/scopes/parse-targets` | POST | Parse pasted targets into URL/domain/IP/CIDR/host:port chips. |
+| `/api/scopes/evaluate-draft` | POST | Dry-run scope policy evaluation before saving. |
+| `/api/toolpacks` | GET | List governed security toolpacks. |
+| `/api/toolpacks/:id/availability` | GET | Check toolpack dependencies/install hints. |
+| `/api/runs` | GET | Run list. |
+| `/api/runs/:id` | GET | Run detail with redacted snapshot metadata. |
+| `/api/runs/:id/events` | GET | Ordered trace events. |
+| `/api/runs/:id/replay` | GET | Replay bundle with run, events, artifacts, graph, and operator steps. |
+| `/api/runs/:id/graph` | GET | Trace-derived graph state. |
+| `/api/artifacts` | GET | Artifact list and filters. |
+| `/api/assets` | GET/POST/PUT/DELETE | Saved asset registry. |
+| `/api/findings` | GET/POST/PUT | Findings/results linked to assets and runs. |
+| `/api/mcp/servers` | GET/POST/DELETE | MCP server management. |
+| `/api/skills` | GET/POST/DELETE | Skill package management. |
+| `/ws` | WebSocket | Real-time chat, tool output, run, trace, and artifact events. |
+
+## 🧪 Development & Verification
+
+PHANTOM uses Node's built-in test runner and keeps the frontend framework-free.
+
+```bash
+# Unit tests
+npm test
+
+# Frontend build
+npm run build
+
+# Syntax checks
+find server frontend/js -name '*.js' -print0 | xargs -0 -n1 node --check
+
+# Smoke test against the local server/model route
+python3 tests/smoke_test.py
+
+# Whitespace check before commit
+git diff --check
+```
 
 ## 🔒 Security Notes
 
-- **Sudo passwords** are stored in a local SQLite database on your machine only
-- **API keys** are stored locally and never transmitted except to your configured API endpoint
-- The `.env` file and `phantom.db` are excluded from git
-- PHANTOM runs **locally only** — no external telemetry or data collection
-- The `edit_source_code` tool only works within the project directory and creates backups
-
-## 🎨 Screenshots
-
-<details>
-<summary>Click to expand</summary>
-
-### Main Interface
-The dark-themed command center with matrix background, real-time streaming, and AI thinking display.
-
-### Settings Panel
-Configure API provider, model, temperature, workspace, and sudo access.
-
-### Management Panel
-Manage MCP servers and skills with tabbed interface and .zip import.
-
-</details>
-
-## ⚙️ Settings (via Web UI)
-
-All settings can be configured from the web UI and **persist across restarts**:
-
-- **API Configuration** — Base URL, API key, model, temperature, max tokens
-- **Workspace** — Default directory for all AI file operations
-- **Sudo Password** — System-validated and securely stored
-- **MCP Servers** — Add/remove Model Context Protocol servers
-- **Skills** — Import .zip skill packages or let AI create them
-
-## 🧠 How It Works
-
-1. **You ask** — Type a request in the chat
-2. **AI thinks** — Reasoning displayed in real-time (for supported models)
-3. **AI acts** — Executes tools autonomously with live output streaming
-4. **AI reports** — Clean, formatted results with typing animation
-5. **AI learns** — Saves traces and memories for future optimization
-
-PHANTOM implements ideas from [Meta-Harness](https://arxiv.org/abs/2603.28052) for automated harness optimization — the AI can review its own execution traces and improve its approach over time.
-
-## 📋 API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/settings` | GET/PUT | Configuration management |
-| `/api/conversations` | GET/POST | Conversation CRUD |
-| `/api/conversations/:id` | GET/DELETE | Single conversation |
-| `/api/tools` | GET | List available tools |
-| `/api/memory` | GET | Query persistent memory |
-| `/api/mcp/servers` | GET/POST/DELETE | MCP server management |
-| `/api/skills` | GET | List installed skills |
-| `/api/skills/upload` | POST | Import skill (.zip) |
-| `/api/sudo/validate` | POST | Validate sudo password |
-| `/api/system/info` | GET | System information |
-| `/ws` | WebSocket | Real-time chat & streaming |
+- Use PHANTOM only for systems you own or are explicitly authorized to test.
+- `.env`, local databases, generated traces, and workspace artifacts are excluded from git.
+- API keys and provider tokens should remain local and should never be pasted into prompts, docs, traces, or screenshots.
+- Prompt/config/scope snapshots are redacted before display/storage where sensitive values may appear.
+- Credential references should be labels/pointers, not raw secrets.
+- Scope policy gates reduce risk but do not replace human judgment, authorization, or environment isolation.
+- Run PHANTOM in a lab or controlled workstation context when using offensive security tools.
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/awesome`)
-3. Commit your changes (`git commit -m 'Add awesome feature'`)
-4. Push to the branch (`git push origin feature/awesome`)
-5. Open a Pull Request
+1. Fork the repository.
+2. Create a feature branch: `git checkout -b feature/governed-workflow`.
+3. Keep changes focused and covered by `node --test` where possible.
+4. Run the verification commands above.
+5. Open a pull request with screenshots or replay/artifact examples for UI changes.
 
 ## 📄 License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License — see [LICENSE](LICENSE).
 
 ## ⚠️ Disclaimer
 
-PHANTOM is designed for **authorized security testing only**. Always obtain proper authorization before testing any systems. The developers are not responsible for misuse of this tool.
+PHANTOM is designed for **authorized security testing only**. Always obtain proper authorization before testing any system. The authors and contributors are not responsible for misuse.
 
 ---
 
 <div align="center">
 
-**Built with 🖤 for the security community**
+**Built for transparent, governed security automation.**
 
 </div>

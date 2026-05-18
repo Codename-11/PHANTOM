@@ -1,5 +1,22 @@
 # PHANTOM DEVLOG
 
+## 2026-05-17 21:25 EDT — Governed Operations Documentation Refresh
+
+- Rewrote `README.md` around the current local-first governed security-ops cockpit: scoped autonomous runs, policy gates, prompt profiles, toolpacks, trace replay, graph, artifacts, Assets / Scope, and populated Settings/Admin surfaces.
+- Refreshed `ai_sync/security.md`, `ai_sync/ui.md`, and `ai_sync/performance.md` so repo-local notes no longer describe governed scopes/prompts as future-only work.
+- Updated Obsidian PHANTOM refs (`SPEC.md`, `Structural Enhancement Plan.md`, `DECISIONS.md`, and index sync timestamp) with Scope Builder, security toolpacks, settings population, and resolved decision context.
+- Updated the public fork metadata for `Codename-11/PHANTOM` with the governed-operations description and current topics.
+
+Validation passed:
+- Grep check found no stale unsafe README/ai_sync phrasing such as `Unlimited Operations`, `No tool call limits`, or sample `sk-` API keys.
+- Grep check confirmed governed terms are present across README, ai_sync notes, and Obsidian PHANTOM refs.
+- GitHub metadata readback confirmed the new description and topics.
+- `npm test` — 53/53 passing.
+- `npm run build` — passing with existing Vite non-module warnings.
+- `find server frontend/js -name '*.js' -print0 | xargs -0 -n1 node --check` — passing.
+- `python3 tests/smoke_test.py` — 4/4 passing.
+- `git diff --check` — passing.
+
 ## 2026-05-17 21:13 EDT — Settings Admin Panel Population Fix
 
 - Fixed the empty-looking Settings tabs after the governed toolpack phase by adding explicit presenter-rendered content for General, Agent Behavior, Security / Scope, Tools / MCP / Skills, and Advanced.
