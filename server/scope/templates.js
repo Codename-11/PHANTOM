@@ -38,11 +38,20 @@ export const SCOPE_TEMPLATES = [
   {
     id: 'offline-password-audit',
     name: 'Offline Password Audit',
-    summary: 'Hash identification and offline cracking against provided hashes only.',
-    allowedActions: ['credentialed'],
+    summary: 'Hash identification and offline cracking against provided local hashes only.',
+    allowedActions: ['offline-password-audit', 'read/local'],
     blockedActions: ['online-bruteforce', 'credential-stuffing', 'spraying', 'destructive'],
     toolpackIds: ['offline-password-audit', 'reporting'],
-    notes: 'Offline hash audit only. Never perform online brute force, spraying, or credential stuffing.',
+    notes: 'Offline hash audit only. Wordlists are local inputs, not remote targets. Never perform online brute force, spraying, or credential stuffing.',
+  },
+  {
+    id: 'credentialed-service-audit',
+    name: 'Credentialed Service Audit',
+    summary: 'Authorized low-rate online authentication testing against explicitly scoped services.',
+    allowedActions: ['online-bruteforce'],
+    blockedActions: ['credential-stuffing', 'spraying', 'destructive'],
+    toolpackIds: ['credentialed-service-audit', 'reporting'],
+    notes: 'Authorized service auth testing only. Keep rates low, use explicit target scope, and stop on lockout/risk signals.',
   },
   {
     id: 'reporting',

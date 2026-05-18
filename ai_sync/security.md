@@ -5,12 +5,13 @@
 - Local SQLite storage for settings, conversations, runs, trace events, artifacts, scopes, prompt profiles/fragments, assets, findings, snapshots, rerun templates, and comparisons.
 - Policy-gated tool execution for governed runs:
   - Extracts target hints such as URL, IP, domain, host, CIDR, and host:port from tool arguments.
-  - Classifies risky actions into policy classes such as `read/local`, `recon`, `network-scan`, `exploit`, `destructive`, `credentialed`, and `unknown`.
+  - Classifies risky actions into policy classes such as `read/local`, `recon`, `network-scan`, `exploit`, `destructive`, `credentialed`, `offline-password-audit`, `online-bruteforce`, and `unknown`.
+  - Separates `offline-password-audit` from `online-bruteforce` so local John/Hashcat/hash workflows can use wordlists without authorizing live login attempts.
   - Blocks expired scopes, explicit denials, missing allowlist permissions, unknown risky actions, and out-of-scope targets before execution.
   - Persists blocked actions as `tool.call.blocked` trace events so audits can prove the command/request did not run.
 - Scope CRUD and archive support for authorization boundaries, rules of engagement, expiry, allowed/blocked action classes, target lists, and redacted credential references.
 - Prompt profiles/fragments with profile/scope/toolpack-aware prompt resolution and redacted per-run snapshots.
-- Curated security toolpacks with risk classes, scope requirements, install hints, availability checks, policy metadata, blocked-by-default classes, and prompt fragments.
+- Curated security toolpacks with risk classes, scope requirements, install hints, availability checks, policy metadata, blocked-by-default classes, Basic/Kali capability levels, and prompt fragments.
 - Run replay bundles expose redacted scope/profile/toolpack metadata plus trace completeness, blocked counts, artifacts, and graph context.
 - Skill deletion route sanitizes path input with `path.basename` to avoid path traversal.
 

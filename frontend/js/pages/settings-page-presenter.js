@@ -44,16 +44,20 @@
 
   function renderToolpackCards(toolpacks = []) {
     if (!toolpacks.length) return '<div class="empty-msg">No toolpacks returned yet. Refresh after the server has loaded the current code.</div>';
-    return toolpacks.map(pack => `
+    return toolpacks.map(pack => {
+      const levelNames = pack.levels ? Object.values(pack.levels).map(level => level.name || '').filter(Boolean).join(' / ') : '';
+      return `
       <article class="toolpack-card">
         <div><strong>${escapeHtml(pack.name)}</strong><p>${escapeHtml(pack.summary)}</p></div>
         <div class="asset-chip-row">
           <span class="asset-chip">Risks: ${escapeHtml((pack.risks || []).join(', ') || 'none')}</span>
           <span class="asset-chip">${pack.policy?.scopeRequired ? 'Scope required' : 'Scope optional'}</span>
+          ${levelNames ? `<span class="asset-chip">Levels: ${escapeHtml(levelNames)}</span>` : ''}
           <span class="asset-chip">Blocked: ${escapeHtml((pack.blockedByDefault || []).join(', ') || 'none')}</span>
         </div>
         <details><summary>${(pack.tools || []).length} tools with install hints</summary>${(pack.tools || []).map(tool => `<div class="target-row"><span>${escapeHtml(tool.name)} · ${escapeHtml(tool.risk)}${tool.scopeRequired ? ' · scoped' : ''}</span><strong>${escapeHtml(tool.installHint || 'installed externally')}</strong></div>`).join('')}</details>
-      </article>`).join('');
+      </article>`;
+    }).join('');
   }
 
   function renderToolpackError(message) {

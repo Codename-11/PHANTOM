@@ -160,7 +160,7 @@ Scopes are first-class authorization boundaries stored in SQLite. A scope can de
 
 - Raw targets: URLs, domains, hosts, IPs, CIDRs, and host:port values
 - Asset-backed targets from the saved asset registry
-- Allowed action classes such as `read/local`, `recon`, `network-scan`, `exploit`, `destructive`, and `credentialed`
+- Allowed action classes such as `read/local`, `recon`, `network-scan`, `exploit`, `destructive`, `credentialed`, `offline-password-audit`, and `online-bruteforce`
 - Explicit blocked action classes
 - Rules of engagement notes
 - Expiration time
@@ -190,10 +190,11 @@ Built-in governed toolpacks provide curated metadata and prompt fragments for co
 - Web Recon
 - Network Discovery
 - Web Vulnerability Assessment
-- Offline Password Audit
+- Offline Password Audit — Basic and Kali levels for local hash/wordlist workflows; wordlists are local inputs, not remote scope targets
+- Credentialed Service Audit — Basic and Kali levels for authorized, low-rate online service authentication checks against explicitly scoped targets
 - Reporting
 
-Toolpacks include availability checks, install hints, input metadata, policy metadata, risk class, scope requirements, output parser names, blocked-by-default classes, and playbook prompt fragments.
+Toolpacks include availability checks, install hints, input metadata, policy metadata, risk class, scope requirements, output parser names, blocked-by-default classes, capability levels, and playbook prompt fragments.
 
 ## 🖥️ Web UI Surfaces
 

@@ -74,19 +74,66 @@ const TOOLPACKS = [
   {
     id: 'offline-password-audit',
     name: 'Offline Password Audit',
-    summary: 'Hash identification and offline cracking against user-provided hash material only.',
+    summary: 'Hash identification and offline cracking against user-provided hash material only. Local hash files and wordlists are inputs, not remote scope targets.',
     category: 'passwords',
-    risks: ['credentialed'],
-    allowedActions: ['credentialed'],
+    risks: ['offline-password-audit'],
+    allowedActions: ['offline-password-audit', 'read/local'],
     blockedByDefault: ['online-bruteforce', 'credential-stuffing', 'spraying', 'destructive'],
-    policy: { scopeRequired: true, passiveOnly: false, offlineOnly: true, allowCredentialUse: false },
+    defaultLevel: 'basic',
+    levels: {
+      basic: {
+        name: 'Basic',
+        description: 'Built-in/off-the-shelf local audit: identify hashes, run John with a small supplied/generated list, and summarize password-strength findings.',
+        tools: ['hashid', 'name-that-hash', 'john'],
+        wordlists: ['operator-supplied list', 'small generated candidate list'],
+      },
+      kali: {
+        name: 'Kali',
+        description: 'Kali-style offline audit using John/Hashcat plus standard local wordlists and rule-based cracking when available.',
+        tools: ['hashid', 'name-that-hash', 'john', 'hashcat'],
+        wordlists: ['/usr/share/wordlists/rockyou.txt', '/usr/share/seclists/Passwords/', 'operator-supplied list'],
+      },
+    },
+    policy: { scopeRequired: true, targetRequired: false, passiveOnly: false, offlineOnly: true, allowCredentialUse: true, allowOnlineLogin: false },
     tools: [
-      { name: 'hashid', command: 'hashid', risk: 'read/local', installHint: 'pipx install hashid', scopeRequired: false, parser: 'hash_types' },
-      { name: 'name-that-hash', command: 'nth', risk: 'read/local', installHint: 'pipx install name-that-hash', scopeRequired: false, parser: 'hash_types' },
-      { name: 'john', command: 'john', risk: 'credentialed', installHint: 'sudo apt install john', scopeRequired: true, parser: 'cracked_summary' },
-      { name: 'hashcat', command: 'hashcat', risk: 'credentialed', installHint: 'sudo apt install hashcat', scopeRequired: true, parser: 'cracked_summary' },
+      { name: 'hashid', command: 'hashid', risk: 'read/local', installHint: 'pipx install hashid', scopeRequired: false, parser: 'hash_types', level: 'basic' },
+      { name: 'name-that-hash', command: 'nth', risk: 'read/local', installHint: 'pipx install name-that-hash', scopeRequired: false, parser: 'hash_types', level: 'basic' },
+      { name: 'john', command: 'john', risk: 'offline-password-audit', installHint: 'sudo apt install john wordlists', scopeRequired: true, parser: 'cracked_summary', level: 'basic' },
+      { name: 'hashcat', command: 'hashcat', risk: 'offline-password-audit', installHint: 'sudo apt install hashcat seclists', scopeRequired: true, parser: 'cracked_summary', level: 'kali' },
     ],
-    prompt: 'Offline Password Audit: identify hash types and assess password strength only against provided hashes. Never perform online brute force, credential stuffing, password spraying, or live login attempts unless a future explicit policy permits them.',
+    prompt: 'Offline Password Audit: identify hash types and assess password strength only against provided local hash material. Wordlists such as rockyou.txt, SecLists, or operator-generated candidates are local inputs and should not be treated as remote scope targets. Start at Basic unless the operator selects/requests Kali-level depth. Never perform online brute force, credential stuffing, password spraying, or live login attempts under this toolpack.',
+  },
+  {
+    id: 'credentialed-service-audit',
+    name: 'Credentialed Service Audit',
+    summary: 'Authorized online authentication testing for explicitly scoped services, separate from offline hash cracking.',
+    category: 'passwords',
+    risks: ['online-bruteforce'],
+    allowedActions: ['online-bruteforce'],
+    blockedByDefault: ['credential-stuffing', 'spraying', 'destructive'],
+    defaultLevel: 'basic',
+    levels: {
+      basic: {
+        name: 'Basic',
+        description: 'Low-volume validation against known scoped services with supplied usernames/password candidates and conservative rates.',
+        tools: ['smbclient', 'ssh', 'curl'],
+        wordlists: ['operator-supplied tiny candidate list'],
+      },
+      kali: {
+        name: 'Kali',
+        description: 'Kali-style online auth testing with Hydra/Medusa/Ncrack when the target and online-bruteforce action class are explicitly in scope.',
+        tools: ['hydra', 'medusa', 'ncrack'],
+        wordlists: ['/usr/share/wordlists/rockyou.txt', '/usr/share/seclists/Passwords/', 'operator-supplied list'],
+      },
+    },
+    policy: { scopeRequired: true, targetRequired: true, passiveOnly: false, offlineOnly: false, allowCredentialUse: true, allowOnlineLogin: true, requireRateLimit: true },
+    tools: [
+      { name: 'smbclient', command: 'smbclient', risk: 'online-bruteforce', installHint: 'sudo apt install smbclient', scopeRequired: true, parser: 'auth_attempt_summary', level: 'basic' },
+      { name: 'hydra', command: 'hydra', risk: 'online-bruteforce', installHint: 'sudo apt install hydra', scopeRequired: true, parser: 'hydra_summary', level: 'kali', gated: true },
+      { name: 'medusa', command: 'medusa', risk: 'online-bruteforce', installHint: 'sudo apt install medusa', scopeRequired: true, parser: 'auth_attempt_summary', level: 'kali', gated: true },
+      { name: 'ncrack', command: 'ncrack', risk: 'online-bruteforce', installHint: 'sudo apt install ncrack', scopeRequired: true, parser: 'auth_attempt_summary', level: 'kali', gated: true },
+    ],
+    prompt: 'Credentialed Service Audit: only run online authentication tests against explicitly scoped services with authorization, low rates, and clear stop conditions. Basic level uses tiny supplied candidate lists. Kali level may use Hydra/Medusa/Ncrack and larger local wordlists only when scope allows online-bruteforce for the target. Do not spray unrelated users, reuse leaked credentials, or test out-of-scope services.',
   },
   {
     id: 'reporting',
@@ -150,14 +197,19 @@ export function buildToolpackPrompt(ids = []) {
   if (!selected.length) return '';
   const sections = ['## SELECTED SECURITY TOOLPACKS'];
   for (const pack of selected) {
+    const levelText = pack.levels ? [
+      'Capability levels:',
+      ...Object.entries(pack.levels).map(([key, level]) => `- ${level.name || key}${pack.defaultLevel === key ? ' (default)' : ''}: ${level.description || ''} Tools: ${(level.tools || []).join(', ') || 'n/a'}. Wordlists: ${(level.wordlists || []).join(', ') || 'n/a'}.`),
+    ].join('\n') : '';
     sections.push([
       `### ${pack.name}`,
       pack.summary,
       `Allowed risk classes: ${pack.allowedActions.join(', ') || 'none'}`,
       `Blocked by default: ${pack.blockedByDefault.join(', ') || 'none'}`,
-      `Tools: ${pack.tools.map(tool => `${tool.name}(${tool.risk})`).join(', ')}`,
+      `Tools: ${pack.tools.map(tool => `${tool.name}(${tool.risk}${tool.level ? `/${tool.level}` : ''})`).join(', ')}`,
+      levelText,
       `Playbook: ${pack.prompt}`,
-    ].join('\n'));
+    ].filter(Boolean).join('\n'));
   }
   return sections.join('\n\n');
 }

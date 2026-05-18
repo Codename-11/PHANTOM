@@ -15,7 +15,7 @@ function loadPresenter() {
 describe('settings page presenter', () => {
   test('renders non-empty admin cards for general, behavior, security, tools, and advanced settings', () => {
     const presenter = loadPresenter();
-    const toolpacks = [{ id: 'web-recon', name: 'Web Recon', summary: 'HTTP surface mapping', risks: ['recon'], policy: { scopeRequired: true }, tools: [{ name: 'httpx', risk: 'network-scan', installHint: 'go install httpx' }] }];
+    const toolpacks = [{ id: 'web-recon', name: 'Web Recon', summary: 'HTTP surface mapping', risks: ['recon'], policy: { scopeRequired: true }, levels: { basic: { name: 'Basic' }, kali: { name: 'Kali' } }, tools: [{ name: 'httpx', risk: 'network-scan', installHint: 'go install httpx' }] }];
     const outputs = [
       presenter.renderGeneralOverview({ model: 'grok-4.3', baseUrl: 'http://127.0.0.1:8648/v1', workspace: '/tmp/ws' }),
       presenter.renderBehaviorOverview(),
@@ -30,6 +30,7 @@ describe('settings page presenter', () => {
     }
     assert.match(outputs[2], /Governed execution/);
     assert.match(outputs[3], /Web Recon/);
+    assert.match(outputs[3], /Levels: Basic \/ Kali/);
   });
 
   test('renders actionable error when toolpacks cannot load instead of a blank panel', () => {

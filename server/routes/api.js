@@ -94,7 +94,7 @@ router.get('/prompts/preview', (req, res) => {
     mode: resolved.profile?.mode || 'default',
     profile: resolved.profile,
     scope: resolved.scope ? { id: resolved.scope.id, name: resolved.scope.name, expires_at: resolved.scope.expires_at } : null,
-    toolpacks: resolved.toolpacks.map(pack => ({ id: pack.id, name: pack.name, summary: pack.summary, risks: pack.risks })),
+    toolpacks: resolved.toolpacks.map(pack => ({ id: pack.id, name: pack.name, summary: pack.summary, risks: pack.risks, defaultLevel: pack.defaultLevel || null, levels: pack.levels || null })),
     fragmentIds: resolved.snapshot.fragmentIds,
     content: resolved.content,
     length: resolved.content.length,

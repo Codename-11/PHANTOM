@@ -178,7 +178,7 @@ export function resolvePrompt({ basePrompt, profileId = null, scopeId = null, to
     resolvedPrompt: content,
     profile: profile ? { id: profile.id, name: profile.name, mode: profile.mode, updated_at: profile.updated_at } : null,
     scope: scope ? { id: scope.id, name: scope.name, expires_at: scope.expires_at, targets: scope.targets, notes: scope.notes } : null,
-    toolpacks: toolpacks.map(pack => ({ id: pack.id, name: pack.name, risks: pack.risks, allowedActions: pack.allowedActions, blockedByDefault: pack.blockedByDefault })),
+    toolpacks: toolpacks.map(pack => ({ id: pack.id, name: pack.name, risks: pack.risks, allowedActions: pack.allowedActions, blockedByDefault: pack.blockedByDefault, defaultLevel: pack.defaultLevel || null, levels: pack.levels || null })),
     fragmentIds: fragments.map(fragment => fragment.id),
     fragments: fragments.map(fragment => ({ id: fragment.id, name: fragment.name, kind: fragment.kind, updated_at: fragment.updated_at })),
     capturedAt: new Date().toISOString(),

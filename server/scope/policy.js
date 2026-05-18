@@ -1,5 +1,6 @@
 const SAFE_RISKS = new Set(['read/local']);
-const RISKY_RISKS = new Set(['recon', 'network-scan', 'exploit', 'destructive', 'credentialed', 'unknown']);
+const RISKY_RISKS = new Set(['recon', 'network-scan', 'exploit', 'destructive', 'credentialed', 'offline-password-audit', 'online-bruteforce', 'unknown']);
+const BLOCKED_CREDENTIAL_SUBRISKS = new Set(['offline-password-audit', 'online-bruteforce']);
 
 const IPV4_RE = /\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g;
 const URL_RE = /https?:\/\/[^\s'"<>),]+/gi;
@@ -11,6 +12,7 @@ const LOCAL_FILE_VALUE_FLAGS = new Set([
   '-iL', '-oN', '-oX', '-oG', '-oA',
   '-r', '--request-file', '--config', '--output', '-o',
 ]);
+const OFFLINE_PASSWORD_TOOLS = new Set(['john', 'hashcat', 'hashid', 'nth', 'name-that-hash', 'unshadow', 'hash-identifier']);
 
 function stringifyInput(args) {
   if (args == null) return '';
@@ -20,6 +22,15 @@ function stringifyInput(args) {
 
 function shellishTokens(text) {
   return String(text).match(/"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|\S+/g)?.map(token => token.replace(/^['"]|['"]$/g, '')) || [];
+}
+
+function tokenCommandName(token) {
+  const cleaned = String(token || '').split(/[\\/]/).pop().toLowerCase();
+  return cleaned.replace(/(?:\.exe|\.py|\.sh)$/i, '');
+}
+
+function isOfflinePasswordCommand(tokens) {
+  return tokens.some(token => OFFLINE_PASSWORD_TOOLS.has(tokenCommandName(token)));
 }
 
 function addFileCandidate(out, value) {
@@ -42,6 +53,7 @@ function localFileCandidates(args = {}) {
   const out = new Set();
   for (const text of texts) {
     const tokens = shellishTokens(text);
+    const offlinePasswordCommand = isOfflinePasswordCommand(tokens);
     for (let i = 0; i < tokens.length; i += 1) {
       const token = tokens[i];
       const [maybeFlag, maybeValue] = token.split('=', 2);
@@ -51,6 +63,9 @@ function localFileCandidates(args = {}) {
         if (flag.length > 2 && token.startsWith(flag) && token.length > flag.length) {
           addFileCandidate(out, token.slice(flag.length));
         }
+      }
+      if (offlinePasswordCommand && !token.startsWith('-') && !/^https?:\/\//i.test(token)) {
+        addFileCandidate(out, token);
       }
     }
   }
@@ -94,7 +109,9 @@ export function classifyRisk(toolName, args = {}) {
   if (toolName === 'install_tool') return 'credentialed';
   if (toolName === 'execute_command' || toolName === 'python_execute') {
     if (/\b(rm\s+-rf|mkfs|dd\s+if=|shutdown|reboot|killall|chmod\s+-r|chown\s+-r)\b/.test(text)) return 'destructive';
-    if (/\b(hydra|john|hashcat|sudo|su\s|ssh\s|scp\s|rsync\s|password|passwd|token|credential)\b/.test(text)) return 'credentialed';
+    if (/\b(hydra|medusa|ncrack|crowbar|patator)\b/.test(text)) return 'online-bruteforce';
+    if (/\b(john|hashcat|hashid|name-that-hash|\bnth\b|unshadow|hash-identifier)\b/.test(text)) return 'offline-password-audit';
+    if (/\b(sudo|su\s|ssh\s|scp\s|rsync\s|password|passwd|token|credential)\b/.test(text)) return 'credentialed';
     if (/\b(sqlmap|msfconsole|metasploit|exploit|payload|reverse\s+shell|nc\s+-e|ncat\s+-e)\b/.test(text)) return 'exploit';
     if (/\b(nmap|masscan|gobuster|ffuf|nuclei|nikto|subfinder|httpx|amass|dirb|dirsearch|nc\s+-vz|netcat\s+-vz)\b/.test(text)) return 'network-scan';
     if (extractTargets(args).length > 0 && /\b(curl|wget|dig|host|ping|traceroute|openssl\s+s_client|nc|netcat)\b/.test(text)) return 'recon';
@@ -143,6 +160,15 @@ function normalizeActions(actions = []) {
   return new Set((actions || []).map(action => String(action).toLowerCase()));
 }
 
+function blockedActionMatches(actions, risk) {
+  if (actions.has(risk)) return true;
+  return BLOCKED_CREDENTIAL_SUBRISKS.has(risk) && actions.has('credentialed');
+}
+
+function allowedActionMatches(actions, risk) {
+  return actions.has(risk);
+}
+
 export function evaluateToolAction({ toolName, args = {}, scope = null, now = new Date() }) {
   const risk = classifyRisk(toolName, args);
   const targets = extractTargets(args);
@@ -154,9 +180,9 @@ export function evaluateToolAction({ toolName, args = {}, scope = null, now = ne
     return { allowed: false, reason: `Scope "${scope.name}" is expired`, risk, targets };
   }
   const blocked = normalizeActions(scope.blocked_actions || scope.blockedActions);
-  if (blocked.has(risk)) return { allowed: false, reason: `${risk} is blocked by scope policy`, risk, targets };
+  if (blockedActionMatches(blocked, risk)) return { allowed: false, reason: `${risk} is blocked by scope policy`, risk, targets };
   const allowed = normalizeActions(scope.allowed_actions || scope.allowedActions);
-  if (allowed.size && !allowed.has(risk)) return { allowed: false, reason: `${risk} is not allowed by selected scope`, risk, targets };
+  if (allowed.size && !allowedActionMatches(allowed, risk)) return { allowed: false, reason: `${risk} is not allowed by selected scope`, risk, targets };
   if (targets.length === 0) return { allowed: true, reason: 'No explicit external target found', risk, targets };
   const outside = targets.filter(target => !targetInScope(target, scope));
   if (outside.length > 0) {

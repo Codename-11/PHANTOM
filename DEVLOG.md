@@ -1,5 +1,23 @@
 # PHANTOM DEVLOG
 
+## 2026-05-17 21:44 EDT — Password Audit Capability Split
+
+- Split password-audit governance into distinct `offline-password-audit` and `online-bruteforce` risk classes so local John/Hashcat/hashid/name-that-hash workflows can use hash files and wordlists without granting live login/brute-force capability.
+- Added RED coverage proving offline password audits with local hash + wordlist paths are allowed when explicitly authorized, while Hydra-style online auth testing remains blocked unless the selected scope allows `online-bruteforce` for the target. Broad legacy `credentialed` allowlists no longer authorize the new password-audit subclasses.
+- Added Basic/Kali capability metadata to security toolpacks and prompt snapshots. Offline Password Audit now exposes Basic local audit and Kali local wordlist/rule tooling; Credentialed Service Audit is a separate scoped online-auth toolpack with Basic and Kali levels.
+- Updated Settings toolpack cards to surface capability levels and updated README, repo security sync notes, and Obsidian PHANTOM docs/decisions/spec/plan with the capability split.
+
+Validation passed:
+- RED: `node --test server/scope/policy.test.js server/toolpacks/toolpack-registry.test.js` failed before implementation on missing `offline-password-audit`, `online-bruteforce`, and Basic/Kali metadata assertions.
+- GREEN targeted: `node --test server/scope/policy.test.js server/toolpacks/toolpack-registry.test.js frontend/js/pages/settings-page-presenter.test.js` — 14/14 passing.
+- Integration targeted: `node --test server/scope/policy.test.js server/toolpacks/toolpack-registry.test.js server/prompts/prompt-store.test.js server/routes/api.test.js frontend/js/pages/settings-page-presenter.test.js` — 21/21 passing.
+- `npm test` — 58/58 passing.
+- `npm run build` — passing with existing Vite non-module warnings.
+- `find server frontend/js -name '*.js' -print0 | xargs -0 -n1 node --check` — passing.
+- `python3 tests/smoke_test.py` — 4/4 passing.
+- Restarted `phantom.service`; live `/api/toolpacks` now returns 7 packs including `credentialed-service-audit`, and post-restart `python3 tests/smoke_test.py` remains 4/4 passing.
+- `git diff --check` — passing.
+
 ## 2026-05-17 21:31 EDT — Scope Policy Local Wordlist False Positive Fix
 
 - Fixed a scope-policy false positive where command arguments like `-P wordlist.txt` in Hydra runs were extracted as remote domain targets because `wordlist.txt` matched the generic domain regex.
