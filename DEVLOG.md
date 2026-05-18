@@ -1,5 +1,21 @@
 # PHANTOM DEVLOG
 
+## 2026-05-17 21:31 EDT — Scope Policy Local Wordlist False Positive Fix
+
+- Fixed a scope-policy false positive where command arguments like `-P wordlist.txt` in Hydra runs were extracted as remote domain targets because `wordlist.txt` matched the generic domain regex.
+- Added local-file argument detection for common wordlist/request/config/output flags (`-P`, `-L`, `-C`, `-w`, `--wordlist`, `-iL`, `-oN`, `-r`, etc.) so file-like values are excluded from remote target matching while actual hosts/IPs/host:port values remain governed.
+- Added a regression test for an in-scope Hydra SMB command using a local wordlist against `172.16.24.12:445`; the policy now evaluates the credentialed action against the SMB target instead of blocking on the local wordlist filename.
+
+Validation passed:
+- RED: `node --test server/scope/policy.test.js` failed before the fix with `Target wordlist.txt is outside selected scope`.
+- GREEN: `node --test server/scope/policy.test.js` — passing.
+- Direct policy smoke returned allowed with targets `172.16.24.12` and `172.16.24.12:445`, excluding `wordlist.txt`.
+- `npm test` — 54/54 passing.
+- `npm run build` — passing with existing Vite non-module warnings.
+- `find server frontend/js -name '*.js' -print0 | xargs -0 -n1 node --check` — passing.
+- `python3 tests/smoke_test.py` — 4/4 passing.
+- `git diff --check` — passing.
+
 ## 2026-05-17 21:25 EDT — Governed Operations Documentation Refresh
 
 - Rewrote `README.md` around the current local-first governed security-ops cockpit: scoped autonomous runs, policy gates, prompt profiles, toolpacks, trace replay, graph, artifacts, Assets / Scope, and populated Settings/Admin surfaces.

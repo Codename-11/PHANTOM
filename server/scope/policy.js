@@ -5,6 +5,12 @@ const IPV4_RE = /\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d
 const URL_RE = /https?:\/\/[^\s'"<>),]+/gi;
 const HOST_PORT_RE = /\b((?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)|(?:[a-z0-9-]+\.)+[a-z]{2,})(?::(\d{1,5}))\b/gi;
 const DOMAIN_RE = /\b(?!(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.\d{1,3}){3}\b)(?:[a-z0-9-]+\.)+[a-z]{2,}\b/gi;
+const LOCAL_FILE_VALUE_FLAGS = new Set([
+  '-p', '-P', '-l', '-L', '-C', // hydra password/login/colon-separated credential files
+  '-w', '--wordlist', '--usernames', '--passwords',
+  '-iL', '-oN', '-oX', '-oG', '-oA',
+  '-r', '--request-file', '--config', '--output', '-o',
+]);
 
 function stringifyInput(args) {
   if (args == null) return '';
@@ -12,8 +18,48 @@ function stringifyInput(args) {
   try { return JSON.stringify(args); } catch { return String(args); }
 }
 
+function shellishTokens(text) {
+  return String(text).match(/"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|\S+/g)?.map(token => token.replace(/^['"]|['"]$/g, '')) || [];
+}
+
+function addFileCandidate(out, value) {
+  const cleaned = String(value || '').replace(/^['"]|['"]$/g, '').replace(/[),;]+$/g, '');
+  if (!cleaned || /^https?:\/\//i.test(cleaned)) return;
+  const basename = cleaned.split(/[\\/]/).pop();
+  for (const candidate of [cleaned, basename]) {
+    if (candidate && candidate.includes('.')) out.add(candidate.toLowerCase());
+  }
+}
+
+function localFileCandidates(args = {}) {
+  const texts = [];
+  if (typeof args === 'string') texts.push(args);
+  if (args && typeof args === 'object') {
+    for (const value of Object.values(args)) {
+      if (typeof value === 'string') texts.push(value);
+    }
+  }
+  const out = new Set();
+  for (const text of texts) {
+    const tokens = shellishTokens(text);
+    for (let i = 0; i < tokens.length; i += 1) {
+      const token = tokens[i];
+      const [maybeFlag, maybeValue] = token.split('=', 2);
+      if (LOCAL_FILE_VALUE_FLAGS.has(maybeFlag) && maybeValue) addFileCandidate(out, maybeValue);
+      if (LOCAL_FILE_VALUE_FLAGS.has(token) && tokens[i + 1]) addFileCandidate(out, tokens[i + 1]);
+      for (const flag of LOCAL_FILE_VALUE_FLAGS) {
+        if (flag.length > 2 && token.startsWith(flag) && token.length > flag.length) {
+          addFileCandidate(out, token.slice(flag.length));
+        }
+      }
+    }
+  }
+  return out;
+}
+
 export function extractTargets(args = {}) {
   const text = stringifyInput(args);
+  const localFiles = localFileCandidates(args);
   const out = new Set();
   for (const url of text.match(URL_RE) || []) {
     out.add(url);
@@ -34,7 +80,8 @@ export function extractTargets(args = {}) {
   }
   for (const ip of text.match(IPV4_RE) || []) out.add(ip);
   for (const domain of text.match(DOMAIN_RE) || []) {
-    if (!domain.includes('..')) out.add(domain.toLowerCase());
+    const normalized = domain.toLowerCase();
+    if (!domain.includes('..') && !localFiles.has(normalized)) out.add(normalized);
   }
   return Array.from(out);
 }

@@ -41,6 +41,24 @@ describe('scope policy evaluator', () => {
     assert.ok(decision.targets.includes('192.168.1.25'));
   });
 
+  test('does not treat local wordlist filenames as out-of-scope remote targets', () => {
+    const scope = {
+      ...activeScope,
+      targets: { cidrs: ['172.16.24.0/24'] },
+      allowed_actions: ['credentialed'],
+    };
+    const decision = evaluateToolAction({
+      toolName: 'execute_command',
+      args: { command: 'hydra -l bailey -P wordlist.txt smb://172.16.24.12:445/' },
+      scope,
+    });
+    assert.strictEqual(decision.risk, 'credentialed');
+    assert.strictEqual(decision.allowed, true);
+    assert.ok(decision.targets.includes('172.16.24.12'));
+    assert.ok(decision.targets.includes('172.16.24.12:445'));
+    assert.ok(!decision.targets.includes('wordlist.txt'));
+  });
+
   test('blocks risky target outside selected scope', () => {
     const decision = evaluateToolAction({ toolName: 'execute_command', args: { command: 'nmap -sV 10.0.0.5' }, scope: activeScope });
     assert.strictEqual(decision.allowed, false);
