@@ -13,16 +13,30 @@ function loadBuilder() {
 }
 
 describe('scope builder UI helpers', () => {
-  test('renders editable target chips with risk visibility labels', () => {
+  test('renders editable target chips with kind, value, and remove handle', () => {
+    // The chip contract is data-driven: each input target produces a
+    // <span class="target-chip"> carrying data-target-id, data-kind, and
+    // data-value attributes plus a remove button bound by id. The earlier
+    // "visibility" label rendering was removed when the policy preview
+    // moved to the action-class matrix; this test follows the current
+    // contract rather than dead UI.
     const builder = loadBuilder();
     const html = builder.renderTargetChips([
-      { id: 'host:10.0.0.5', type: 'host', value: '10.0.0.5', visibility: 'private' },
-      { id: 'url:https://example.com', type: 'url', value: 'https://example.com', visibility: 'public' },
+      { id: 'host:10.0.0.5', kind: 'host', value: '10.0.0.5' },
+      { id: 'url:https://example.com', kind: 'url', value: 'https://example.com' },
     ]);
     assert.match(html, /target-chip/);
     assert.match(html, /10\.0\.0\.5/);
-    assert.match(html, /private/);
-    assert.match(html, /data-remove-target/);
+    assert.match(html, /data-kind="host"/);
+    assert.match(html, /data-kind="url"/);
+    assert.match(html, /data-remove-target="host:10\.0\.0\.5"/);
+    assert.match(html, /data-remove-target="url:https:\/\/example\.com"/);
+  });
+
+  test('renderTargetChips returns the empty-state caption when no targets are supplied', () => {
+    const builder = loadBuilder();
+    const html = builder.renderTargetChips([]);
+    assert.match(html, /No targets yet/);
   });
 
   test('renders policy dry-run decisions in operator language', () => {

@@ -3,6 +3,9 @@ window.RunsPage = {
   selectedRunId: null,
   currentRun: null,
   activeTab: 'trace',
+  // Default the sidebar filter to the conversation the operator is in.
+  // 'this' = runs from the current conversation only; 'all' = global recents.
+  scopeFilter: 'this',
   replay: {
     timer: null,
     playing: false,
@@ -11,18 +14,58 @@ window.RunsPage = {
     blockedIndex: -1,
     events: [],
   },
+  // Debounce token for the live-trace listener. Each SSE chunk fires a
+  // phantom:trace event; without debouncing, /api/runs + /replay refetch
+  // 100+ times per assistant reply, causing visible lag and noisy logs.
+  _traceDebounce: null,
+  _pendingTraceRunId: null,
 
   init() {
     document.getElementById('refresh-runs-btn')?.addEventListener('click', () => this.loadRuns());
     window.addEventListener('phantom:route', (event) => {
       if (event.detail?.route === 'runs') this.loadRuns();
     });
+    // Debounced live update: coalesce chunk-rate phantom:trace events
+    // (one per SSE token) into a single refetch ~300ms after the stream
+    // pauses. The currently-selected run still feels live because the
+    // chat dock owns the visible streaming view; the Runs page is the
+    // forensic lens, so a small lag here is fine.
     window.addEventListener('phantom:trace', (event) => {
       const runId = event.detail?.runId;
-      if (runId && (window.Router?.current === 'runs')) this.loadRuns(runId);
+      if (!runId || window.Router?.current !== 'runs') return;
+      this._pendingTraceRunId = runId;
+      if (this._traceDebounce) clearTimeout(this._traceDebounce);
+      this._traceDebounce = setTimeout(() => {
+        const target = this._pendingTraceRunId;
+        this._traceDebounce = null;
+        this._pendingTraceRunId = null;
+        this.loadRuns(target);
+      }, 300);
+    });
+    // When the active run terminates, re-fetch its synthesis so the card
+    // updates from "running" to its final shape without a manual refresh.
+    // Also flashes the Synthesis tab so the operator notices it landed.
+    window.addEventListener('phantom:run-complete', (event) => {
+      const runId = event.detail?.runId;
+      if (!runId) return;
+      if (this.selectedRunId === runId) this.loadSynthesis(runId);
+      this.flashSynthesisTab();
+    });
+    // Repaint the sidebar when the operator switches conversations so the
+    // "this conversation" filter follows their context without manual refresh.
+    window.addEventListener('phantom:conversation', () => {
+      if (window.Router?.current === 'runs') this.loadRuns();
     });
     this.bindStaticControls();
     if (window.Router?.current === 'runs') setTimeout(() => this.loadRuns(this.selectedRunId), 0);
+  },
+
+  // Resolve which conversation the operator is "in". app.js persists this
+  // to localStorage on every selectConversation; we read it here rather than
+  // reaching into the app.js IIFE.
+  currentConversationId() {
+    try { return localStorage.getItem('phantom:last-conversation') || null; }
+    catch { return null; }
   },
 
   bindStaticControls() {
@@ -72,10 +115,33 @@ window.RunsPage = {
     if (!list) return;
     list.innerHTML = '<div class="empty-msg">Loading runs…</div>';
     try {
-      const res = await fetch('/api/runs?limit=50');
+      // When the operator is in a conversation and the filter is on "this",
+      // narrow the sidebar to that conversation's runs. The /api/runs endpoint
+      // already supports a conversationId query param. Fall back to global
+      // recents if the filter is 'all' or no conversation is pinned.
+      const conversationId = this.currentConversationId();
+      const params = new URLSearchParams({ limit: '50' });
+      if (this.scopeFilter === 'this' && conversationId) {
+        params.set('conversationId', conversationId);
+      }
+      const res = await fetch(`/api/runs?${params.toString()}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       this.runs = await res.json();
+      // If filtering to current conversation returned nothing but global has
+      // runs, auto-fallback so the page isn't empty when the operator opens
+      // it from a fresh conversation. Filter chip still shows "this" so they
+      // can see the state and toggle back.
+      if (this.scopeFilter === 'this' && conversationId && this.runs.length === 0) {
+        const globalRes = await fetch('/api/runs?limit=50');
+        if (globalRes.ok) {
+          this.runs = await globalRes.json();
+          this._filterFellBack = true;
+        }
+      } else {
+        this._filterFellBack = false;
+      }
       this.renderRunsList();
+      this.renderScopeChip();
       const runToSelect = selectRunId || this.runs[0]?.id;
       if (runToSelect) await this.selectRun(runToSelect);
       else this.renderEmptyDetail();
@@ -84,26 +150,98 @@ window.RunsPage = {
     }
   },
 
+  // Filter chip ("This conversation · 3" ↔ "All runs · 50") + click toggle.
+  // Lives at the top of the sidebar so the scope is always visible — the
+  // previous list silently mixed runs from every conversation, which made
+  // it hard to find "what did the agent just do in this chat?".
+  renderScopeChip() {
+    const host = document.getElementById('runs-scope-chip');
+    if (!host) return;
+    const conversationId = this.currentConversationId();
+    const total = this.runs.length;
+    const active = this.scopeFilter === 'this' && conversationId && !this._filterFellBack;
+    const label = active ? 'This conversation' : 'All runs';
+    const hint = active ? `${total} matched` : `${total} recent · 50 max`;
+    const fallback = this._filterFellBack ? `<small class="runs-scope-fallback">No runs in current conversation — showing recent.</small>` : '';
+    host.innerHTML = `
+      <button type="button" class="runs-scope-btn ${active ? 'is-active' : ''}" id="runs-scope-toggle"
+              title="Switch between current conversation and all runs">
+        <span class="lbl">${this.escapeHtml(label)}</span>
+        <span class="ct">${this.escapeHtml(hint)}</span>
+      </button>
+      ${fallback}
+    `;
+    const btn = host.querySelector('#runs-scope-toggle');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        this.scopeFilter = this.scopeFilter === 'this' ? 'all' : 'this';
+        this.loadRuns();
+      });
+    }
+  },
+
   renderRunsList() {
     const list = document.getElementById('runs-list');
     if (!this.runs.length) {
-      list.innerHTML = '<div class="empty-msg">No runs yet. Send a chat message to create one.</div>';
+      list.innerHTML = `
+        <div class="empty-msg runs-empty">
+          <strong>No runs yet.</strong>
+          <p>Each chat turn that calls a tool becomes a run. Try one of:</p>
+          <ul>
+            <li><a href="#" data-runs-empty-action="chat">Start a new chat</a></li>
+            <li><a href="#" data-runs-empty-action="onboarding">Re-open onboarding</a></li>
+          </ul>
+        </div>
+      `;
+      list.querySelectorAll('[data-runs-empty-action]').forEach((el) => {
+        el.addEventListener('click', (event) => {
+          event.preventDefault();
+          if (el.dataset.runsEmptyAction === 'chat') window.Router?.navigate?.('chat');
+          if (el.dataset.runsEmptyAction === 'onboarding') window.OnboardingWizard?.open?.();
+        });
+      });
       return;
     }
     list.innerHTML = '';
     this.runs.forEach((run) => {
       const item = document.createElement('button');
       item.className = `run-list-item${run.id === this.selectedRunId ? ' active' : ''}`;
+      // Surface the goal as a second line when it differs from the title.
+      // Most runs auto-title from the first 80 chars of the goal, so when
+      // the goal IS the title we skip the duplicate — but when an operator
+      // edited the title or the goal is longer, the goal preview adds value.
+      const title = run.title || run.goal || 'Untitled Run';
+      const goal = run.goal || '';
+      const goalLine = goal && goal !== title && !title.startsWith(goal.slice(0, 40))
+        ? `<small class="run-list-goal">${this.escapeHtml(goal.length > 80 ? goal.slice(0, 80) + '…' : goal)}</small>`
+        : '';
       item.innerHTML = `
         <span class="run-status ${this.escapeHtml(run.status)}"></span>
         <span class="run-list-body">
-          <strong>${this.escapeHtml(run.title || run.goal || 'Untitled Run')}</strong>
-          <small>${this.escapeHtml(run.model || 'model unknown')} · ${this.escapeHtml(run.scope?.name || 'no scope')} · ${this.escapeHtml(run.started_at || '')}</small>
+          <strong>${this.escapeHtml(title)}</strong>
+          ${goalLine}
+          <small>${this.escapeHtml(run.model || 'model unknown')} · ${this.escapeHtml(run.scope?.name || 'no scope')} · ${this.escapeHtml(this.timeAgo(run.started_at) || run.started_at || '')}</small>
         </span>
       `;
+      // Tooltip carries the full goal for runs where the displayed line is truncated.
+      if (goal) item.title = goal;
       item.addEventListener('click', () => this.selectRun(run.id));
       list.appendChild(item);
     });
+  },
+
+  // Compact "5m ago" / "2h ago" / "3d ago" — easier to scan than ISO strings
+  // in a dense sidebar. Falls back to the raw string if parsing fails.
+  timeAgo(iso) {
+    if (!iso) return '';
+    const t = new Date(iso).getTime();
+    if (!Number.isFinite(t)) return '';
+    const mins = (Date.now() - t) / 60000;
+    if (mins < 0 || !Number.isFinite(mins)) return '';
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${Math.round(mins)}m ago`;
+    if (mins < 1440) return `${Math.round(mins / 60)}h ago`;
+    return `${Math.round(mins / 1440)}d ago`;
   },
 
   async selectRun(id) {
@@ -130,6 +268,7 @@ window.RunsPage = {
       this.currentRun = run;
       this.renderDetailHeader(run);
       this.renderTabCounts(run);
+      this.renderMessages(run);
       this.renderTraceTimeline(run);
       this.renderGraphPreview(run);
       this.renderArtifactGrid(run);
@@ -137,7 +276,10 @@ window.RunsPage = {
       this.renderOutput(run);
       this.renderMetaDrawer(run);
       this.setupReplay(run);
-      this.setActiveTab(this.activeTab || 'trace');
+      this.loadSynthesis(run.id);
+      // Synthesis is the operator's headline view — what happened, was the
+      // goal met, what's next. Messages/Trace stay one click away.
+      this.setActiveTab(this.activeTab || 'synthesis');
     } catch (err) {
       if (traceEl) traceEl.innerHTML = `<div class="empty-msg danger">Failed to load run: ${this.escapeHtml(err.message)}</div>`;
     }
@@ -147,6 +289,8 @@ window.RunsPage = {
     this.currentRun = null;
     const traceEl = document.getElementById('run-trace-timeline');
     if (traceEl) traceEl.innerHTML = '<div class="empty-msg">Select a run to inspect the trace timeline.</div>';
+    const synthEl = document.getElementById('run-synthesis');
+    if (synthEl) synthEl.innerHTML = '<div class="empty-msg">Select a run to view its synthesis.</div>';
     const hdEl = document.getElementById('run-detail-hd');
     if (hdEl) hdEl.innerHTML = '';
     ['run-meta-run', 'run-meta-scope', 'run-meta-prompt'].forEach((id) => { const e = document.getElementById(id); if (e) e.innerHTML = ''; });
@@ -163,8 +307,34 @@ window.RunsPage = {
     if (!hdEl) return;
     const idShort = run.id ? String(run.id).slice(0, 12) : '—';
     const status = run.status || 'unknown';
-    const toolpack = (run.prompt_snapshot?.toolpacks || []).map((p) => p.name).join(', ') || 'no toolpack';
-    const scopeName = run.scope?.name || 'no scope';
+    // Toolpack metadata can land under a few keys depending on snapshot
+    // vintage. Tolerate all of them, and accept either `[{id, name}]`
+    // objects or bare id strings. Empty list → hide the pill entirely
+    // rather than displaying a noisy "no toolpack" placeholder.
+    const toolpackEntries = run.prompt_snapshot?.toolpacks
+      || run.promptSnapshot?.toolpacks
+      || run.toolpacks
+      || [];
+    const toolpackNames = toolpackEntries
+      .map((p) => (typeof p === 'string' ? p : (p?.name || p?.id)))
+      .filter(Boolean);
+    const toolpackPill = toolpackNames.length
+      ? `<span class="run-hd-pill kind-cyan" title="Toolpacks: ${this.escapeAttribute(toolpackNames.join(', '))}">${this.escapeHtml(toolpackNames.length === 1 ? toolpackNames[0] : `${toolpackNames.length} toolpacks`)}</span>`
+      : '';
+    // Profile pill — surfaces the prompt profile name when one was chosen.
+    const profileName = run.prompt_snapshot?.profile?.name || run.promptSnapshot?.profile?.name;
+    const profilePill = profileName
+      ? `<span class="run-hd-pill kind-cyan">profile: ${this.escapeHtml(profileName)}</span>`
+      : '';
+    // Operator-override badge so the reader sees policy mode at a glance.
+    const policyMode = run.prompt_snapshot?.governance?.policyMode || run.promptSnapshot?.governance?.policyMode;
+    const overridePill = policyMode === 'operator-override'
+      ? `<span class="run-hd-pill kind-policy" title="Operator Override active">⚠ override</span>`
+      : '';
+    const scopeName = run.scope?.name || null;
+    const scopePill = scopeName
+      ? `<span class="run-hd-pill kind-policy">scope: ${this.escapeHtml(scopeName)}</span>`
+      : `<span class="run-hd-pill kind-policy muted">no scope</span>`;
     const started = run.started_at || '—';
     const ended = run.ended_at || '';
     const duration = this.computeDuration(run);
@@ -175,8 +345,10 @@ window.RunsPage = {
         <span class="run-hd-caption">RUN</span>
         <span class="run-hd-id">${this.escapeHtml(idShort)}</span>
         <span class="run-hd-pill status-${this.escapeHtml(status)}">${this.escapeHtml(status)}</span>
-        <span class="run-hd-pill kind-cyan">${this.escapeHtml(toolpack)}</span>
-        <span class="run-hd-pill kind-policy">scope: ${this.escapeHtml(scopeName)}</span>
+        ${toolpackPill}
+        ${profilePill}
+        ${scopePill}
+        ${overridePill}
         <span class="run-hd-ts">${tsLine}</span>
       </div>
       <h2 class="run-hd-title">${this.escapeHtml(title)}</h2>
@@ -206,16 +378,72 @@ window.RunsPage = {
   },
 
   renderTabCounts(run) {
-    const traceCt = run.replay?.eventCount ?? (run.events || []).length;
+    // Count the AGGREGATED timeline, not raw events. A streaming reply emits
+    // one trace event per token chunk — without aggregation a single chat
+    // turn shows 170+ rows in the trace and dwarfs the actually-interesting
+    // events (tool calls, policy decisions, artifact creations).
+    const aggregated = this.aggregateTraceEvents(run.events || []);
+    const traceCt = aggregated.length;
     const artCt = run.replay?.artifactCount ?? (run.artifacts || []).length;
+    const msgCt = aggregated.filter((e) => e.type === 'assistant.reply' || e.type === 'tool.call.completed' || e.type === 'tool.call.blocked').length;
     const tCt = document.getElementById('run-tab-trace-ct'); if (tCt) tCt.textContent = String(traceCt);
     const aCt = document.getElementById('run-tab-artifacts-ct'); if (aCt) aCt.textContent = String(artCt);
+    const mCt = document.getElementById('run-tab-messages-ct'); if (mCt) mCt.textContent = String(msgCt);
+  },
+
+  /**
+   * Collapse consecutive `assistant.chunk` and `assistant.thinking` events
+   * into a single synthetic event with the concatenated text. The raw event
+   * stream is what the executor emits per SSE token — useful for forensics
+   * but unreadable as a timeline (170+ rows per chat turn). We keep the
+   * original seq range so replay scrubbing still works.
+   */
+  aggregateTraceEvents(events) {
+    const out = [];
+    let buffer = null;
+    const aggregable = new Set(['assistant.chunk', 'assistant.thinking']);
+    const syntheticType = { 'assistant.chunk': 'assistant.reply', 'assistant.thinking': 'assistant.thought' };
+
+    const flush = () => {
+      if (!buffer) return;
+      out.push(buffer);
+      buffer = null;
+    };
+
+    for (const event of events) {
+      if (aggregable.has(event.type)) {
+        if (buffer && buffer._sourceType === event.type) {
+          buffer.output_preview = (buffer.output_preview || '') + (event.output_preview || '');
+          buffer.seqEnd = event.seq;
+          buffer._count += 1;
+          continue;
+        }
+        flush();
+        buffer = {
+          id: event.id,
+          seq: event.seq,
+          seqEnd: event.seq,
+          type: syntheticType[event.type],
+          _sourceType: event.type,
+          _count: 1,
+          phase: event.phase,
+          status: 'completed',
+          output_preview: event.output_preview || '',
+          created_at: event.created_at,
+        };
+        continue;
+      }
+      flush();
+      out.push(event);
+    }
+    flush();
+    return out;
   },
 
   renderTraceTimeline(run) {
     const el = document.getElementById('run-trace-timeline');
     if (!el) return;
-    const events = run.events || [];
+    const events = this.aggregateTraceEvents(run.events || []);
     el.innerHTML = events.map((event, idx) => this.renderEvent(event, idx)).join('') || '<div class="empty-msg">No events recorded.</div>';
   },
 
@@ -247,6 +475,56 @@ window.RunsPage = {
     `).join('');
   },
 
+  // Pulses the Synthesis tab when a new run terminates so the operator
+  // notices "ok, you have a fresh card to look at" without disrupting
+  // whatever they were doing on another tab.
+  flashSynthesisTab() {
+    const btn = document.querySelector('#run-tabs .run-tab[data-tab="synthesis"]');
+    if (!btn) return;
+    btn.classList.remove('flash-ping');
+    // Force a reflow so the class can be re-added and the animation restarts.
+    // eslint-disable-next-line no-unused-expressions
+    btn.offsetWidth;
+    btn.classList.add('flash-ping');
+    setTimeout(() => btn.classList.remove('flash-ping'), 2200);
+  },
+
+  // Synthesis tab — fetches the canonical end-of-run summary and hands it
+  // to the shared renderer. Each next-step action routes back through
+  // handleRunAction so the buttons reuse existing Rerun/Report/etc. plumbing.
+  async loadSynthesis(runId) {
+    const host = document.getElementById('run-synthesis');
+    if (!host || !window.SynthesisCard) return;
+    host.innerHTML = '<div class="empty-msg">Building synthesis…</div>';
+    try {
+      const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/synthesis`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const synthesis = await res.json();
+      window.SynthesisCard.render(host, synthesis, {
+        onAction: (action) => this.handleSynthesisAction(action),
+      });
+    } catch (err) {
+      host.innerHTML = `<div class="empty-msg danger">Failed to build synthesis: ${this.escapeHtml(err.message)}</div>`;
+    }
+  },
+
+  handleSynthesisAction(action) {
+    const run = this.currentRun;
+    if (!run || !action) return;
+    if (action === 'rerun')             return this.handleRunAction(run, 'rerun',   this.synthesisActionBtn(action));
+    if (action === 'summary')           return this.handleRunAction(run, 'summary', this.synthesisActionBtn(action));
+    if (action === 'review-trace')      return this.setActiveTab('trace');
+    if (action === 'review-approvals')  { window.Router?.navigate?.('approvals'); return; }
+    if (action === 'review-findings')   { window.Router?.navigate?.('alerts');    return; }
+    if (action === 'edit-scope')        { window.Router?.navigate?.('scope');     return; }
+  },
+
+  // Lookup helper so synthesis actions can borrow the existing
+  // button-with-spinner pattern used in renderDetailHeader.
+  synthesisActionBtn(action) {
+    return document.querySelector(`#run-detail-hd [data-run-action="${action}"]`) || null;
+  },
+
   renderSnapshot(run) {
     const el = document.getElementById('run-snapshot');
     if (!el) return;
@@ -262,13 +540,129 @@ window.RunsPage = {
     const el = document.getElementById('run-output');
     if (!el) return;
     const events = run.events || [];
-    const lastAssistant = [...events].reverse().find((e) => e.type === 'message.assistant' || e.type === 'assistant.message' || (e.role === 'assistant' && e.content));
-    if (lastAssistant) {
-      el.textContent = lastAssistant.content || lastAssistant.output_preview || lastAssistant.outputPreview || JSON.stringify(lastAssistant, null, 2);
+    // Compose the final assistant reply from chunks. The previous code
+    // searched for `message.assistant` / `assistant.message` event types
+    // that never exist — chunks are emitted as `assistant.chunk`. Result:
+    // the Output tab always fell through to the bare stats summary even
+    // when the agent had said a full paragraph.
+    const replyText = events
+      .filter((e) => e.type === 'assistant.chunk')
+      .map((e) => e.output_preview || '')
+      .join('');
+    const thinkingText = events
+      .filter((e) => e.type === 'assistant.thinking')
+      .map((e) => e.output_preview || '')
+      .join('');
+
+    if (replyText || thinkingText) {
+      const blocks = [];
+      if (thinkingText) {
+        blocks.push(`<details class="run-output-thinking"><summary>🧠 Thinking · ${thinkingText.length} chars</summary><pre>${this.escapeHtml(thinkingText)}</pre></details>`);
+      }
+      if (replyText && window.renderMarkdown) {
+        blocks.push(`<div class="run-output-reply">${window.renderMarkdown(replyText)}</div>`);
+      } else if (replyText) {
+        blocks.push(`<pre class="run-output-reply">${this.escapeHtml(replyText)}</pre>`);
+      }
+      el.innerHTML = blocks.join('');
       return;
     }
     const replay = run.replay || {};
     el.textContent = `events: ${replay.eventCount ?? events.length}\nartifacts: ${replay.artifactCount ?? (run.artifacts || []).length}\ntool calls: ${replay.toolCalls?.length ?? 0}\nblocked: ${replay.blockedActions ?? 0}`;
+  },
+
+  /**
+   * Reconstruct the user → assistant → tool conversation from trace events
+   * and render it chat-style. Operators looking at a run typically want
+   * "what did the agent actually say and do?" — the raw trace stream
+   * doesn't answer that; this tab does.
+   */
+  renderMessages(run) {
+    const el = document.getElementById('run-messages');
+    if (!el) return;
+    const events = run.events || [];
+    if (!events.length) { el.innerHTML = '<div class="empty-msg">No events recorded for this run.</div>'; return; }
+
+    const turns = this.reconstructTurns(run, events);
+    if (!turns.length) { el.innerHTML = '<div class="empty-msg">No assistant turns reconstructable from this run.</div>'; return; }
+
+    el.innerHTML = turns.map((turn) => this.renderTurn(turn)).join('');
+  },
+
+  /**
+   * Walk the (already-aggregated) events and produce chat-style "turns".
+   * A turn is one of: user (the run goal), thinking, assistant, or tool.
+   */
+  reconstructTurns(run, rawEvents) {
+    const events = this.aggregateTraceEvents(rawEvents);
+    const turns = [];
+
+    // The run's goal is the user's prompt — surface it as the opening
+    // message so the reader has the question they're seeing answered.
+    if (run.goal || run.title) {
+      turns.push({ kind: 'user', text: run.goal || run.title });
+    }
+
+    // Track open tool calls so we can pair started → completed with their
+    // input/output. metadata.toolCallId is the join key.
+    const openTools = new Map();
+    for (const event of events) {
+      if (event.type === 'assistant.thought') {
+        turns.push({ kind: 'thinking', text: event.output_preview || '' });
+      } else if (event.type === 'assistant.reply') {
+        turns.push({ kind: 'assistant', text: event.output_preview || '' });
+      } else if (event.type === 'tool.call.started') {
+        openTools.set(event.metadata?.toolCallId || event.id, {
+          name: event.tool_name,
+          input: event.input,
+          startedAt: event.created_at,
+        });
+      } else if (event.type === 'tool.call.completed' || event.type === 'tool.call.failed') {
+        const key = event.metadata?.toolCallId || event.id;
+        const open = openTools.get(key) || { name: event.tool_name };
+        openTools.delete(key);
+        turns.push({
+          kind: 'tool',
+          name: event.tool_name || open.name,
+          input: open.input,
+          output: event.output_preview || '',
+          failed: event.type === 'tool.call.failed' || event.status === 'failed',
+        });
+      } else if (event.type === 'tool.call.blocked') {
+        turns.push({
+          kind: 'tool',
+          name: event.tool_name,
+          input: event.input,
+          output: event.output_preview || event.metadata?.decision?.reason || 'Blocked by policy',
+          blocked: true,
+        });
+      }
+    }
+    return turns;
+  },
+
+  renderTurn(turn) {
+    if (turn.kind === 'user') {
+      return `<div class="run-msg run-msg-user"><div class="run-msg-label">USER</div><div class="run-msg-body">${this.escapeHtml(turn.text)}</div></div>`;
+    }
+    if (turn.kind === 'thinking') {
+      return `<details class="run-msg run-msg-thinking"><summary>🧠 Thinking · ${turn.text.length} chars</summary><pre>${this.escapeHtml(turn.text)}</pre></details>`;
+    }
+    if (turn.kind === 'assistant') {
+      const md = window.renderMarkdown ? window.renderMarkdown(turn.text) : `<pre>${this.escapeHtml(turn.text)}</pre>`;
+      return `<div class="run-msg run-msg-assistant"><div class="run-msg-label">PHANTOM</div><div class="run-msg-body markdown-body">${md}</div></div>`;
+    }
+    if (turn.kind === 'tool') {
+      const args = turn.input ? `<pre class="run-msg-tool-args">${this.escapeHtml(JSON.stringify(turn.input, null, 2))}</pre>` : '';
+      const stateClass = turn.blocked ? 'blocked' : turn.failed ? 'failed' : 'done';
+      const stateLabel = turn.blocked ? '🛡 BLOCKED' : turn.failed ? '✗ FAILED' : '✓ TOOL';
+      return `<details class="run-msg run-msg-tool ${stateClass}">
+        <summary><span class="run-msg-tool-state">${stateLabel}</span> <strong>${this.escapeHtml(turn.name || 'tool')}</strong></summary>
+        ${args}
+        <pre class="run-msg-tool-output">${this.escapeHtml(turn.output || '')}</pre>
+      </details>`;
+    }
+    return '';
   },
 
   renderMetaDrawer(run) {
@@ -458,12 +852,35 @@ window.RunsPage = {
   renderEvent(event, index) {
     const preview = event.output_preview || event.outputPreview || event.tool_name || '';
     const isBlocked = event.type === 'tool.call.blocked' || event.type === 'scope.blocked';
+    const isAggregateReply = event.type === 'assistant.reply' || event.type === 'assistant.thought';
     const isToolCallStarted = (event.type === 'tool.call' || event.type === 'tool_call')
       && event.status === 'started';
     const engagingAnim = isToolCallStarted
       ? `<span class="trace-event-anim">${window.StateIcons?.engaging?.(24) || ''}</span>`
       : '';
     const dataIdx = typeof index === 'number' ? ` data-event-idx="${index}"` : '';
+
+    // Aggregated chunk events get a compact "Assistant reply · N chunks · M chars"
+    // header so the trace tab stays scannable. Click to expand the full text.
+    if (isAggregateReply) {
+      const chunkCount = event._count || 1;
+      const seqLabel = event.seqEnd && event.seqEnd !== event.seq ? `#${event.seq}–${event.seqEnd}` : `#${event.seq}`;
+      const isThought = event.type === 'assistant.thought';
+      const cls = isThought ? 'aggregated thought' : 'aggregated reply';
+      const label = isThought ? '🧠 Thinking' : '💬 Assistant reply';
+      return `
+        <details class="trace-event completed ${cls}"${dataIdx}>
+          <summary>
+            <span class="trace-event-dot"></span>
+            <span>${seqLabel}</span>
+            <strong>${label}</strong>
+            <small>${chunkCount} chunks · ${preview.length} chars</small>
+          </summary>
+          <pre>${this.escapeHtml(preview)}</pre>
+        </details>
+      `;
+    }
+
     return `
       <div class="trace-event ${this.escapeHtml(isBlocked ? 'failed' : (event.status || ''))}"${dataIdx}>
         <div class="trace-event-dot"></div>

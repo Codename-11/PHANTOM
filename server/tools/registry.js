@@ -1,8 +1,17 @@
+import { getPhantomToolDefinitions } from './phantom-tools.js';
+
 /**
- * Tool definitions in OpenAI function calling format
+ * Tool definitions in OpenAI function calling format.
+ *
+ * Composes two registries:
+ *   - The base shell/file/web/memory tools below (always available).
+ *   - PHANTOM-native domain tools from phantom-tools.js (scopes, assets,
+ *     findings, runs, artifacts, reports). These let the agent operate
+ *     PHANTOM itself instead of only the host shell.
  */
 export function getToolDefinitions() {
   return [
+    ...getPhantomToolDefinitions(),
     {
       type: 'function',
       function: {

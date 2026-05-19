@@ -16,6 +16,20 @@ const LOCAL_FILE_VALUE_FLAGS = new Set([
 ]);
 const OFFLINE_PASSWORD_TOOLS = new Set(['john', 'hashcat', 'hashid', 'nth', 'name-that-hash', 'unshadow', 'hash-identifier']);
 
+// Canonical action class universe. Used by the scope builder to render the
+// three-state matrix and by the policy evaluator to resolve modes. Order
+// matches the existing risk-classification output of classifyRisk().
+export const ACTION_CLASSES = [
+  'read/local',
+  'recon',
+  'network-scan',
+  'exploit',
+  'destructive',
+  'credentialed',
+  'offline-password-audit',
+  'online-bruteforce',
+];
+
 function stringifyInput(args) {
   if (args == null) return '';
   if (typeof args === 'string') return args;
@@ -187,6 +201,7 @@ function operatorOverrideDecision({ risk, targets, operatorOverride }) {
   if (!normalized.enabled) return null;
   return {
     allowed: true,
+    mode: 'auto',
     reason: `Operator Override active: governed scope checks bypassed for this test run`,
     risk,
     targets,
@@ -195,26 +210,215 @@ function operatorOverrideDecision({ risk, targets, operatorOverride }) {
   };
 }
 
-export function evaluateToolAction({ toolName, args = {}, scope = null, now = new Date(), operatorOverride = null }) {
+// ─── New: action_modes resolution ──────────────────────────────────────────
+//
+// Scopes can now declare a per-action-class mode: 'auto' | 'ask' | 'deny'.
+// `auto` runs immediately. `ask` pauses for operator approval in chat.
+// `deny` blocks outright.
+//
+// Backwards compat: if `action_modes` isn't set, fall back to the legacy
+// allowed_actions/blocked_actions arrays. Anything in `blocked_actions` is
+// treated as `deny` (explicit). Anything in `allowed_actions` is `auto`.
+// Anything outside both is `deny` (implicit — eligible for one-time override).
+function resolveActionMode(scope, risk) {
+  const modes = scope?.action_modes || scope?.actionModes;
+  if (modes && typeof modes === 'object') {
+    const direct = modes[risk];
+    if (direct === 'auto' || direct === 'ask' || direct === 'deny') {
+      return { mode: direct, explicit: true };
+    }
+    // Treat credentialed→offline-password-audit/online-bruteforce parent role
+    // when no specific entry exists.
+    if (BLOCKED_CREDENTIAL_SUBRISKS.has(risk) && modes.credentialed === 'deny') {
+      return { mode: 'deny', explicit: true };
+    }
+    // Defined map but no entry for this risk → implicit deny (allow-once
+    // override possible in chat).
+    return { mode: 'deny', explicit: false };
+  }
+  // Legacy fallback
+  const blocked = normalizeActions(scope?.blocked_actions || scope?.blockedActions);
+  if (blockedActionMatches(blocked, risk)) return { mode: 'deny', explicit: true };
+  const allowed = normalizeActions(scope?.allowed_actions || scope?.allowedActions);
+  if (allowed.size === 0) return { mode: 'auto', explicit: false };
+  if (allowedActionMatches(allowed, risk)) return { mode: 'auto', explicit: true };
+  return { mode: 'deny', explicit: false };
+}
+
+// ─── Time windows: active_hours + blackout_windows ────────────────────────
+//
+// Shape: { timezone: 'UTC' (optional, defaults UTC), windows: [{days, start, end}] }
+// days: ['mon','tue',...] (lowercase 3-letter), start/end as 'HH:MM' 24h.
+// A scope with `active_hours` requires that the current time falls within at
+// least one window. A scope with `blackout_windows` blocks if current time
+// matches any window. Both are evaluated in UTC unless `timezone` is set
+// (we only support UTC and the host TZ for now — true tz conversion is a
+// follow-up).
+function parseTimeStr(s) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '').trim());
+  if (!m) return null;
+  const h = Number(m[1]), mm = Number(m[2]);
+  if (h < 0 || h > 23 || mm < 0 || mm > 59) return null;
+  return h * 60 + mm;
+}
+
+const DAY_KEYS = ['sun','mon','tue','wed','thu','fri','sat'];
+
+function withinWindow(now, window) {
+  const days = (window?.days || []).map((d) => String(d).slice(0, 3).toLowerCase());
+  const startMin = parseTimeStr(window?.start);
+  const endMin = parseTimeStr(window?.end);
+  if (startMin == null || endMin == null) return false;
+  const dayKey = DAY_KEYS[now.getUTCDay()];
+  if (days.length && !days.includes(dayKey)) return false;
+  const nowMin = now.getUTCHours() * 60 + now.getUTCMinutes();
+  // Wrap-around windows (e.g. 22:00–02:00) are honored when end < start.
+  if (endMin >= startMin) return nowMin >= startMin && nowMin <= endMin;
+  return nowMin >= startMin || nowMin <= endMin;
+}
+
+function timeWindowDecision(scope, now) {
+  const active = scope?.active_hours?.windows;
+  if (Array.isArray(active) && active.length) {
+    const inWindow = active.some((w) => withinWindow(now, w));
+    if (!inWindow) {
+      return { ok: false, reason: 'outside scope active-hours window' };
+    }
+  }
+  const blackout = scope?.blackout_windows?.windows;
+  if (Array.isArray(blackout) && blackout.length) {
+    const inBlackout = blackout.some((w) => withinWindow(now, w));
+    if (inBlackout) {
+      return { ok: false, reason: 'inside scope blackout window' };
+    }
+  }
+  return { ok: true };
+}
+
+// ─── Rate caps ─────────────────────────────────────────────────────────────
+//
+// Shape on scope: { requests_per_minute, max_actions_per_run }.
+// `usage` is passed by the caller (scope/rate-limiter.js maintains it):
+//   { lastMinute: number, thisRun: number }
+// Override mode bypasses these — operator already accepted responsibility.
+function rateCapDecision(scope, usage) {
+  const caps = scope?.rate_caps || scope?.rateCaps;
+  if (!caps || typeof caps !== 'object') return { ok: true };
+  if (typeof caps.requests_per_minute === 'number' && usage?.lastMinute >= caps.requests_per_minute) {
+    return { ok: false, reason: `rate cap: ${caps.requests_per_minute} requests/minute exceeded` };
+  }
+  if (typeof caps.max_actions_per_run === 'number' && usage?.thisRun >= caps.max_actions_per_run) {
+    return { ok: false, reason: `rate cap: ${caps.max_actions_per_run} actions/run exceeded` };
+  }
+  return { ok: true };
+}
+
+// ─── Main evaluator ────────────────────────────────────────────────────────
+//
+// Decision shape:
+//   {
+//     allowed: bool,            // can the action proceed without further intervention?
+//     mode: 'auto' | 'ask' | 'deny',
+//     explicit: bool,           // true if the scope explicitly named this action
+//     reason: string,
+//     risk: string,
+//     targets: string[],
+//     policyMode: 'governed' | 'operator-override',
+//     gate: 'action' | 'time' | 'rate' | 'target' | 'expiry' | null
+//   }
+//
+// For the executor:
+//   - mode 'auto' AND allowed → run normally
+//   - mode 'ask'              → pause for operator approval (kind: 'ask')
+//   - mode 'deny' AND explicit → block, no override card
+//   - mode 'deny' AND !explicit → pause for one-time override (kind: 'allow-once')
+//   - operator override active → always mode 'auto', policyMode 'operator-override'
+export function evaluateToolAction({ toolName, args = {}, scope = null, now = new Date(), operatorOverride = null, usage = null }) {
   const risk = classifyRisk(toolName, args);
   const targets = extractTargets(args);
-  if (SAFE_RISKS.has(risk)) return { allowed: true, reason: 'Safe local/read action', risk, targets, policyMode: 'governed' };
-  if (!RISKY_RISKS.has(risk)) return { allowed: false, reason: `Unknown risk class: ${risk}`, risk, targets, policyMode: 'governed' };
+
+  if (SAFE_RISKS.has(risk)) {
+    return { allowed: true, mode: 'auto', explicit: true, reason: 'Safe local/read action', risk, targets, policyMode: 'governed', gate: null };
+  }
+  if (!RISKY_RISKS.has(risk)) {
+    return { allowed: false, mode: 'deny', explicit: true, reason: `Unknown risk class: ${risk}`, risk, targets, policyMode: 'governed', gate: 'action' };
+  }
+
+  // Operator override is total bypass — every gate skipped.
   const overrideDecision = operatorOverrideDecision({ risk, targets, operatorOverride });
-  if (overrideDecision) return overrideDecision;
-  if (!scope) return { allowed: false, reason: `No selected scope for ${risk} action`, risk, targets, policyMode: 'governed' };
-  if (scope.archived_at) return { allowed: false, reason: `Scope "${scope.name}" is archived`, risk, targets, policyMode: 'governed' };
+  if (overrideDecision) return { ...overrideDecision, explicit: true, gate: null };
+
+  // No scope at all = implicit deny (eligible for allow-once override card).
+  if (!scope) {
+    return { allowed: false, mode: 'deny', explicit: false, reason: `No selected scope for ${risk} action`, risk, targets, policyMode: 'governed', gate: 'action' };
+  }
+
+  // Archive and expiry are "explicit" — operator made these terminal decisions.
+  if (scope.archived_at) {
+    return { allowed: false, mode: 'deny', explicit: true, reason: `Scope "${scope.name}" is archived`, risk, targets, policyMode: 'governed', gate: 'expiry' };
+  }
   if (scope.expires_at && new Date(scope.expires_at).getTime() < now.getTime()) {
-    return { allowed: false, reason: `Scope "${scope.name}" is expired`, risk, targets, policyMode: 'governed' };
+    // Expiry is implicit-deny: operator can override for one more action.
+    return { allowed: false, mode: 'deny', explicit: false, reason: `Scope "${scope.name}" is expired`, risk, targets, policyMode: 'governed', gate: 'expiry' };
   }
-  const blocked = normalizeActions(scope.blocked_actions || scope.blockedActions);
-  if (blockedActionMatches(blocked, risk)) return { allowed: false, reason: `${risk} is blocked by scope policy`, risk, targets, policyMode: 'governed' };
-  const allowed = normalizeActions(scope.allowed_actions || scope.allowedActions);
-  if (allowed.size && !allowedActionMatches(allowed, risk)) return { allowed: false, reason: `${risk} is not allowed by selected scope`, risk, targets, policyMode: 'governed' };
-  if (targets.length === 0) return { allowed: true, reason: 'No explicit external target found', risk, targets, policyMode: 'governed' };
-  const outside = targets.filter(target => !targetInScope(target, scope));
-  if (outside.length > 0) {
-    return { allowed: false, reason: `Target ${outside[0]} is outside selected scope`, risk, targets, policyMode: 'governed' };
+
+  // Action-class gate (auto / ask / deny).
+  const actionResolution = resolveActionMode(scope, risk);
+  if (actionResolution.mode === 'deny') {
+    return {
+      allowed: false,
+      mode: 'deny',
+      explicit: actionResolution.explicit,
+      reason: actionResolution.explicit
+        ? `${risk} is explicitly denied by scope policy`
+        : `${risk} is not allowed by selected scope`,
+      risk, targets, policyMode: 'governed', gate: 'action',
+    };
   }
-  return { allowed: true, reason: 'Action is inside selected scope', risk, targets, policyMode: 'governed' };
+
+  // Time-window gate.
+  const tw = timeWindowDecision(scope, now);
+  if (!tw.ok) {
+    return { allowed: false, mode: 'deny', explicit: false, reason: tw.reason, risk, targets, policyMode: 'governed', gate: 'time' };
+  }
+
+  // Rate caps.
+  const rc = rateCapDecision(scope, usage);
+  if (!rc.ok) {
+    return { allowed: false, mode: 'deny', explicit: false, reason: rc.reason, risk, targets, policyMode: 'governed', gate: 'rate' };
+  }
+
+  // Target match gate. No targets observed = considered in-scope.
+  if (targets.length > 0) {
+    const outside = targets.filter((target) => !targetInScope(target, scope));
+    if (outside.length > 0) {
+      return {
+        allowed: false,
+        mode: 'deny',
+        explicit: false,
+        reason: `Target ${outside[0]} is outside selected scope`,
+        risk, targets, policyMode: 'governed', gate: 'target',
+      };
+    }
+  }
+
+  // Mode is auto or ask. Ask is "allowed pending approval" — the executor
+  // pauses for an operator decision; the action itself isn't blocked yet.
+  if (actionResolution.mode === 'ask') {
+    return {
+      allowed: false, // not yet — pending approval
+      mode: 'ask',
+      explicit: true,
+      reason: `${risk} requires operator approval per scope policy`,
+      risk, targets, policyMode: 'governed', gate: null,
+    };
+  }
+
+  return {
+    allowed: true,
+    mode: 'auto',
+    explicit: true,
+    reason: 'Action is inside selected scope',
+    risk, targets, policyMode: 'governed', gate: null,
+  };
 }

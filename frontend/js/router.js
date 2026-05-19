@@ -1,7 +1,11 @@
 window.Router = {
   current: 'dash',
   defaultRoute: 'dash',
-  routes: ['dash', 'chat', 'runs', 'graph', 'alerts', 'artifacts', 'scope', 'settings'],
+  // Routes we don't want to "stick" — landing on Dash is always preferable
+  // to landing on Settings after a reload.
+  noRestore: new Set(['settings']),
+  storeKey: 'phantom:last-route',
+  routes: ['dash', 'chat', 'runs', 'graph', 'alerts', 'artifacts', 'approvals', 'scope', 'settings'],
 
   init() {
     this.chatArea = document.getElementById('chat-area');
@@ -16,13 +20,23 @@ window.Router = {
       });
     });
 
-    const initialRoute = window.location.hash.replace('#', '') || this.defaultRoute;
+    // Priority: explicit URL hash → persisted last route → default (Dash).
+    // First-time visitors and operators returning after closing Settings
+    // both land on Dash; everyone else picks up where they left off.
+    const hashRoute = window.location.hash.replace('#', '');
+    let restored = null;
+    try { restored = localStorage.getItem(this.storeKey); } catch { /* private mode */ }
+    const initialRoute = hashRoute
+      || (restored && this.routes.includes(restored) && !this.noRestore.has(restored) ? restored : this.defaultRoute);
     this.navigate(initialRoute, { replace: true });
   },
 
   navigate(route, { replace = false } = {}) {
     if (!this.routes.includes(route)) route = this.defaultRoute;
     this.current = route;
+    if (!this.noRestore.has(route)) {
+      try { localStorage.setItem(this.storeKey, route); } catch { /* ignore */ }
+    }
 
     const isChat = route === 'chat';
     this.chatArea?.classList.toggle('hidden', !isChat);
@@ -44,6 +58,7 @@ window.Router = {
 
     // Page-specific show hooks
     if (route === 'dash') window.Dash?.show?.();
+    if (route === 'approvals') window.ApprovalsPage?.show?.();
 
     window.dispatchEvent(new CustomEvent('phantom:route', { detail: { route } }));
   },

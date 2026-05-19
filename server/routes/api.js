@@ -10,16 +10,27 @@ import {
   getMCPServers, addMCPServer, removeMCPServer,
   getRuns, getRun, getTraceEvents,
   getArtifacts, getArtifact, getArtifactsForRun,
+  getApprovalEvents, getApprovalStats,
+  createInstallRequest, getInstallRequest, getInstallRequests, updateInstallRequest,
 } from '../memory/store.js';
+import {
+  getInstallerStatus,
+  resolveInstallPlan,
+  summarizePlan,
+  toolIdsForTier,
+  TIERS,
+} from '../tools/installer.js';
+import { spawn } from 'child_process';
 import { artifactToPublic } from '../artifacts/renderers.js';
 import { writeArtifact, exportEvidenceBundle } from '../artifacts/artifact-store.js';
 import { renderExecutiveSummary, renderPentestReport } from '../artifacts/report-renderers.js';
 import { deriveRunGraph } from '../graph/graph-derive.js';
 import { buildSystemPrompt } from '../ai/system-prompt.js';
 import { createScope, getScope, getScopes, updateScope, archiveScope } from '../scope/scope-store.js';
-import { evaluateToolAction, normalizeOperatorOverride } from '../scope/policy.js';
+import { evaluateToolAction, normalizeOperatorOverride, ACTION_CLASSES } from '../scope/policy.js';
 import { parseTargetInput, targetsToScopeFields } from '../scope/target-parser.js';
 import { getScopeTemplates } from '../scope/templates.js';
+import { getRoeTemplates, getRoeTemplate } from '../scope/roe-templates.js';
 import {
   createPromptProfile, getPromptProfiles, getPromptProfile, updatePromptProfile,
   createPromptFragment, getPromptFragments, getPromptFragment, updatePromptFragment,
@@ -28,6 +39,10 @@ import {
 import { getToolDefinitions } from '../tools/registry.js';
 import { getToolpacks, getToolpack, checkToolpackAvailability } from '../toolpacks/toolpack-registry.js';
 import { buildRunReplay } from '../runs/replay.js';
+import { buildRunSynthesis, buildStubSynthesis, enrichSynthesisWithLLM } from '../runs/synthesis.js';
+import { llmCompleteJson } from '../ai/llm-client.js';
+import { getPostureTrend } from '../runs/trending.js';
+import { getOnboardingStatus, markOnboardingComplete, resetOnboarding } from '../onboarding/onboarding.js';
 import {
   createAsset, getAsset, getAssets, updateAsset, archiveAsset,
   createFinding, getFindings, updateFinding,
@@ -49,6 +64,279 @@ const router = Router();
 
 // Multer for file uploads (skills .zip)
 const upload = multer({ dest: '/tmp/phantom-uploads/', limits: { fileSize: 50 * 1024 * 1024 } });
+
+// ─── Sec-ops installer ───────────────────────────────────────────────────
+// Detects the host's package manager(s), maps catalog tools to install
+// commands, and serves an approval-gated install workflow. The exec path
+// runs each step via Node's spawn (no shell), captures stdout/stderr/exit,
+// and persists the result for replay.
+
+router.get('/installer/status', (req, res) => {
+  res.json(getInstallerStatus());
+});
+
+router.get('/installer/catalog', (req, res) => {
+  res.json({ tiers: TIERS, ...getInstallerStatus() });
+});
+
+// Preview without persistence — used by Settings when the operator picks
+// a tier so they see the exact command list before requesting approval.
+router.post('/installer/preview', (req, res) => {
+  const body = req.body || {};
+  const ids = Array.isArray(body.toolIds)
+    ? body.toolIds
+    : (body.tier && TIERS.includes(body.tier) ? toolIdsForTier(body.tier) : []);
+  if (!ids.length) return res.status(400).json({ error: 'toolIds or tier is required' });
+  const plan = resolveInstallPlan(ids);
+  res.json({ plan, summary: summarizePlan(plan) });
+});
+
+router.post('/installer/request', (req, res) => {
+  const body = req.body || {};
+  const ids = Array.isArray(body.toolIds)
+    ? body.toolIds
+    : (body.tier && TIERS.includes(body.tier) ? toolIdsForTier(body.tier) : []);
+  if (!ids.length) return res.status(400).json({ error: 'toolIds or tier is required' });
+  const plan = resolveInstallPlan(ids);
+  const request = createInstallRequest({ toolIds: ids, plan, note: body.note || '' });
+  res.json({ request, summary: summarizePlan(plan) });
+});
+
+router.get('/installer/requests', (req, res) => {
+  res.json(getInstallRequests({ status: req.query.status || null, limit: req.query.limit || 50 }));
+});
+
+router.get('/installer/requests/:id', (req, res) => {
+  const request = getInstallRequest(req.params.id);
+  if (!request) return res.status(404).json({ error: 'Install request not found' });
+  res.json(request);
+});
+
+router.post('/installer/requests/:id/cancel', (req, res) => {
+  const request = getInstallRequest(req.params.id);
+  if (!request) return res.status(404).json({ error: 'Install request not found' });
+  if (request.status !== 'pending') return res.status(409).json({ error: `cannot cancel a ${request.status} request` });
+  const updated = updateInstallRequest(req.params.id, {
+    status: 'cancelled',
+    decidedAt: new Date().toISOString(),
+    completedAt: new Date().toISOString(),
+  });
+  res.json(updated);
+});
+
+// Execute the install plan. Each step runs sequentially via spawn (no
+// shell), bounded by a per-step timeout. The captured per-step result
+// (exit, stdout-tail, stderr-tail) lands in the request's result_json
+// so the Approvals page can replay what happened.
+router.post('/installer/requests/:id/approve', async (req, res) => {
+  const request = getInstallRequest(req.params.id);
+  if (!request) return res.status(404).json({ error: 'Install request not found' });
+  if (request.status !== 'pending') return res.status(409).json({ error: `cannot approve a ${request.status} request` });
+
+  updateInstallRequest(req.params.id, { status: 'running', decidedAt: new Date().toISOString() });
+
+  const steps = [];
+  const PER_STEP_TIMEOUT_MS = 10 * 60_000; // 10 min cap per step (heavy packages can be slow)
+  let failed = false;
+
+  for (const entry of request.plan) {
+    if (!entry.backend || !entry.command) {
+      steps.push({
+        id: entry.id, backend: null, command: null, args: null,
+        skipped: true, reason: entry.reason || 'no package available',
+      });
+      continue;
+    }
+    const step = await runStep(entry, PER_STEP_TIMEOUT_MS);
+    steps.push(step);
+    if (step.exit !== 0) {
+      failed = true;
+      // Continue on per-step failure rather than abort — operator may
+      // still want the other packages installed and can re-request the
+      // failed ones with more privileges later.
+    }
+  }
+
+  const finalStatus = failed ? 'failed' : 'completed';
+  const updated = updateInstallRequest(req.params.id, {
+    status: finalStatus,
+    result: { steps },
+    completedAt: new Date().toISOString(),
+  });
+  res.json(updated);
+});
+
+// Privilege-failure signature matchers. The exit code alone isn't enough
+// (sudo returns 1, winget returns 5 or 0x80073D06, brew returns 1 with
+// "must be administrator") so we match on captured stderr/stdout too.
+// `kind: 'admin'` means "the package manager refused for lack of
+// privilege" — the UI surfaces a clear next step rather than the raw
+// exit code. Patterns are conservative: false negatives (missed admin
+// failures shown as generic exit) are recoverable; false positives
+// would tell the operator "needs admin" for unrelated failures, so we
+// require explicit phrasing.
+const ADMIN_FAILURE_PATTERNS = [
+  /must (?:be|run as) root/i,
+  /are you root/i,
+  /permission denied/i,
+  /requires (?:administrator|elevation|root|sudo)/i,
+  /access is denied/i,
+  /sudo: a password is required/i,
+  /operation not permitted/i,
+  /eaccess/i,
+  /not enough permissions/i,
+];
+// winget elevation errors are encoded numerically.
+const WINGET_ADMIN_EXIT_CODES = new Set([
+  -1978335230, // 0x8A150022 — APPINSTALLER_CLI_ERROR_NEEDS_REMEDIATION
+  -1978334202, // 0x8A150426 — needs elevation
+  -2147023293, // 0x80073D06 — DELIVERY_OPTIMIZATION needs elevation
+]);
+
+function classifyResult(step) {
+  if (step.skipped) return { kind: 'skipped' };
+  if (step.timedOut) return { kind: 'timeout' };
+  if (step.exit === 0) return { kind: 'ok' };
+  const blob = `${step.stderrTail || ''} ${step.stdoutTail || ''}`;
+  const matched = ADMIN_FAILURE_PATTERNS.some(re => re.test(blob));
+  if (matched) return { kind: 'admin' };
+  if (step.backend === 'winget' && WINGET_ADMIN_EXIT_CODES.has(step.exit)) return { kind: 'admin' };
+  if (step.backend === 'choco' && step.exit === 1603) return { kind: 'admin' }; // MSI install needs admin
+  return { kind: 'failed' };
+}
+
+// Compose a single-line elevated command string the operator can paste
+// into their own admin shell. Used by the UI's "Copy elevated command"
+// affordance for Windows / cases where the host lacks a cached sudo
+// password. Pure quoting — we never execute this; the operator does.
+function elevatedCommandPreview(entry, os) {
+  const shellQuote = (s) => /[\s"']/.test(s) ? `"${String(s).replace(/"/g, '\\"')}"` : String(s);
+  const parts = [entry.command, ...(entry.args || [])].map(shellQuote);
+  if (os === 'win32') {
+    // PowerShell elevated one-liner — no Start-Process flag needed if the
+    // operator already pasted into an admin shell, but Start-Process makes
+    // the intent obvious.
+    return `Start-Process -Verb RunAs ${parts[0]} -ArgumentList ${parts.slice(1).join(',')}`;
+  }
+  // POSIX — operator runs in their own TTY where sudo can prompt.
+  if (entry.command === 'sudo') return parts.slice(0).join(' '); // already sudo'd
+  return `sudo ${parts.join(' ')}`;
+}
+
+function runStep(entry, timeoutMs) {
+  return new Promise((resolve) => {
+    const startedAt = new Date().toISOString();
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    let child;
+
+    // Linux sudo password injection. The installer's apt/dnf/pacman steps
+    // resolve to `sudo apt-get install …`; without a TTY (we're inside an
+    // Express request) sudo fails to prompt. If the operator has cached
+    // their sudo password via /api/sudo/validate, prepend `-S` and pipe
+    // the password to stdin so the install proceeds non-interactively.
+    let cmd = entry.command;
+    let args = entry.args || [];
+    let stdinFeed = null;
+    if (process.platform === 'linux' && cmd === 'sudo' && !args.includes('-S')) {
+      const cachedPass = getSetting('sudo_password', '');
+      if (cachedPass) {
+        args = ['-S', ...args];
+        stdinFeed = cachedPass + '\n';
+      }
+    }
+
+    try {
+      child = spawn(cmd, args, { shell: false });
+    } catch (err) {
+      resolve({
+        id: entry.id, backend: entry.backend, command: entry.command, args: entry.args,
+        exit: -1, error: err.message, startedAt, endedAt: new Date().toISOString(),
+        stdoutTail: '', stderrTail: err.message,
+        classification: { kind: 'failed' },
+      });
+      return;
+    }
+    if (stdinFeed && child.stdin && !child.stdin.destroyed) {
+      try { child.stdin.write(stdinFeed); child.stdin.end(); } catch { /* ignore */ }
+    }
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { child.kill('SIGTERM'); } catch { /* may already be gone */ }
+    }, timeoutMs);
+    child.stdout?.on('data', (chunk) => { stdout += chunk.toString(); if (stdout.length > 20_000) stdout = stdout.slice(-20_000); });
+    child.stderr?.on('data', (chunk) => {
+      // Strip sudo's interactive password prompt from stderr so it never
+      // appears in the UI even if -S is in use.
+      const text = chunk.toString().replace(/\[sudo\] password for.*?:\s*/g, '');
+      stderr += text;
+      if (stderr.length > 20_000) stderr = stderr.slice(-20_000);
+    });
+    child.on('close', (exit) => {
+      clearTimeout(timer);
+      const result = {
+        id: entry.id, backend: entry.backend, command: entry.command, args: entry.args,
+        exit: timedOut ? 124 : (exit ?? -1),
+        timedOut,
+        startedAt, endedAt: new Date().toISOString(),
+        stdoutTail: stdout.slice(-4_000),
+        stderrTail: stderr.slice(-4_000),
+      };
+      result.classification = classifyResult(result);
+      if (result.classification.kind === 'admin') {
+        result.elevatedCommand = elevatedCommandPreview(entry, process.platform);
+      }
+      resolve(result);
+    });
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      const result = {
+        id: entry.id, backend: entry.backend, command: entry.command, args: entry.args,
+        exit: -1, error: err.message,
+        startedAt, endedAt: new Date().toISOString(),
+        stdoutTail: stdout.slice(-4_000),
+        stderrTail: (stderr + '\n' + err.message).slice(-4_000),
+      };
+      result.classification = classifyResult(result);
+      if (result.classification.kind === 'admin') {
+        result.elevatedCommand = elevatedCommandPreview(entry, process.platform);
+      }
+      resolve(result);
+    });
+  });
+}
+
+// Test surface so the classification logic can be unit-tested without
+// spawning subprocesses. Not exported in the route's public API.
+export const _installerInternals = { classifyResult, elevatedCommandPreview };
+
+// ─── Posture trending ────────────────────────────────────────────────────
+// Aggregates synthesis-card scores across recent runs so the Dash can show
+// a posture trend without re-deriving the metric. Filterable by scopeId.
+router.get('/trending/posture', (req, res) => {
+  res.json(getPostureTrend({
+    scopeId: req.query.scopeId || null,
+    limit:   req.query.limit   || 12,
+    includeRecentRuns: req.query.includeRecentRuns !== 'false',
+  }));
+});
+
+// ─── Onboarding ──────────────────────────────────────────────────────────
+// Surfaces first-run state to the frontend so the wizard can decide whether
+// to auto-open. Completion is a sticky flag in the settings table — once
+// the operator dismisses the wizard we never auto-open it again, even if
+// they later wipe their data. Settings → "Re-run onboarding" calls
+// /reset to clear the flag.
+router.get('/onboarding/status', (req, res) => {
+  res.json(getOnboardingStatus());
+});
+router.post('/onboarding/complete', (req, res) => {
+  res.json(markOnboardingComplete(true));
+});
+router.post('/onboarding/reset', (req, res) => {
+  res.json(resetOnboarding());
+});
 
 // ─── Providers ───
 // Returns the registry of OpenAI-compatible providers PHANTOM can route to.
@@ -75,11 +363,17 @@ router.get('/settings', (req, res) => {
     maxTokens: parseInt(settings.api_max_tokens || config.api.maxTokens),
     workspace: settings.workspace || config.workspace,
     sudoConfigured: !!settings.sudo_password,
+    synthesisLlmEnabled: settings.synthesis_llm_enabled === '1',
   });
 });
 
 router.put('/settings', (req, res) => {
-  const { provider, baseUrl, apiKey, model, temperature, maxTokens, sudoPassword, workspace } = req.body;
+  const { provider, baseUrl, apiKey, model, temperature, maxTokens, sudoPassword, workspace, synthesisLlmEnabled } = req.body;
+  // Feature flag: LLM-enriched synthesis highlights/nextSteps. Persisted
+  // as '0' / '1' in the settings table; read by /api/runs/:id/synthesis.
+  if (synthesisLlmEnabled !== undefined) {
+    setSetting('synthesis_llm_enabled', synthesisLlmEnabled ? '1' : '0');
+  }
 
   // Provider must be handled before baseUrl so explicit baseUrl wins, but
   // the auto-derived URL from the provider registry takes effect when the
@@ -214,6 +508,17 @@ router.get('/scopes', (req, res) => {
 router.get('/scopes/templates', (req, res) => {
   res.json(getScopeTemplates());
 });
+// ROE (rules-of-engagement) templates — pre-built scope payloads that fill
+// action_modes, time windows, rate caps, and ROE notes for common
+// engagement types (internal pentest, bug bounty, red team, etc.).
+router.get('/scopes/roe-templates', (req, res) => {
+  res.json({ action_classes: ACTION_CLASSES, templates: getRoeTemplates() });
+});
+router.get('/scopes/roe-templates/:id', (req, res) => {
+  const tpl = getRoeTemplate(req.params.id);
+  if (!tpl) return res.status(404).json({ error: 'ROE template not found' });
+  res.json(tpl);
+});
 router.post('/scopes/parse-targets', (req, res) => {
   const parsed = parseTargetInput(req.body?.input || '');
   res.json({ ...parsed, scopeFields: targetsToScopeFields(parsed.targets) });
@@ -260,6 +565,26 @@ router.delete('/scopes/:id', (req, res) => {
   if (!scope) return res.status(404).json({ error: 'Scope not found' });
   res.json(scope);
 });
+// PATCH a single action class's mode — used by the chat-side "promote to
+// auto" suggestion after the operator has approved the same action 3+ times.
+// Round-trips through scope-store.updateScope so the change is persisted
+// and emits an updated_at bump.
+router.patch('/scopes/:id/action-mode', (req, res) => {
+  const scope = getScope(req.params.id);
+  if (!scope) return res.status(404).json({ error: 'Scope not found' });
+  const cls = String(req.body?.actionClass || '').toLowerCase();
+  const mode = String(req.body?.mode || '').toLowerCase();
+  if (!cls) return res.status(400).json({ error: 'actionClass required' });
+  if (!['auto', 'ask', 'deny'].includes(mode)) {
+    return res.status(400).json({ error: 'mode must be auto | ask | deny' });
+  }
+  const next = { ...(scope.action_modes || {}), [cls]: mode };
+  try {
+    const updated = updateScope(req.params.id, { actionModes: next });
+    res.json(updated);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 router.post('/scopes/:id/evaluate', (req, res) => {
   const scope = getScope(req.params.id);
   if (!scope) return res.status(404).json({ error: 'Scope not found' });
@@ -366,6 +691,25 @@ router.post('/comparisons', (req, res) => {
   catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// ─── Approval audit ──────────────────────────────────────────────────────
+// All approval/denial/override events are reconstructed from trace_events
+// — no new table needed. Filterable by decision, risk, scopeId, toolName,
+// and an ISO `since` timestamp.
+router.get('/approvals', (req, res) => {
+  const events = getApprovalEvents({
+    limit: req.query.limit || 100,
+    decision: req.query.decision || null,
+    risk: req.query.risk || null,
+    scopeId: req.query.scopeId || null,
+    toolName: req.query.toolName || null,
+    since: req.query.since || null,
+  });
+  res.json({ count: events.length, events });
+});
+router.get('/approvals/stats', (req, res) => {
+  res.json(getApprovalStats({ since: req.query.since || null }));
+});
+
 // ─── Runs + Trace Events ───
 router.get('/runs', (req, res) => {
   res.json(getRuns({
@@ -386,6 +730,43 @@ router.get('/runs/:id/replay', (req, res) => {
   const replay = buildRunReplay(req.params.id, { eventLimit: req.query.limit || 2000 });
   if (!replay) return res.status(404).json({ error: 'Run not found' });
   res.json(replay);
+});
+
+// End-of-run synthesis card. Single canonical data shape — also consumed by
+// the onboarding wizard preview and the posture-trending dashboard.
+//
+// Pass ?preview=stub for a hand-tuned sample synthesis without touching the DB
+// (used by the onboarding wizard to show "here's what you'll see when a run
+// finishes" before any real runs exist).
+router.get('/runs/:id/synthesis', async (req, res) => {
+  if (req.query.preview === 'stub') {
+    return res.json(buildStubSynthesis());
+  }
+  const run = getRun(req.params.id);
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  const events = getTraceEvents(req.params.id, { limit: 2000 });
+  const artifacts = getArtifactsForRun(req.params.id).map(artifact => artifactToPublic(artifact));
+  const findings = getFindings({ runId: req.params.id, limit: 500 });
+  const replay = buildRunReplay(req.params.id, { eventLimit: 2000 })?.replay || null;
+  const previousScore = req.query.previousScore ? Number(req.query.previousScore) : null;
+
+  let synthesis = buildRunSynthesis({
+    run, events, artifacts, findings, replay,
+    previousScore: Number.isFinite(previousScore) ? previousScore : null,
+  });
+
+  // Feature-flagged LLM enrichment: replaces the heuristic highlights[] +
+  // nextSteps[] with content the model generates from the actual trace.
+  // Flag default is OFF. Operator toggles `synthesis_llm_enabled` in
+  // settings (or via the query string `?enrich=1` for ad-hoc testing).
+  // Any failure falls back to the heuristic synthesis — the endpoint
+  // remains green even if the model is down.
+  const flagOn = getSetting('synthesis_llm_enabled', '0') === '1';
+  const explicit = req.query.enrich === '1';
+  if ((flagOn || explicit) && run.status !== 'running') {
+    synthesis = await enrichSynthesisWithLLM(synthesis, events, { llmCompleteJson });
+  }
+  res.json(synthesis);
 });
 
 router.get('/runs/:id/artifacts', (req, res) => {

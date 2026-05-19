@@ -8,6 +8,8 @@ window.SettingsPage = {
     this.initTabs();
     this.initPromptPreview();
     this.renderStaticPanels();
+    this.initOnboardingControl();
+    this.initSynthesisLlmToggle();
 
     window.addEventListener('phantom:route', (event) => {
       if (event.detail?.route === 'settings') {
@@ -16,6 +18,55 @@ window.SettingsPage = {
       }
     });
     this.loadPromptAdmin();
+  },
+
+  // LLM-synthesis feature flag toggle (Advanced panel). Persists to the
+  // settings table via PUT /api/settings; the synthesis route reads it on
+  // each fetch so the change takes effect immediately on the next card
+  // render — no restart required.
+  initSynthesisLlmToggle() {
+    const toggle = document.getElementById('settings-synthesis-llm-toggle');
+    if (!toggle || toggle.dataset.bound === '1') return;
+    toggle.dataset.bound = '1';
+    // Mirror current server state on mount.
+    fetch('/api/settings').then(r => r.json()).then(s => {
+      toggle.checked = !!s.synthesisLlmEnabled;
+    }).catch(() => {});
+    toggle.addEventListener('change', async () => {
+      try {
+        await fetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ synthesisLlmEnabled: toggle.checked }),
+        });
+      } catch (err) {
+        toggle.checked = !toggle.checked;
+        alert(`Failed to update setting: ${err.message}`);
+      }
+    });
+  },
+
+  // "Open wizard" button on Advanced panel. Resets the sticky completion
+  // flag and re-summons the wizard so the operator can re-walk setup.
+  initOnboardingControl() {
+    const btn = document.getElementById('settings-onboarding-open');
+    if (!btn || btn.dataset.bound === '1') return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', async () => {
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Opening…';
+      try {
+        await fetch('/api/onboarding/reset', { method: 'POST' });
+        await window.OnboardingWizard?.open?.();
+      } catch (err) {
+        btn.textContent = `Failed: ${err.message}`;
+        setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 1600);
+        return;
+      }
+      btn.textContent = original;
+      btn.disabled = false;
+    });
   },
 
   mountExistingSettingsBody() {
@@ -171,10 +222,22 @@ window.SettingsPage = {
     const target = document.getElementById('toolpack-settings-list');
     const security = document.getElementById('settings-scope-policy');
     try {
-      const res = await this.fetchWithTimeout('/api/toolpacks');
+      // Fetch toolpacks and installer status in parallel so each toolpack
+      // card can decorate its tool rows with green/red availability dots
+      // and a "N/M on host" chip — the operator sees what's already there
+      // before they consider installing.
+      const [res, statusRes] = await Promise.all([
+        this.fetchWithTimeout('/api/toolpacks'),
+        this.fetchWithTimeout('/api/installer/status').catch(() => null),
+      ]);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       this.toolpacks = await res.json();
-      if (target) target.innerHTML = window.SettingsPagePresenter?.renderToolpackCards(this.toolpacks) || this.toolpacks.map(pack => `
+      let availabilityByCommand = {};
+      if (statusRes && statusRes.ok) {
+        const status = await statusRes.json();
+        availabilityByCommand = Object.fromEntries((status.tools || []).map(t => [t.command, !!t.available]));
+      }
+      if (target) target.innerHTML = window.SettingsPagePresenter?.renderToolpackCards(this.toolpacks, { availabilityByCommand }) || this.toolpacks.map(pack => `
           <article class="toolpack-card">
             <div><strong>${this.escapeHtml(pack.name)}</strong><p>${this.escapeHtml(pack.summary)}</p></div>
             <div class="asset-chip-row"><span class="asset-chip">Risks: ${this.escapeHtml((pack.risks || []).join(', '))}</span><span class="asset-chip">${pack.policy?.scopeRequired ? 'Scope required' : 'Scope optional'}</span></div>

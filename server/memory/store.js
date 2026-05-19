@@ -330,9 +330,32 @@ export function initDB(dbPath = config.db.path) {
     CREATE INDEX IF NOT EXISTS idx_findings_run ON findings(run_id);
     CREATE INDEX IF NOT EXISTS idx_asset_snapshots_asset ON asset_snapshots(asset_id);
     CREATE INDEX IF NOT EXISTS idx_run_templates_source ON run_templates(source_run_id);
+
+    CREATE TABLE IF NOT EXISTS install_requests (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'pending',
+      tool_ids_json TEXT NOT NULL,
+      plan_json TEXT NOT NULL,
+      note TEXT,
+      result_json TEXT,
+      requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      decided_at DATETIME,
+      completed_at DATETIME
+    );
+    CREATE INDEX IF NOT EXISTS idx_install_requests_status ON install_requests(status);
   `);
 
   ensureColumn('runs', 'prompt_snapshot_json', 'TEXT');
+
+  // Scope-policy expansion (action_modes, time windows, rate caps, ROE).
+  // These are additive — existing scopes continue working with their
+  // allowed_actions/blocked_actions columns; the new fields take precedence
+  // only when populated.
+  ensureColumn('scopes', 'action_modes_json', 'TEXT');
+  ensureColumn('scopes', 'active_hours_json', 'TEXT');
+  ensureColumn('scopes', 'blackout_windows_json', 'TEXT');
+  ensureColumn('scopes', 'rate_caps_json', 'TEXT');
+  ensureColumn('scopes', 'rules_of_engagement', 'TEXT');
 
   return db;
 }
@@ -631,6 +654,167 @@ export function getTraceEvents(runId, { limit = 500 } = {}) {
   ).all(runId, safeLimit).map(normalizeTraceEvent);
 }
 
+// ─── Approval audit queries ────────────────────────────────────────────────
+//
+// Reconstructs the approval log from the trace_events table — no new table
+// needed since every approval/denial/override is already persisted. The
+// "decision" field is derived from the event type so the UI doesn't have
+// to know about the underlying trace vocabulary.
+const APPROVAL_EVENT_TYPES = [
+  'tool.call.approval.granted',
+  'tool.call.approval.denied',
+  'tool.call.allow-once',
+  'tool.call.override',
+];
+
+function decisionForEvent(event) {
+  if (event.type === 'tool.call.approval.granted') {
+    return event.metadata?.kind === 'allow-once' ? 'allow-once' : 'granted';
+  }
+  if (event.type === 'tool.call.approval.denied') {
+    // Timeout note is set server-side when the 5-min timer fires.
+    return /timed out/i.test(event.metadata?.approval?.note || '') ? 'timeout' : 'denied';
+  }
+  if (event.type === 'tool.call.allow-once') return 'allow-once';
+  if (event.type === 'tool.call.override') return 'override';
+  return 'unknown';
+}
+
+function normalizeApprovalEvent(row) {
+  const event = normalizeTraceEvent(row);
+  if (!event) return null;
+  const metadata = event.metadata || {};
+  const decision = decisionForEvent(event);
+  return {
+    id: event.id,
+    runId: event.run_id,
+    seq: event.seq,
+    type: event.type,
+    decision,
+    kind: metadata.kind || (event.type === 'tool.call.override' ? 'override' : null),
+    risk: metadata.risk || metadata.decision?.risk || 'unknown',
+    gate: metadata.gate || metadata.decision?.gate || null,
+    reason: metadata.decision?.reason || event.output_preview || '',
+    operatorNote: metadata.approval?.note || null,
+    toolName: event.tool_name,
+    args: event.input || null,
+    scopeId: metadata.scopeId || metadata.decision?.scopeId || null,
+    policyMode: metadata.policyMode || metadata.decision?.policyMode || null,
+    toolCallId: metadata.toolCallId || null,
+    occurredAt: event.started_at,
+    durationMs: event.duration_ms || null,
+    // Scope name is filled in by the route handler via a join.
+    scopeName: null,
+    runTitle: null,
+  };
+}
+
+/**
+ * Query approval events with optional filters. Decisions:
+ *   'granted'    — operator approved an ask-gate
+ *   'denied'     — operator denied an ask-gate or allow-once card
+ *   'allow-once' — operator granted a one-time exception to an implicit deny
+ *   'override'   — Operator Override bypassed the gate
+ *   'timeout'    — the 5-minute approval window expired
+ */
+export function getApprovalEvents({
+  limit = 100,
+  decision = null,
+  risk = null,
+  scopeId = null,
+  toolName = null,
+  since = null,
+} = {}) {
+  const safeLimit = Math.max(1, Math.min(parseInt(limit, 10) || 100, 1000));
+  const placeholders = APPROVAL_EVENT_TYPES.map(() => '?').join(',');
+  const params = [...APPROVAL_EVENT_TYPES];
+  const where = [`type IN (${placeholders})`];
+  if (since) {
+    where.push('started_at >= ?');
+    params.push(since);
+  }
+  if (toolName) {
+    where.push('tool_name = ?');
+    params.push(toolName);
+  }
+  const sql = `SELECT * FROM trace_events WHERE ${where.join(' AND ')} ORDER BY started_at DESC LIMIT ?`;
+  params.push(safeLimit * 4); // overshoot since some filters apply post-load
+  const rows = getDB().prepare(sql).all(...params).map(normalizeApprovalEvent).filter(Boolean);
+
+  // Post-filter by derived fields (decision, risk, scopeId — these live in
+  // metadata JSON so we can't push them into the WHERE cheaply).
+  const filtered = rows.filter((row) => {
+    if (decision && row.decision !== decision) return false;
+    if (risk && row.risk !== risk) return false;
+    if (scopeId && row.scopeId !== scopeId) return false;
+    return true;
+  }).slice(0, safeLimit);
+
+  // Join scope name and run title.
+  const scopeIds = [...new Set(filtered.map((r) => r.scopeId).filter(Boolean))];
+  const runIds = [...new Set(filtered.map((r) => r.runId).filter(Boolean))];
+  const scopeNames = {};
+  const runTitles = {};
+  if (scopeIds.length) {
+    const sPh = scopeIds.map(() => '?').join(',');
+    for (const s of getDB().prepare(`SELECT id, name FROM scopes WHERE id IN (${sPh})`).all(...scopeIds)) {
+      scopeNames[s.id] = s.name;
+    }
+  }
+  if (runIds.length) {
+    const rPh = runIds.map(() => '?').join(',');
+    for (const r of getDB().prepare(`SELECT id, title, conversation_id FROM runs WHERE id IN (${rPh})`).all(...runIds)) {
+      runTitles[r.id] = { title: r.title, conversationId: r.conversation_id };
+    }
+  }
+  return filtered.map((row) => ({
+    ...row,
+    scopeName: scopeNames[row.scopeId] || null,
+    runTitle: runTitles[row.runId]?.title || null,
+    conversationId: runTitles[row.runId]?.conversationId || null,
+  }));
+}
+
+/**
+ * Aggregate approval stats for the dashboard KPI strip.
+ * Counts events grouped by decision and by risk; also returns the most
+ * recent 14 days as a sparkline series.
+ */
+export function getApprovalStats({ since = null } = {}) {
+  const placeholders = APPROVAL_EVENT_TYPES.map(() => '?').join(',');
+  const params = [...APPROVAL_EVENT_TYPES];
+  const where = [`type IN (${placeholders})`];
+  if (since) { where.push('started_at >= ?'); params.push(since); }
+  const sql = `SELECT * FROM trace_events WHERE ${where.join(' AND ')} ORDER BY started_at DESC LIMIT 5000`;
+  const rows = getDB().prepare(sql).all(...params).map(normalizeApprovalEvent).filter(Boolean);
+
+  const byDecision = { granted: 0, denied: 0, 'allow-once': 0, override: 0, timeout: 0 };
+  const byRisk = {};
+  const byDay = {};
+  for (const row of rows) {
+    byDecision[row.decision] = (byDecision[row.decision] || 0) + 1;
+    if (row.risk) byRisk[row.risk] = (byRisk[row.risk] || 0) + 1;
+    const day = String(row.occurredAt || '').slice(0, 10);
+    if (day) byDay[day] = (byDay[day] || 0) + 1;
+  }
+
+  // Last 14 days as a flat series (oldest first).
+  const series = [];
+  const today = new Date();
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(today.getTime() - i * 86400_000);
+    const key = d.toISOString().slice(0, 10);
+    series.push({ day: key, count: byDay[key] || 0 });
+  }
+
+  return {
+    total: rows.length,
+    byDecision,
+    byRisk,
+    series,
+  };
+}
+
 // ─── Artifacts ───
 function normalizeArtifact(row) {
   if (!row) return null;
@@ -701,6 +885,62 @@ export function getArtifacts({ limit = 100, runId = null, conversationId = null,
 
 export function getArtifactsForRun(runId, options = {}) {
   return getArtifacts({ ...options, runId });
+}
+
+// ─── Install requests ─────────────────────────────────────────────────────
+// Approval-gated install requests for the sec-ops installer. Stores the
+// resolved plan so the approval card can re-display it verbatim, and the
+// captured result (stdout/stderr/exit) so post-hoc audits can replay what
+// actually happened.
+function normalizeInstallRequest(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    status: row.status,
+    toolIds: parseJSONField(row.tool_ids_json) || [],
+    plan: parseJSONField(row.plan_json) || [],
+    note: row.note || '',
+    result: parseJSONField(row.result_json) || null,
+    requested_at: row.requested_at,
+    decided_at: row.decided_at,
+    completed_at: row.completed_at,
+  };
+}
+
+export function createInstallRequest({ toolIds, plan, note = '' }) {
+  const id = uuidv4();
+  getDB().prepare(
+    `INSERT INTO install_requests (id, status, tool_ids_json, plan_json, note)
+     VALUES (?, 'pending', ?, ?, ?)`
+  ).run(id, JSON.stringify(toolIds || []), JSON.stringify(plan || []), note || null);
+  return getInstallRequest(id);
+}
+
+export function getInstallRequest(id) {
+  return normalizeInstallRequest(getDB().prepare('SELECT * FROM install_requests WHERE id = ?').get(id));
+}
+
+export function getInstallRequests({ status = null, limit = 50 } = {}) {
+  const safeLimit = Math.max(1, Math.min(parseInt(limit, 10) || 50, 200));
+  let sql = 'SELECT * FROM install_requests';
+  const params = [];
+  if (status) { sql += ' WHERE status = ?'; params.push(status); }
+  sql += ' ORDER BY requested_at DESC LIMIT ?';
+  params.push(safeLimit);
+  return getDB().prepare(sql).all(...params).map(normalizeInstallRequest);
+}
+
+export function updateInstallRequest(id, { status = null, result = null, decidedAt = null, completedAt = null }) {
+  const fields = [];
+  const params = [];
+  if (status) { fields.push('status = ?'); params.push(status); }
+  if (result !== null) { fields.push('result_json = ?'); params.push(JSON.stringify(result)); }
+  if (decidedAt) { fields.push('decided_at = ?'); params.push(decidedAt); }
+  if (completedAt) { fields.push('completed_at = ?'); params.push(completedAt); }
+  if (!fields.length) return getInstallRequest(id);
+  params.push(id);
+  getDB().prepare(`UPDATE install_requests SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+  return getInstallRequest(id);
 }
 
 export function closeDB() {

@@ -76,25 +76,81 @@
     }).join('');
   }
 
+  // Resolve a row's mode from the saved state. Priority:
+  //   1. state.action_modes[id] — new canonical field
+  //   2. legacy allow/blocked arrays — backwards compat
+  function resolveModeForRow(rowId, state) {
+    const modes = state.action_modes || state.actionModes;
+    if (modes && typeof modes === 'object') {
+      const v = modes[rowId];
+      if (v === 'auto' || v === 'ask' || v === 'deny') return v;
+      return 'deny'; // unspecified → implicit deny
+    }
+    const blocked = new Set((state.blocked || []).map((s) => String(s).toLowerCase()));
+    const allowed = new Set((state.allowed || []).map((s) => String(s).toLowerCase()));
+    if (blocked.has(rowId)) return 'deny';
+    if (allowed.has(rowId)) return 'auto';
+    return 'deny';
+  }
+
+  // Three-state action matrix: Allow (auto) / Ask / Deny radio per row.
+  // The classic two-state checkbox layout still works (driven by the legacy
+  // allowed/blocked CSV inputs in scope-page.js), but the new matrix is the
+  // canonical writer of `action_modes`. Locked rows (exploit, destructive)
+  // are hard-pinned to Deny.
   function renderActionClassTable(state = {}) {
-    const allowed = new Set((state.allowed || []).map(s => String(s).toLowerCase()));
-    const blocked = new Set((state.blocked || []).map(s => String(s).toLowerCase()));
     return ACTION_CLASSES.map((row) => {
       const locked = row.locked;
-      const isAllow = !locked && allowed.has(row.id);
-      const isDeny  = locked || blocked.has(row.id);
+      const current = locked ? 'deny' : resolveModeForRow(row.id, state);
       const rowCls = locked ? 'action-class-locked' : '';
-      const allowCell = locked
-        ? `<span class="mono" style="color:var(--policy);font-size:var(--fs-10);">LOCKED</span>`
-        : `<input type="checkbox" data-action-allow="${escapeHtml(row.id)}" ${isAllow ? 'checked' : ''} aria-label="Allow ${escapeHtml(row.id)}">`;
-      const denyCell = `<input type="checkbox" data-action-deny="${escapeHtml(row.id)}" ${isDeny ? 'checked' : ''} ${locked ? 'disabled' : ''} aria-label="Deny ${escapeHtml(row.id)}">`;
+      // Renders three radio buttons in one cell — they share the row's
+      // input name so HTML enforces single-select. The legacy allow/deny
+      // checkbox markup is still emitted (hidden) so older event handlers
+      // in scope-page.js don't crash when looking for them.
+      const radio = (mode, label, className) => {
+        const checked = current === mode ? 'checked' : '';
+        const disabled = locked && mode !== 'deny' ? 'disabled' : '';
+        return `<label class="action-mode-radio ${className}">`
+          + `<input type="radio" name="action-mode-${escapeHtml(row.id)}" `
+          +   `data-action-mode-input="${escapeHtml(row.id)}" value="${escapeHtml(mode)}" ${checked} ${disabled}>`
+          + `<span>${escapeHtml(label)}</span>`
+          + `</label>`;
+      };
+      const modeCell = locked
+        ? `<span class="mono" style="color:var(--sev-crit);font-size:var(--fs-10);">LOCKED · DENY</span>`
+        : `<div class="action-mode-group" data-action-mode="${escapeHtml(row.id)}">`
+          + radio('auto', 'Allow', 'mode-auto')
+          + radio('ask',  'Ask',   'mode-ask')
+          + radio('deny', 'Deny',  'mode-deny')
+          + `</div>`;
+      // Hidden legacy cells preserve the old checkbox API so existing
+      // scope-page event handlers keep working until we migrate them.
+      const legacyAllowCheckbox = locked
+        ? `<input type="hidden" data-action-allow="${escapeHtml(row.id)}" value="0">`
+        : `<input type="checkbox" data-action-allow="${escapeHtml(row.id)}" ${current === 'auto' ? 'checked' : ''} hidden>`;
+      const legacyDenyCheckbox = `<input type="checkbox" data-action-deny="${escapeHtml(row.id)}" ${current === 'deny' ? 'checked' : ''} ${locked ? 'disabled' : ''} hidden>`;
       return `<tr class="${rowCls}" data-action-class="${escapeHtml(row.id)}">`
         + `<td><span class="mono">${escapeHtml(row.id)}</span><div class="mono" style="color:var(--fg-3);font-size:var(--fs-10);margin-top:2px;">${escapeHtml(row.examples)}</div></td>`
         + `<td><span class="risk-pill ${escapeHtml(row.risk)}">${escapeHtml(row.risk)}</span></td>`
-        + `<td class="ck">${allowCell}</td>`
-        + `<td class="ck">${denyCell}</td>`
+        + `<td class="ck action-mode-cell" colspan="2">${modeCell}${legacyAllowCheckbox}${legacyDenyCheckbox}</td>`
         + `</tr>`;
     }).join('');
+  }
+
+  // Helper: extract the action_modes map from a rendered table.
+  function readActionModes(root = document) {
+    const groups = root.querySelectorAll('[data-action-mode]');
+    const modes = {};
+    groups.forEach((group) => {
+      const id = group.getAttribute('data-action-mode');
+      const checked = group.querySelector('input[type="radio"]:checked');
+      if (id && checked) modes[id] = checked.value;
+    });
+    // Locked rows always map to deny.
+    for (const cls of ACTION_CLASSES) {
+      if (cls.locked) modes[cls.id] = 'deny';
+    }
+    return modes;
   }
 
   function renderPolicyPreview(decision = null) {
@@ -149,6 +205,8 @@
     templateToDraft,
     normalizeTargets,
     getActionClasses,
+    readActionModes,
+    resolveModeForRow,
     escapeHtml,
   };
   global.ScopeBuilder = api;

@@ -40,11 +40,41 @@
 
   // ─── State ───
   let ws = null;
+  // currentConversationId is persisted to localStorage so the most recent
+  // chat auto-resumes on page reload. Prior to this, every refresh reset
+  // the ID to null and made it look like history didn't exist — but the
+  // server had been storing messages all along; the operator just had to
+  // manually click a sidebar conversation to surface them.
+  const LAST_CONV_KEY = 'phantom:last-conversation';
   let currentConversationId = null;
   let conversations = [];
   let isProcessing = false;
   let reconnectAttempts = 0;
   const MAX_RECONNECT = 10;
+
+  function setCurrentConversation(id) {
+    currentConversationId = id;
+    try {
+      if (id) localStorage.setItem(LAST_CONV_KEY, id);
+      else localStorage.removeItem(LAST_CONV_KEY);
+    } catch { /* ignore quota / private-mode errors */ }
+    // Broadcast so page modules (Runs, etc.) can re-scope their views to
+    // the active conversation without polling localStorage on a timer.
+    window.dispatchEvent(new CustomEvent('phantom:conversation', { detail: { id } }));
+  }
+
+  // Build the UI-context bundle sent on every chat message so the agent
+  // knows which surface the operator is on and which scope/asset/run is
+  // selected. The server uses this to default phantom_* tool args and to
+  // print a "## CURRENT UI CONTEXT" block in the system prompt.
+  function buildUiContext() {
+    return {
+      route: window.Router?.current || null,
+      selectedScopeId: document.getElementById('active-scope-select')?.value || null,
+      selectedAssetId: window.AssetPage?.selectedId || null,
+      selectedRunId: window.RunsPage?.selectedId || null,
+    };
+  }
 
   // Pending image for OSINT (base64 data URL)
   let pendingImage = null;
@@ -72,6 +102,7 @@
   window.RunsPage?.init?.();
   window.GraphPage?.init?.();
   window.ArtifactsPage?.init?.();
+  window.ApprovalsPage?.init?.();
   window.ScopePage?.init?.();
   Management.init();
   initCommandPalette();
@@ -80,7 +111,10 @@
   connectWebSocket();
   loadConversations();
   checkSudoStatus();
-  initOperatorOverrideControl();
+  // initOperatorOverrideControl() is called later, after OverrideController
+  // (a `const`) is declared. Calling it here would hit a temporal-dead-zone
+  // ReferenceError because the function declaration is hoisted but the
+  // const it references is not.
   initImageDrop();
 
   // ─── WebSocket ───
@@ -195,6 +229,14 @@
     if (msg.type === 'artifact_created' && msg.artifact) {
       window.dispatchEvent(new CustomEvent('phantom:artifact', { detail: msg }));
     }
+    // Surface run-completion as its own event so the Synthesis card and
+    // trending panel can re-fetch without polling. trace.type carries the
+    // canonical terminal events that the executor emits when a run ends.
+    if (msg.runId && msg.trace && /^run\.(completed|failed|stopped)$/.test(msg.trace.type || '')) {
+      window.dispatchEvent(new CustomEvent('phantom:run-complete', {
+        detail: { runId: msg.runId, status: msg.trace.type.replace('run.', '') },
+      }));
+    }
 
     // Session isolation: only render messages for the active conversation
     if (msg.conversationId && currentConversationId && msg.conversationId !== currentConversationId) {
@@ -205,7 +247,7 @@
 
     switch (msg.type) {
       case 'conversation_created':
-        currentConversationId = msg.conversationId;
+        setCurrentConversation(msg.conversationId);
         loadConversations();
         break;
 
@@ -226,6 +268,19 @@
       case 'tool_call':
         Chat.endAssistantMessage();
         Chat.addToolCall(msg);
+        // Count tool calls that fire while override is active so the
+        // overlay modal can surface a real-time "actions under override"
+        // metric. Useful for after-session review.
+        OverrideController.incrementEvents();
+        break;
+
+      case 'approval_request':
+        // Policy evaluator decided this tool call needs operator approval
+        // (or was implicit-denied but allow-once-eligible). Render the
+        // chat card; the user clicks Approve/Deny and Chat dispatches a
+        // `phantom:approval` CustomEvent that we forward back over WS.
+        Chat.endAssistantMessage();
+        Chat.addApprovalRequest(msg);
         break;
 
       case 'tool_progress':
@@ -317,6 +372,7 @@ Start the investigation immediately!`;
           profileId: document.getElementById('prompt-profile-select')?.value || null,
           operatorOverride: operatorOverridePayload(),
           toolpackIds: selectedToolpackIds(),
+          uiContext: buildUiContext(),
         }));
       } else {
         Chat.addErrorMessage('Not connected to server. Trying to reconnect...');
@@ -339,6 +395,7 @@ Start the investigation immediately!`;
         profileId: document.getElementById('prompt-profile-select')?.value || null,
         operatorOverride: operatorOverridePayload(),
         toolpackIds: selectedToolpackIds(),
+        uiContext: buildUiContext(),
       }));
     } else {
       Chat.addErrorMessage('Not connected to server. Trying to reconnect...');
@@ -350,25 +407,214 @@ Start the investigation immediately!`;
     return Array.from(document.getElementById('active-toolpack-select')?.selectedOptions || []).map(option => option.value).filter(Boolean);
   }
 
+  // ─── Operator Override controller ────────────────────────────────────────
+  // Single source of truth for override state. Mirrors itself across four
+  // surfaces:
+  //   1. Sidebar entry (#sidebar-override-btn) — always-visible primary
+  //   2. Persistent banner (#override-banner) — across all routes when ON
+  //   3. Overlay modal (#override-modal) — deliberate-ceremony toggle UI
+  //   4. Legacy run-config popover checkbox — kept for backwards compat,
+  //      now driven by the controller instead of owning state.
+  // Persisted to localStorage so it survives reloads — override is supposed
+  // to feel like a thing you hold open, not a setting you toggle and forget.
+  const OVERRIDE_STORE_KEY = 'phantom:operator-override';
+  const OverrideController = {
+    state: { enabled: false, reason: '', activations: 0, events: 0 },
+
+    load() {
+      try {
+        const raw = localStorage.getItem(OVERRIDE_STORE_KEY);
+        if (raw) Object.assign(this.state, JSON.parse(raw));
+      } catch {}
+    },
+    save() {
+      try { localStorage.setItem(OVERRIDE_STORE_KEY, JSON.stringify(this.state)); } catch {}
+    },
+
+    init() {
+      this.load();
+      // Legacy popover sync — keep the run-config-popover checkbox driven
+      // by the controller so old keyboard flows still work.
+      const popoverCb = document.getElementById('operator-override-enabled');
+      const popoverReason = document.getElementById('operator-override-reason');
+      if (popoverCb) {
+        popoverCb.addEventListener('change', () => this.set({ enabled: popoverCb.checked }));
+      }
+      if (popoverReason) {
+        popoverReason.addEventListener('input', () => this.set({ reason: popoverReason.value }));
+      }
+
+      // Sidebar entry
+      const sidebarBtn = document.getElementById('sidebar-override-btn');
+      sidebarBtn?.addEventListener('click', () => this.openModal());
+
+      // Banner controls
+      document.getElementById('override-banner-edit')?.addEventListener('click', () => this.openModal());
+      document.getElementById('override-banner-end')?.addEventListener('click', () => {
+        this.set({ enabled: false });
+      });
+
+      // Modal controls
+      const modal = document.getElementById('override-modal');
+      const modalToggle = document.getElementById('override-modal-toggle');
+      const modalReason = document.getElementById('override-modal-reason');
+      const saveBtn = document.getElementById('override-modal-save');
+      const disableBtn = document.getElementById('override-modal-disable');
+
+      modal?.querySelectorAll('[data-override-close]').forEach((el) => {
+        el.addEventListener('click', () => this.closeModal());
+      });
+      modalToggle?.addEventListener('change', () => this.refreshModalChrome());
+      saveBtn?.addEventListener('click', () => {
+        const next = {
+          enabled: !!modalToggle?.checked,
+          reason: modalReason?.value?.trim() || '',
+        };
+        if (next.enabled && !next.reason) {
+          // Require a reason on enable — modeled after sudo prompt UX.
+          modalReason.focus();
+          modalReason.classList.add('error');
+          setTimeout(() => modalReason.classList.remove('error'), 1500);
+          return;
+        }
+        this.set(next);
+        this.closeModal();
+      });
+      disableBtn?.addEventListener('click', () => {
+        this.set({ enabled: false });
+        this.closeModal();
+      });
+
+      // Escape closes modal
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal && !modal.hidden) this.closeModal();
+      });
+
+      this.render();
+    },
+
+    set(patch) {
+      const wasEnabled = this.state.enabled;
+      Object.assign(this.state, patch);
+      // Default a reason on first enable so trace events always carry one.
+      if (this.state.enabled && !this.state.reason) {
+        this.state.reason = 'Local testing / fixture validation';
+      }
+      // Count session activations — every off→on edge increments.
+      if (!wasEnabled && this.state.enabled) {
+        this.state.activations = (this.state.activations || 0) + 1;
+      }
+      this.save();
+      this.render();
+    },
+
+    incrementEvents() {
+      if (!this.state.enabled) return;
+      this.state.events = (this.state.events || 0) + 1;
+      this.save();
+      this.renderStats();
+    },
+
+    payload() {
+      if (!this.state.enabled) return { enabled: false };
+      return { enabled: true, reason: this.state.reason || 'Local testing / fixture validation' };
+    },
+
+    openModal() {
+      const modal = document.getElementById('override-modal');
+      if (!modal) return;
+      modal.hidden = false;
+      requestAnimationFrame(() => modal.classList.add('is-open'));
+      // Sync modal inputs from state on open so cancel discards edits cleanly.
+      const t = document.getElementById('override-modal-toggle');
+      const r = document.getElementById('override-modal-reason');
+      if (t) t.checked = this.state.enabled;
+      if (r) r.value = this.state.reason || '';
+      this.refreshModalChrome();
+      setTimeout(() => r?.focus(), 80);
+    },
+
+    closeModal() {
+      const modal = document.getElementById('override-modal');
+      if (!modal) return;
+      modal.classList.remove('is-open');
+      setTimeout(() => { modal.hidden = true; }, 180);
+    },
+
+    refreshModalChrome() {
+      const t = document.getElementById('override-modal-toggle');
+      const label = document.getElementById('override-toggle-label');
+      const sub = document.getElementById('override-toggle-sub');
+      const disable = document.getElementById('override-modal-disable');
+      const on = !!t?.checked;
+      if (label) label.textContent = on ? 'Override will be ON' : 'Override is OFF';
+      if (sub) sub.textContent = on
+        ? 'Scope gates bypassed. Trace audit still records every action.'
+        : 'Toggle on to bypass scope gates for this session.';
+      if (disable) disable.disabled = !this.state.enabled;
+    },
+
+    renderStats() {
+      const a = document.getElementById('override-stat-activations');
+      const e = document.getElementById('override-stat-events');
+      if (a) a.textContent = String(this.state.activations || 0);
+      if (e) e.textContent = String(this.state.events || 0);
+    },
+
+    render() {
+      const on = !!this.state.enabled;
+
+      // body class — legacy CSS hook for tinting input-area, scope-warning etc.
+      document.body.classList.toggle('operator-override-active', on);
+
+      // Sidebar entry
+      const btn = document.getElementById('sidebar-override-btn');
+      if (btn) {
+        btn.setAttribute('data-state', on ? 'on' : 'off');
+        btn.setAttribute('aria-label', `Operator Override · ${on ? 'on' : 'off'}`);
+        const stateEl = document.getElementById('sidebar-override-state');
+        if (stateEl) stateEl.textContent = on ? 'ACTIVE' : 'OFF';
+      }
+
+      // Banner — show only when active.
+      const banner = document.getElementById('override-banner');
+      const reasonEl = document.getElementById('override-banner-reason');
+      if (banner) {
+        banner.hidden = !on;
+        if (reasonEl) reasonEl.textContent = this.state.reason || '';
+      }
+
+      // Legacy popover checkbox + reason
+      const popoverCb = document.getElementById('operator-override-enabled');
+      const popoverReason = document.getElementById('operator-override-reason');
+      if (popoverCb) popoverCb.checked = on;
+      if (popoverReason) {
+        popoverReason.disabled = !on;
+        popoverReason.value = this.state.reason || '';
+      }
+
+      // Modal mirror (when open)
+      const t = document.getElementById('override-modal-toggle');
+      const r = document.getElementById('override-modal-reason');
+      if (t) t.checked = on;
+      if (r) r.value = this.state.reason || '';
+      this.refreshModalChrome();
+      this.renderStats();
+    },
+  };
+
   function initOperatorOverrideControl() {
-    const checkbox = document.getElementById('operator-override-enabled');
-    const reason = document.getElementById('operator-override-reason');
-    if (!checkbox || !reason) return;
-    const sync = () => {
-      reason.disabled = !checkbox.checked;
-      document.body.classList.toggle('operator-override-active', checkbox.checked);
-      if (checkbox.checked && !reason.value.trim()) reason.value = 'Local testing / fixture validation';
-    };
-    checkbox.addEventListener('change', sync);
-    sync();
+    OverrideController.init();
   }
 
   function operatorOverridePayload() {
-    const checkbox = document.getElementById('operator-override-enabled');
-    if (!checkbox?.checked) return { enabled: false };
-    const reason = document.getElementById('operator-override-reason')?.value?.trim() || 'Local testing / fixture validation';
-    return { enabled: true, reason };
+    return OverrideController.payload();
   }
+
+  // Run the override controller initializer now that the const above is in
+  // scope. Safe to call sync — it only touches DOM elements that exist
+  // because this script is loaded at the bottom of <body>.
+  initOperatorOverrideControl();
 
   // ─── Stop AI ───
   function stopAI() {
@@ -557,7 +803,7 @@ Start the investigation immediately!`;
 
   async function selectConversation(id) {
     window.Router?.navigate?.('chat');
-    currentConversationId = id;
+    setCurrentConversation(id);
     renderConversationList();
 
     try {
@@ -576,7 +822,7 @@ Start the investigation immediately!`;
     try {
       await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
       if (currentConversationId === id) {
-        currentConversationId = null;
+        setCurrentConversation(null);
         Chat.clear();
         Chat.showWelcome();
       }
@@ -586,12 +832,40 @@ Start the investigation immediately!`;
 
   function newChat() {
     window.Router?.navigate?.('chat');
-    currentConversationId = null;
+    setCurrentConversation(null);
     Chat.clear();
     Chat.showWelcome();
     renderConversationList();
     messageInput.focus();
   }
+
+  // Auto-resume the most recently active conversation on page load. We try
+  // the localStorage-pinned id first (matches the operator's last context),
+  // and fall back to the newest conversation if that id is gone (e.g. they
+  // deleted it from another tab). Skipped entirely if there's no history
+  // yet, leaving the welcome screen visible.
+  async function autoResumeConversation() {
+    try {
+      const res = await fetch('/api/conversations');
+      const all = await res.json();
+      if (!Array.isArray(all) || all.length === 0) return;
+      let target = null;
+      try {
+        const pinned = localStorage.getItem(LAST_CONV_KEY);
+        if (pinned) target = all.find((c) => c.id === pinned);
+      } catch {}
+      if (!target) target = all[0]; // newest first per API ordering
+      if (target) await selectConversation(target.id);
+    } catch { /* leave welcome screen visible on failure */ }
+  }
+  // Run after the initial conversation list paint so the sidebar shows
+  // results even if the resume fails.
+  setTimeout(autoResumeConversation, 50);
+
+  // First-run onboarding wizard. Decides whether to auto-open based on
+  // /api/onboarding/status (empty DB + sticky completion flag). Skipped
+  // silently when the server is unreachable.
+  setTimeout(() => { window.OnboardingWizard?.maybeOpen?.(); }, 800);
 
   // ─── Sudo Modal ───
   async function checkSudoStatus() {
@@ -697,6 +971,24 @@ Start the investigation immediately!`;
 
   searchInput.addEventListener('input', () => {
     renderConversationList(searchInput.value);
+  });
+
+  // ─── Approval response forwarder ──────────────────────────────────────────
+  // Chat.addApprovalRequest dispatches phantom:approval when the operator
+  // clicks Approve/Deny on an approval card. Forward the decision back over
+  // the WebSocket so the server-side requestApproval promise resolves.
+  window.addEventListener('phantom:approval', (e) => {
+    const detail = e.detail || {};
+    if (!detail.approvalId || !ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({
+      type: 'approval_response',
+      approvalId: detail.approvalId,
+      decision: detail.decision,  // 'approve' | 'deny'
+      note: detail.note || '',
+      // When the operator ticked "approve next N matching", batch carries
+      // the server-side persistence hint (scopeId + risk + remaining count).
+      batch: detail.batch || null,
+    }));
   });
 
   // ─── Mobile sidebar scrim (Pass 16) ───

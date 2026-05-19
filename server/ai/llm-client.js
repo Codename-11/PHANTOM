@@ -22,13 +22,22 @@ export function resetClient() {
   openaiClient = null;
 }
 
+// Hard upper bound on the agent loop. Generous so real engagements with
+// many tools (recon → enumeration → exploit → report) can complete, but
+// finite so a pathological model can't burn quota forever. 40 iterations
+// = ~40 tool-call rounds in the worst case.
+export const MAX_AGENT_ITERATIONS = 40;
+
 /**
  * Process a user message: send to LLM with tools, handle tool calls recursively, stream responses.
- * Now supports:
- *  - Unlimited tool iterations (no cap)
+ * Supports:
+ *  - Up to MAX_AGENT_ITERATIONS tool rounds per turn
  *  - AbortSignal for stopping mid-operation
  *  - Thinking/reasoning token detection
  *  - Live tool output streaming via onToolProgress
+ *  - Tolerance for providers (Grok, several local shims) that emit
+ *    finish_reason='stop' alongside tool_calls instead of the spec's
+ *    finish_reason='tool_calls'.
  */
 export async function processMessage(conversationId, userMessage, onChunk, onToolCall, onToolResult, onError, onThinking, abortSignal, onToolProgress, options = {}) {
   const operatorOverride = normalizeOperatorOverride(options.operatorOverride);
@@ -36,9 +45,17 @@ export async function processMessage(conversationId, userMessage, onChunk, onToo
   // Get conversation history
   const history = getMessages(conversationId);
 
-  // Build messages array
+  // Build messages array.
+  // The system prompt now takes a uiContext bundle so the agent knows what
+  // page the operator is on and which scope/asset/run is selected. Without
+  // it the agent was blind to PHANTOM's UI state and couldn't answer
+  // "what's on screen?" or default phantom_* tool args correctly.
   const messages = [
-    { role: 'system', content: buildSystemPrompt({ profileId: options.profileId || null, scopeId: options.scope?.id || options.scopeId || null }) },
+    { role: 'system', content: buildSystemPrompt({
+      profileId: options.profileId || null,
+      scopeId: options.scope?.id || options.scopeId || null,
+      uiContext: options.uiContext || null,
+    }) },
   ];
 
   // Add memory context
@@ -82,8 +99,22 @@ export async function processMessage(conversationId, userMessage, onChunk, onToo
   const tools = getToolDefinitions();
   const client = getClient();
 
-  // Unlimited tool calling loop — runs until AI stops or abort signal fires
+  // Iteration cap protects against pathological loops (model that keeps
+  // calling tools forever, or providers that never emit a final stop).
+  // The previous code documented "unlimited" but in practice exited too
+  // early because finish_reason=='stop' returned even with tool_calls
+  // pending — see the if-block guard below.
+  let iterations = 0;
+  let lastFinishReason = null;
   while (true) {
+    if (iterations >= MAX_AGENT_ITERATIONS) {
+      const capMsg = `[PHANTOM] ⏹ Stopped after ${MAX_AGENT_ITERATIONS} tool rounds. Ask me to continue if more work remains.`;
+      onChunk(capMsg);
+      addMessage(conversationId, { role: 'assistant', content: capMsg });
+      return capMsg;
+    }
+    iterations += 1;
+
     // Check if aborted
     if (abortSignal?.aborted) {
       const abortMsg = '[PHANTOM] ⏹ Operation stopped by user.';
@@ -107,6 +138,7 @@ export async function processMessage(conversationId, userMessage, onChunk, onToo
       let thinkingContent = '';
       let toolCalls = [];
       let isInThinkBlock = false;
+      let finishReason = null;
 
       for await (const chunk of response) {
         // Check abort between chunks
@@ -118,7 +150,13 @@ export async function processMessage(conversationId, userMessage, onChunk, onToo
         }
 
         const delta = chunk.choices?.[0]?.delta;
-        if (!delta) continue;
+        if (!delta) {
+          // Some providers send terminal chunks with no delta (just a
+          // finish_reason). Still record the reason so the post-stream
+          // decision logic sees it.
+          if (chunk.choices?.[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason;
+          continue;
+        }
 
         // Handle reasoning/thinking tokens (DeepSeek, Claude, etc.)
         // Some models send reasoning in a separate field
@@ -191,22 +229,38 @@ export async function processMessage(conversationId, userMessage, onChunk, onToo
           }
         }
 
-        // Check for finish
-        if (chunk.choices?.[0]?.finish_reason === 'stop') {
-          // Normal completion, save and return
-          if (fullContent) {
-            addMessage(conversationId, { role: 'assistant', content: fullContent });
-          }
-          return fullContent;
-        }
-
-        if (chunk.choices?.[0]?.finish_reason === 'tool_calls') {
-          break; // Process tool calls below
+        // Record the finish reason — but do NOT decide whether to stop
+        // here. The decision happens after the stream drains so we can
+        // also see whether tool_calls were assembled. Grok routinely
+        // emits finish_reason='stop' alongside tool_calls in the same
+        // chunk (the OpenAI spec says 'tool_calls' but several
+        // OpenAI-compatible providers don't comply); the previous code
+        // returned immediately on 'stop' and never executed those calls.
+        if (chunk.choices?.[0]?.finish_reason) {
+          finishReason = chunk.choices[0].finish_reason;
         }
       }
 
-      // If we have tool calls, execute them
-      if (toolCalls.length > 0) {
+      lastFinishReason = finishReason;
+
+      // Stuck-state guard: empty content AND empty tool_calls. Indicates
+      // an upstream provider returned an empty completion. Looping again
+      // would burn quota for no benefit — record the state and exit.
+      const filteredToolCalls = toolCalls.filter(tc => tc && tc.function?.name);
+      if (!fullContent && filteredToolCalls.length === 0) {
+        const stuckMsg = lastFinishReason === 'length'
+          ? '[PHANTOM] ⏹ Model response truncated (max_tokens). Increase max_tokens in Settings or split the request.'
+          : '[PHANTOM] ⏹ Model returned an empty completion.';
+        onChunk(stuckMsg);
+        addMessage(conversationId, { role: 'assistant', content: stuckMsg });
+        return stuckMsg;
+      }
+
+      // If we have tool calls, execute them — even when the provider
+      // reported finish_reason='stop'. The presence of tool_calls is the
+      // canonical signal that the model wants to call tools.
+      if (filteredToolCalls.length > 0) {
+        toolCalls = filteredToolCalls;
         // Save assistant message with tool calls
         const assistantMsg = { role: 'assistant', content: fullContent || null, tool_calls: toolCalls };
         addMessage(conversationId, assistantMsg);
@@ -236,7 +290,12 @@ export async function processMessage(conversationId, userMessage, onChunk, onToo
           const startTime = Date.now();
           let result;
           try {
-            // Pass onToolProgress for live output streaming
+            // Pass onToolProgress for live output streaming.
+            // conversationId + runId + uiContext are forwarded so phantom_*
+            // tools can default to the live run when the LLM omits them.
+            // requestApproval is the gate hook: when policy returns
+            // mode:'ask' or implicit-deny, the executor pauses on
+            // options.requestApproval(...) until the operator decides in chat.
             result = await executeTool(tc.function.name, args, (progressText) => {
               if (onToolProgress) onToolProgress({ id: tc.id, name: tc.function.name, text: progressText });
             }, {
@@ -246,6 +305,10 @@ export async function processMessage(conversationId, userMessage, onChunk, onToo
               trace: options.trace,
               emitLifecycle: false,
               toolCallId: tc.id,
+              conversationId,
+              runId: options.runId || null,
+              uiContext: options.uiContext || null,
+              requestApproval: options.requestApproval || null,
             });
           } catch (e) {
             result = `Error: ${e.message}`;
@@ -274,7 +337,11 @@ export async function processMessage(conversationId, userMessage, onChunk, onToo
         continue;
       }
 
-      // No tool calls and finish_reason was not explicitly 'stop' (stream ended)
+      // No tool calls. The stream produced text-only content → the model
+      // is done with this turn. finishReason should be 'stop' or 'length'
+      // here in practice; either way we save what we have and exit. If
+      // finishReason is 'length' the operator is responsible for asking
+      // for continuation in their next message.
       if (fullContent) {
         addMessage(conversationId, { role: 'assistant', content: fullContent });
       }
@@ -292,6 +359,49 @@ export async function processMessage(conversationId, userMessage, onChunk, onToo
       addMessage(conversationId, { role: 'assistant', content: errMsg });
       return errMsg;
     }
+  }
+}
+
+/**
+ * One-shot, non-streaming completion that asks the model for JSON and
+ * parses the result. Used by feature paths that need a structured object
+ * back (synthesis enrichment, classification, etc.) rather than a chat
+ * stream. Throws if the response isn't valid JSON — callers are expected
+ * to wrap in try/catch and fall back to their non-LLM path.
+ *
+ * Honors:
+ *   - the configured provider/model
+ *   - an optional abortSignal
+ *   - an optional max_tokens override (default 1024 — small for JSON)
+ */
+export async function llmCompleteJson({ system, user, maxTokens = 1024, abortSignal = null } = {}) {
+  if (!user) throw new Error('llmCompleteJson requires a user prompt');
+  const client = getClient();
+  const messages = [];
+  if (system) messages.push({ role: 'system', content: system });
+  messages.push({ role: 'user', content: user });
+
+  // response_format=json_object is the OpenAI/Hermes way to force JSON.
+  // Providers that don't support it ignore the field; we still try to
+  // parse and fall back to bracket-matching extraction.
+  const response = await client.chat.completions.create({
+    model: config.api.model,
+    messages,
+    temperature: 0.2,
+    max_tokens: maxTokens,
+    response_format: { type: 'json_object' },
+  }, abortSignal ? { signal: abortSignal } : undefined);
+
+  const text = response.choices?.[0]?.message?.content || '';
+  // Try strict JSON first; if the model wrapped it in fences or prose,
+  // pull the largest {...} substring as a best-effort fallback.
+  try { return JSON.parse(text); } catch {
+    const open = text.indexOf('{');
+    const close = text.lastIndexOf('}');
+    if (open >= 0 && close > open) {
+      return JSON.parse(text.substring(open, close + 1));
+    }
+    throw new Error('llmCompleteJson: model did not return parseable JSON');
   }
 }
 

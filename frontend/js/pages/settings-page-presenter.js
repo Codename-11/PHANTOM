@@ -48,10 +48,23 @@
       </div>`;
   }
 
-  function renderToolpackCards(toolpacks = []) {
+  function renderToolpackCards(toolpacks = [], options = {}) {
     if (!toolpacks.length) return '<div class="empty-msg">No toolpacks returned yet. Refresh after the server has loaded the current code.</div>';
+    // availabilityByCommand: { 'nmap': true, 'sqlmap': false } — when
+    // provided, each tool row gets a green/red dot and the card-level
+    // availability count surfaces in the header chip. Optional so the
+    // legacy callers (and existing tests) keep working unchanged.
+    const availability = options.availabilityByCommand || {};
+    const hasAvailability = Object.keys(availability).length > 0;
     return toolpacks.map(pack => {
       const levelNames = pack.levels ? Object.values(pack.levels).map(level => level.name || '').filter(Boolean).join(' / ') : '';
+      const tools = pack.tools || [];
+      const installedCount = hasAvailability
+        ? tools.filter(t => availability[t.command]).length
+        : 0;
+      const availChip = hasAvailability
+        ? `<span class="asset-chip toolpack-avail ${installedCount === tools.length ? 'is-all' : installedCount === 0 ? 'is-none' : 'is-partial'}">${installedCount}/${tools.length} on host</span>`
+        : '';
       return `
       <article class="toolpack-card">
         <div><strong>${escapeHtml(pack.name)}</strong><p>${escapeHtml(pack.summary)}</p></div>
@@ -60,8 +73,17 @@
           <span class="asset-chip">${pack.policy?.scopeRequired ? 'Scope required' : 'Scope optional'}</span>
           ${levelNames ? `<span class="asset-chip">Levels: ${escapeHtml(levelNames)}</span>` : ''}
           <span class="asset-chip">Blocked: ${escapeHtml((pack.blockedByDefault || []).join(', ') || 'none')}</span>
+          ${availChip}
         </div>
-        <details><summary>${(pack.tools || []).length} tools with install hints</summary>${(pack.tools || []).map(tool => `<div class="target-row"><span>${escapeHtml(tool.name)} · ${escapeHtml(tool.risk)}${tool.scopeRequired ? ' · scoped' : ''}</span><strong>${escapeHtml(tool.installHint || 'installed externally')}</strong></div>`).join('')}</details>
+        <details><summary>${tools.length} tools with install hints</summary>${tools.map(tool => {
+          const ok = hasAvailability ? availability[tool.command] : null;
+          const dot = ok === true
+            ? '<span class="toolpack-tool-dot is-ok" title="On PATH"></span>'
+            : ok === false
+              ? '<span class="toolpack-tool-dot is-missing" title="Not on PATH"></span>'
+              : '';
+          return `<div class="target-row">${dot}<span>${escapeHtml(tool.name)} · ${escapeHtml(tool.risk)}${tool.scopeRequired ? ' · scoped' : ''}</span><strong>${escapeHtml(tool.installHint || 'installed externally')}</strong></div>`;
+        }).join('')}</details>
       </article>`;
     }).join('');
   }

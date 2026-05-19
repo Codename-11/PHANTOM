@@ -32,6 +32,13 @@ function normalizeScope(row) {
     raw_targets: targets,
     allowed_actions: parseJSON(row.allowed_actions_json, []),
     blocked_actions: parseJSON(row.blocked_actions_json, []),
+    // New: per-action-class modes (auto/ask/deny). Null when scope predates
+    // the expansion — policy.js falls back to allowed/blocked_actions then.
+    action_modes: parseJSON(row.action_modes_json, null),
+    active_hours: parseJSON(row.active_hours_json, null),
+    blackout_windows: parseJSON(row.blackout_windows_json, null),
+    rate_caps: parseJSON(row.rate_caps_json, null),
+    rules_of_engagement: row.rules_of_engagement || '',
     credential_refs: parseJSON(row.credential_refs_json, []),
     notes: row.notes || '',
     expires_at: row.expires_at,
@@ -50,6 +57,11 @@ export function createScope({
   targets = {},
   allowedActions = [],
   blockedActions = [],
+  actionModes = null,
+  activeHours = null,
+  blackoutWindows = null,
+  rateCaps = null,
+  rulesOfEngagement = '',
   credentialRefs = [],
   notes = '',
   expiresAt = null,
@@ -59,14 +71,20 @@ export function createScope({
   getDB().prepare(
     `INSERT INTO scopes (
       id, name, targets_json, allowed_actions_json, blocked_actions_json,
+      action_modes_json, active_hours_json, blackout_windows_json, rate_caps_json, rules_of_engagement,
       credential_refs_json, notes, expires_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     String(name).trim(),
     json(targets, {}),
     json(allowedActions, []),
     json(blockedActions, []),
+    actionModes ? JSON.stringify(actionModes) : null,
+    activeHours ? JSON.stringify(activeHours) : null,
+    blackoutWindows ? JSON.stringify(blackoutWindows) : null,
+    rateCaps ? JSON.stringify(rateCaps) : null,
+    rulesOfEngagement || null,
     json(credentialRefs, []),
     notes || null,
     expiresAt || null
@@ -93,6 +111,11 @@ export function updateScope(id, updates = {}) {
     targets: updates.targets !== undefined ? updates.targets : current.targets,
     allowedActions: updates.allowedActions !== undefined ? updates.allowedActions : current.allowed_actions,
     blockedActions: updates.blockedActions !== undefined ? updates.blockedActions : current.blocked_actions,
+    actionModes: updates.actionModes !== undefined ? updates.actionModes : current.action_modes,
+    activeHours: updates.activeHours !== undefined ? updates.activeHours : current.active_hours,
+    blackoutWindows: updates.blackoutWindows !== undefined ? updates.blackoutWindows : current.blackout_windows,
+    rateCaps: updates.rateCaps !== undefined ? updates.rateCaps : current.rate_caps,
+    rulesOfEngagement: updates.rulesOfEngagement !== undefined ? updates.rulesOfEngagement : current.rules_of_engagement,
     credentialRefs: updates.credentialRefs !== undefined ? updates.credentialRefs : current.credential_refs,
     notes: updates.notes !== undefined ? updates.notes : current.notes,
     expiresAt: updates.expiresAt !== undefined ? updates.expiresAt : current.expires_at,
@@ -101,6 +124,8 @@ export function updateScope(id, updates = {}) {
   getDB().prepare(
     `UPDATE scopes
      SET name = ?, targets_json = ?, allowed_actions_json = ?, blocked_actions_json = ?,
+         action_modes_json = ?, active_hours_json = ?, blackout_windows_json = ?, rate_caps_json = ?,
+         rules_of_engagement = ?,
          credential_refs_json = ?, notes = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`
   ).run(
@@ -108,6 +133,11 @@ export function updateScope(id, updates = {}) {
     json(next.targets, {}),
     json(next.allowedActions, []),
     json(next.blockedActions, []),
+    next.actionModes ? JSON.stringify(next.actionModes) : null,
+    next.activeHours ? JSON.stringify(next.activeHours) : null,
+    next.blackoutWindows ? JSON.stringify(next.blackoutWindows) : null,
+    next.rateCaps ? JSON.stringify(next.rateCaps) : null,
+    next.rulesOfEngagement || null,
     json(next.credentialRefs, []),
     next.notes || null,
     next.expiresAt || null,

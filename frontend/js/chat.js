@@ -264,6 +264,189 @@ window.Chat = {
     this.scrollToBottom(true);
   },
 
+  // Counts approvals per (scopeId, riskClass) so we can suggest "promote
+  // to auto" after the operator has approved the same kind 3+ times.
+  // Lives on window so it survives chat clear without reaching into the
+  // approval card's own state.
+  _approvalRepeats: new Map(),
+
+  approvalRepeatKey(data) {
+    return `${data.scopeId || 'no-scope'}::${data.risk || 'unknown'}`;
+  },
+
+  approvalRepeatCount(data) {
+    return this._approvalRepeats.get(this.approvalRepeatKey(data)) || 0;
+  },
+
+  /**
+   * Render an inline approval card. Two flavors keyed by `data.kind`:
+   *   - 'ask'          → blue card, "Approve / Deny" copy (ask-gate)
+   *   - 'allow-once'   → amber card, "Allow once / Stay denied" copy (implicit deny)
+   *
+   * Posts an `approval_response` over WS when the operator clicks a button
+   * (or hits y/n on the focused card). The matching tool card is converted
+   * to a "Waiting for approval" spinner while this card is live.
+   *
+   * Three approval-fatigue features layered on:
+   *   - Keyboard shortcuts (y = approve, n = deny, Esc blurs note)
+   *   - Batch "approve next N matching" checkbox + count input
+   *   - "Promote to auto" suggestion after 3+ approvals of the same risk
+   *     class under the same scope
+   */
+  addApprovalRequest(data) {
+    this.hideWelcome();
+    const card = document.createElement('div');
+    card.className = `approval-card kind-${data.kind === 'allow-once' ? 'allow-once' : 'ask'}`;
+    card.id = `approval-${data.approvalId}`;
+    card.tabIndex = -1; // focusable for keyboard shortcuts
+
+    const argsPreview = data.args && typeof data.args === 'object'
+      ? (data.args.command || data.args.path || data.args.url || data.args.query || JSON.stringify(data.args).slice(0, 160))
+      : String(data.args || '');
+
+    const isAllowOnce = data.kind === 'allow-once';
+    const headline = isAllowOnce
+      ? `Blocked: ${data.name}`
+      : `Approval required: ${data.name}`;
+    const sub = isAllowOnce
+      ? 'Operator can grant a one-time exception.'
+      : 'Operator approval required by scope policy.';
+    const approveLabel = isAllowOnce ? 'Allow once' : 'Approve';
+    const denyLabel = isAllowOnce ? 'Stay denied' : 'Deny';
+
+    // Promote-to-auto suggestion fires after the 3rd same-class approval
+    // under the same scope. The link below the action row PATCHes
+    // /api/scopes/:id/action-mode to flip that class to 'auto'.
+    const repeatCount = this.approvalRepeatCount(data);
+    const showPromote = !isAllowOnce && data.scopeId && data.risk && repeatCount >= 3;
+
+    card.innerHTML = `
+      <div class="approval-card-hd">
+        <span class="approval-card-mark" aria-hidden="true">${isAllowOnce ? '⚠' : '🛡'}</span>
+        <div class="approval-card-titles">
+          <strong>${this.escapeHtml(headline)}</strong>
+          <small>${this.escapeHtml(sub)}</small>
+        </div>
+        <span class="approval-card-risk risk-${this.escapeHtml(data.risk || 'unknown')}">${this.escapeHtml(String(data.risk || '').toUpperCase())}</span>
+      </div>
+      <div class="approval-card-bd">
+        <div class="approval-card-row">
+          <span class="lbl">REASON</span>
+          <span>${this.escapeHtml(data.reason || 'No reason given.')}</span>
+        </div>
+        ${data.scopeName ? `<div class="approval-card-row"><span class="lbl">SCOPE</span><span>${this.escapeHtml(data.scopeName)}</span></div>` : ''}
+        <div class="approval-card-row">
+          <span class="lbl">ACTION</span>
+          <code>${this.escapeHtml(argsPreview)}</code>
+        </div>
+        <label class="approval-card-note">
+          <span class="lbl">NOTE (optional, recorded in audit trace)</span>
+          <input type="text" class="approval-card-note-input" placeholder="e.g. covered by today's ROE" />
+        </label>
+        ${!isAllowOnce ? `
+        <label class="approval-card-batch" title="Auto-approve subsequent matching ${this.escapeHtml(data.risk || 'risky')} calls under this scope">
+          <input type="checkbox" class="approval-card-batch-toggle">
+          <span>Approve next</span>
+          <input type="number" class="approval-card-batch-count" value="5" min="1" max="100">
+          <span>matching <code>${this.escapeHtml(data.risk || 'risky')}</code> calls</span>
+        </label>` : ''}
+        ${showPromote ? `
+        <div class="approval-card-promote">
+          You've approved <strong>${this.escapeHtml(data.risk)}</strong> on
+          <strong>${this.escapeHtml(data.scopeName || data.scopeId)}</strong> ${repeatCount} times this session.
+          <a href="#" data-promote-to-auto>Update scope to auto-approve future ${this.escapeHtml(data.risk)} →</a>
+        </div>` : ''}
+      </div>
+      <div class="approval-card-ft">
+        <button type="button" class="btn btn-secondary danger" data-decision="deny">${this.escapeHtml(denyLabel)}</button>
+        <span class="approval-card-grow"></span>
+        <span class="approval-card-hint">
+          <kbd>y</kbd> ${this.escapeHtml(approveLabel.toLowerCase())} ·
+          <kbd>n</kbd> ${this.escapeHtml(denyLabel.toLowerCase())} ·
+          <kbd>Enter</kbd> submit
+        </span>
+        <button type="button" class="btn btn-primary" data-decision="approve">${this.escapeHtml(approveLabel)}</button>
+      </div>
+    `;
+
+    const send = (decision) => {
+      const note = card.querySelector('.approval-card-note-input')?.value?.trim() || '';
+      const batchToggle = card.querySelector('.approval-card-batch-toggle');
+      const batchCount = parseInt(card.querySelector('.approval-card-batch-count')?.value || '0', 10) || 0;
+      const batch = (decision === 'approve' && batchToggle?.checked && batchCount > 0)
+        ? { remaining: batchCount, scopeId: data.scopeId || null, risk: data.risk || null }
+        : null;
+
+      // Track per-class repeats for the promote-to-auto suggestion.
+      if (decision === 'approve' && data.scopeId && data.risk && !isAllowOnce) {
+        const key = this.approvalRepeatKey(data);
+        this._approvalRepeats.set(key, (this._approvalRepeats.get(key) || 0) + 1);
+      }
+
+      window.dispatchEvent(new CustomEvent('phantom:approval', {
+        detail: { approvalId: data.approvalId, decision, note, batch },
+      }));
+      // Visually settle the card.
+      card.classList.add('is-resolved', decision === 'approve' ? 'approved' : 'denied');
+      card.querySelectorAll('button, input').forEach((el) => { el.disabled = true; });
+      const status = document.createElement('div');
+      status.className = 'approval-card-status';
+      const batchSuffix = batch ? ` · batch ×${batch.remaining}` : '';
+      status.textContent = decision === 'approve'
+        ? (isAllowOnce ? `Allowed once · executing${batchSuffix}` : `Approved · executing${batchSuffix}`)
+        : 'Denied';
+      card.querySelector('.approval-card-ft').appendChild(status);
+    };
+    card.querySelectorAll('[data-decision]').forEach((btn) => {
+      btn.addEventListener('click', () => send(btn.dataset.decision));
+    });
+
+    // Promote-to-auto link.
+    card.querySelector('[data-promote-to-auto]')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try {
+        await fetch(`/api/scopes/${encodeURIComponent(data.scopeId)}/action-mode`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ actionClass: data.risk, mode: 'auto' }),
+        });
+        const promote = card.querySelector('.approval-card-promote');
+        if (promote) {
+          promote.classList.add('promoted');
+          promote.innerHTML = `✓ Scope updated — future <strong>${this.escapeHtml(data.risk)}</strong> calls under this scope will run automatically.`;
+        }
+      } catch (err) {
+        console.warn('Promote-to-auto failed:', err);
+      }
+    });
+
+    // Keyboard shortcuts. The card grabs focus when it lands so y/n work
+    // immediately without clicking. Typing inside the note input gets a
+    // pass-through except for Enter (submits approve).
+    card.addEventListener('keydown', (e) => {
+      if (card.classList.contains('is-resolved')) return;
+      const inNote = e.target === card.querySelector('.approval-card-note-input');
+      if (e.key === 'Escape' && inNote) { e.target.blur(); return; }
+      if (inNote && e.key !== 'Enter') return;
+      if (e.key.toLowerCase() === 'y') { e.preventDefault(); send('approve'); return; }
+      if (e.key.toLowerCase() === 'n') { e.preventDefault(); send('deny'); return; }
+      if (e.key === 'Enter') { e.preventDefault(); send('approve'); return; }
+    });
+
+    this.messagesEl.appendChild(card);
+    this.scrollToBottom(true);
+    // Focus the card so keyboard shortcuts work without an extra click.
+    setTimeout(() => card.focus(), 60);
+
+    if (data.toolCallId) {
+      const toolCard = document.getElementById(`tool-${data.toolCallId}`);
+      if (toolCard) {
+        const status = toolCard.querySelector('.tool-status');
+        if (status) { status.className = 'tool-status waiting'; status.textContent = 'WAIT'; }
+      }
+    }
+  },
+
   addToolCall(data) {
     this.hideWelcome();
     const card = document.createElement('div');

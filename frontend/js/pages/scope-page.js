@@ -3,11 +3,20 @@ window.ScopePage = {
   scopes: [],
   comparisons: [],
   scopeTemplates: [],
+  roeTemplates: [],
   toolpacks: [],
   selectedAssetId: null,
   selectedScopeId: null,
   selectedTemplateId: null,
   selectedToolpackIds: new Set(),
+  // Draft scope state for the new policy fields. The action_modes map is
+  // canonical — allowed/blocked CSV inputs are derived from it for backwards
+  // compat with the policy evaluator's legacy reads.
+  draftActionModes: null,
+  draftActiveHours: null,
+  draftBlackoutWindows: null,
+  draftRateCaps: null,
+  draftRoeText: '',
   mode: 'scopes',
   assetFilter: { query: '', type: '' },
   _scopeBoundOnce: false,
@@ -50,7 +59,9 @@ window.ScopePage = {
     tbl?.addEventListener('change', (e) => {
       const t = e.target;
       if (!(t instanceof HTMLInputElement)) return;
-      if (t.dataset.actionAllow || t.dataset.actionDeny) this.syncActionClassHiddenInputs();
+      if (t.dataset.actionAllow || t.dataset.actionDeny || t.dataset.actionModeInput) {
+        this.syncActionClassHiddenInputs();
+      }
     });
     // Chip removal
     const chips = document.getElementById('scope-target-chips');
@@ -67,6 +78,14 @@ window.ScopePage = {
       const tile = e.target.closest('[data-template-id]');
       if (!tile) return;
       this.applyScopeTemplate(tile.dataset.templateId);
+    });
+    // ROE template select handler
+    document.getElementById('scope-roe-template')?.addEventListener('change', (e) => {
+      if (e.target.value) this.applyRoeTemplate(e.target.value);
+    });
+    // ROE textarea live-sync into draftRoeText
+    document.getElementById('scope-roe')?.addEventListener('input', (e) => {
+      this.draftRoeText = e.target.value;
     });
     // Toolpack card delegated click
     document.getElementById('scope-toolpack-grid')?.addEventListener('click', (e) => {
@@ -91,6 +110,7 @@ window.ScopePage = {
       this.loadScopes(false),
       this.loadComparisons(false),
       this.loadScopeTemplates(),
+      this.loadRoeTemplates(),
       this.loadToolpacks(),
     ]);
     await this.loadAssetOperationalDetails();
@@ -247,7 +267,12 @@ window.ScopePage = {
     if (!tbody) return;
     const allowed = this.csv('scope-allowed');
     const blocked = this.csv('scope-blocked');
-    tbody.innerHTML = window.ScopeBuilder?.renderActionClassTable({ allowed, blocked }) || '';
+    // Pass action_modes when set so the builder renders the 3-state matrix
+    // with the right radios pre-selected. When unset, the builder falls back
+    // to interpreting allowed/blocked as auto/deny respectively.
+    tbody.innerHTML = window.ScopeBuilder?.renderActionClassTable({
+      allowed, blocked, action_modes: this.draftActionModes,
+    }) || '';
   },
 
   renderToolpackGrid() {
@@ -274,6 +299,22 @@ window.ScopePage = {
   },
 
   syncActionClassHiddenInputs() {
+    // Read the canonical 3-state matrix first; derive legacy allowed/blocked
+    // CSV inputs from it so older code paths keep working.
+    if (window.ScopeBuilder?.readActionModes) {
+      const modes = window.ScopeBuilder.readActionModes(document);
+      if (Object.keys(modes).length) {
+        this.draftActionModes = modes;
+        const allowed = Object.entries(modes).filter(([, v]) => v === 'auto').map(([k]) => k);
+        const blocked = Object.entries(modes).filter(([, v]) => v === 'deny').map(([k]) => k);
+        const allowEl = document.getElementById('scope-allowed');
+        const blockEl = document.getElementById('scope-blocked');
+        if (allowEl) allowEl.value = allowed.join(', ');
+        if (blockEl) blockEl.value = blocked.join(', ');
+        return;
+      }
+    }
+    // Fallback path — hidden legacy checkboxes (kept for backwards compat).
     const allowedEls = document.querySelectorAll('#scope-action-table input[data-action-allow]:checked');
     const deniedEls = document.querySelectorAll('#scope-action-table input[data-action-deny]:checked');
     const allowed = Array.from(allowedEls).map(el => el.dataset.actionAllow);
@@ -355,11 +396,22 @@ window.ScopePage = {
   scopePayloadFromBuilder() {
     const targets = this.collectTargetChips();
     targets.toolpackIds = Array.from(this.selectedToolpackIds);
+    // Ensure draftActionModes is current with the visible radios.
+    if (window.ScopeBuilder?.readActionModes) {
+      const modes = window.ScopeBuilder.readActionModes(document);
+      if (Object.keys(modes).length) this.draftActionModes = modes;
+    }
+    const roeEl = document.getElementById('scope-roe');
     return {
       name: document.getElementById('scope-name')?.value || '',
       targets,
       allowedActions: this.csv('scope-allowed'),
       blockedActions: this.csv('scope-blocked'),
+      actionModes: this.draftActionModes || null,
+      activeHours: this.draftActiveHours || null,
+      blackoutWindows: this.draftBlackoutWindows || null,
+      rateCaps: this.draftRateCaps || null,
+      rulesOfEngagement: (roeEl && roeEl.value) || this.draftRoeText || '',
       expiresAt: document.getElementById('scope-expires')?.value || null,
       owner: document.getElementById('scope-owner')?.value || null,
       notes: document.getElementById('scope-notes')?.value || '',
@@ -452,7 +504,12 @@ window.ScopePage = {
     this.selectedScopeId = null;
     this.selectedTemplateId = null;
     this.selectedToolpackIds = new Set();
-    ['scope-name', 'scope-expires', 'scope-owner', 'scope-notes', 'scope-target-input'].forEach(id => {
+    this.draftActionModes = null;
+    this.draftActiveHours = null;
+    this.draftBlackoutWindows = null;
+    this.draftRateCaps = null;
+    this.draftRoeText = '';
+    ['scope-name', 'scope-expires', 'scope-owner', 'scope-notes', 'scope-target-input', 'scope-roe'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = '';
     });
@@ -463,6 +520,52 @@ window.ScopePage = {
     if (allow) allow.value = '';
     if (block) block.value = '';
     this.renderScopeBuilderShell();
+  },
+
+  // ROE templates — pre-built scope payloads from /api/scopes/roe-templates.
+  // Operators pick one to seed action_modes + windows + caps + ROE text;
+  // the rest of the builder (name, targets, toolpacks) is independent.
+  async loadRoeTemplates() {
+    try {
+      const res = await this.fetchJSON('/api/scopes/roe-templates');
+      this.roeTemplates = Array.isArray(res?.templates) ? res.templates : [];
+      this.renderRoeTemplateSelect();
+    } catch (err) {
+      console.warn('Failed to load ROE templates:', err.message);
+    }
+  },
+
+  renderRoeTemplateSelect() {
+    const sel = document.getElementById('scope-roe-template');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">No ROE template…</option>'
+      + this.roeTemplates.map((t) => `<option value="${this.escapeAttribute(t.id)}">${this.escapeHtml(t.name)}</option>`).join('');
+  },
+
+  applyRoeTemplate(id) {
+    const tpl = this.roeTemplates.find((t) => t.id === id);
+    if (!tpl) return;
+    const p = tpl.payload || {};
+    if (p.action_modes) this.draftActionModes = { ...p.action_modes };
+    if (p.active_hours) this.draftActiveHours = { ...p.active_hours };
+    if (p.blackout_windows) this.draftBlackoutWindows = { ...p.blackout_windows };
+    if (p.rate_caps) this.draftRateCaps = { ...p.rate_caps };
+    if (p.rules_of_engagement) {
+      this.draftRoeText = p.rules_of_engagement;
+      const roeEl = document.getElementById('scope-roe');
+      if (roeEl) roeEl.value = this.draftRoeText;
+    }
+    // Update small summary chips so the operator sees what was applied.
+    const hint = document.getElementById('scope-roe-template-hint');
+    if (hint) {
+      const bits = [];
+      if (p.action_modes) bits.push(`${Object.keys(p.action_modes).length} action modes`);
+      if (p.active_hours) bits.push('active hours');
+      if (p.rate_caps) bits.push('rate caps');
+      hint.textContent = bits.length ? `Applied · ${bits.join(' · ')}` : '';
+    }
+    this.renderActionClassTable();
+    this.syncActionClassHiddenInputs();
   },
 
   async archiveCurrentScope() {
@@ -501,6 +604,14 @@ window.ScopePage = {
     document.getElementById('scope-notes').value = scope.notes || '';
     document.getElementById('scope-allowed').value = (scope.allowed_actions || []).join(', ');
     document.getElementById('scope-blocked').value = (scope.blocked_actions || []).join(', ');
+    // New policy fields
+    this.draftActionModes = scope.action_modes || null;
+    this.draftActiveHours = scope.active_hours || null;
+    this.draftBlackoutWindows = scope.blackout_windows || null;
+    this.draftRateCaps = scope.rate_caps || null;
+    this.draftRoeText = scope.rules_of_engagement || '';
+    const roeEl = document.getElementById('scope-roe');
+    if (roeEl) roeEl.value = this.draftRoeText;
     this.selectedToolpackIds = new Set(raw.toolpackIds || []);
     // Hydrate target chips
     const chips = document.getElementById('scope-target-chips');

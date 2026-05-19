@@ -164,6 +164,125 @@ describe('scope policy evaluator', () => {
     const blocked = { ...activeScope, blocked_actions: ['network-scan'] };
     const decision = evaluateToolAction({ toolName: 'execute_command', args: { command: 'nmap 192.168.1.20' }, scope: blocked });
     assert.strictEqual(decision.allowed, false);
-    assert.match(decision.reason, /blocked by scope/i);
+    assert.match(decision.reason, /(blocked|denied) by scope/i);
+  });
+
+  // ── Pass 12: action_modes / ask gate / allow-once / time / rate caps ──
+
+  test('action_modes "ask" returns mode:ask (allowed: false, explicit: true)', () => {
+    const scope = {
+      ...activeScope,
+      action_modes: { 'read/local': 'auto', 'recon': 'auto', 'network-scan': 'ask', 'exploit': 'deny' },
+    };
+    const decision = evaluateToolAction({
+      toolName: 'execute_command',
+      args: { command: 'nmap -sV 192.168.1.25' },
+      scope,
+    });
+    assert.strictEqual(decision.mode, 'ask');
+    assert.strictEqual(decision.allowed, false);
+    assert.strictEqual(decision.explicit, true);
+    assert.match(decision.reason, /approval/i);
+  });
+
+  test('action_modes "deny" explicit blocks outright (no allow-once card)', () => {
+    const scope = {
+      ...activeScope,
+      action_modes: { 'recon': 'auto', 'exploit': 'deny' },
+    };
+    const decision = evaluateToolAction({
+      toolName: 'execute_command',
+      args: { command: 'sqlmap -u https://example.com/app' },
+      scope,
+    });
+    assert.strictEqual(decision.mode, 'deny');
+    assert.strictEqual(decision.explicit, true);
+    assert.strictEqual(decision.allowed, false);
+  });
+
+  test('absent action mode falls through as implicit deny (allow-once eligible)', () => {
+    const scope = {
+      ...activeScope,
+      action_modes: { 'recon': 'auto' }, // network-scan not listed
+    };
+    const decision = evaluateToolAction({
+      toolName: 'execute_command',
+      args: { command: 'nmap 192.168.1.20' },
+      scope,
+    });
+    assert.strictEqual(decision.mode, 'deny');
+    assert.strictEqual(decision.explicit, false);
+  });
+
+  test('outside active-hours window blocks with gate:time', () => {
+    // Force "now" to a Saturday afternoon, declare Mon-Fri business hours.
+    const now = new Date(Date.UTC(2026, 4, 16, 14, 0, 0)); // 2026-05-16 = Saturday
+    const scope = {
+      ...activeScope,
+      action_modes: { 'recon': 'auto', 'network-scan': 'auto' },
+      active_hours: { windows: [{ days: ['mon','tue','wed','thu','fri'], start: '09:00', end: '18:00' }] },
+    };
+    const decision = evaluateToolAction({
+      toolName: 'execute_command',
+      args: { command: 'nmap 192.168.1.20' },
+      scope, now,
+    });
+    assert.strictEqual(decision.allowed, false);
+    assert.strictEqual(decision.gate, 'time');
+    assert.strictEqual(decision.explicit, false);
+  });
+
+  test('inside blackout window blocks with gate:time', () => {
+    const now = new Date(Date.UTC(2026, 4, 12, 12, 0, 0)); // Tuesday noon UTC
+    const scope = {
+      ...activeScope,
+      action_modes: { 'recon': 'auto', 'network-scan': 'auto' },
+      blackout_windows: { windows: [{ days: ['mon','tue','wed','thu','fri'], start: '11:00', end: '13:00' }] },
+    };
+    const decision = evaluateToolAction({
+      toolName: 'execute_command',
+      args: { command: 'nmap 192.168.1.20' },
+      scope, now,
+    });
+    assert.strictEqual(decision.allowed, false);
+    assert.strictEqual(decision.gate, 'time');
+    assert.match(decision.reason, /blackout/i);
+  });
+
+  test('rate cap (requests_per_minute) blocks with gate:rate', () => {
+    const scope = {
+      ...activeScope,
+      action_modes: { 'network-scan': 'auto', 'recon': 'auto' },
+      rate_caps: { requests_per_minute: 5 },
+    };
+    const decision = evaluateToolAction({
+      toolName: 'execute_command',
+      args: { command: 'nmap 192.168.1.20' },
+      scope,
+      usage: { lastMinute: 5, thisRun: 5 },
+    });
+    assert.strictEqual(decision.allowed, false);
+    assert.strictEqual(decision.gate, 'rate');
+    assert.match(decision.reason, /rate cap/i);
+  });
+
+  test('operator override bypasses ask, time-window, and rate caps', () => {
+    const scope = {
+      ...activeScope,
+      action_modes: { 'network-scan': 'deny' },
+      active_hours: { windows: [{ days: ['sun'], start: '00:00', end: '00:01' }] },
+      rate_caps: { requests_per_minute: 1, max_actions_per_run: 1 },
+    };
+    const now = new Date(Date.UTC(2026, 4, 12, 14, 0, 0)); // Tue 14:00 UTC — outside the window
+    const decision = evaluateToolAction({
+      toolName: 'execute_command',
+      args: { command: 'nmap 192.168.1.20' },
+      scope, now,
+      usage: { lastMinute: 100, thisRun: 100 },
+      operatorOverride: { enabled: true, reason: 'fixture' },
+    });
+    assert.strictEqual(decision.allowed, true);
+    assert.strictEqual(decision.mode, 'auto');
+    assert.strictEqual(decision.policyMode, 'operator-override');
   });
 });

@@ -17,6 +17,7 @@ import { buildSystemPrompt } from './ai/system-prompt.js';
 import { getScope } from './scope/scope-store.js';
 import { resolvePrompt } from './prompts/prompt-store.js';
 import { normalizeOperatorOverride } from './scope/policy.js';
+import { getToolpacks } from './toolpacks/toolpack-registry.js';
 import { writePreviewArtifact, exportRunTrace } from './artifacts/artifact-store.js';
 import { artifactToPublic } from './artifacts/renderers.js';
 import apiRouter from './routes/api.js';
@@ -62,10 +63,80 @@ wss.on('connection', (ws) => {
   let currentAbortController = null;
   let currentRunId = null;
   let currentRunStopped = false;
+  // Pending approval round-trips. Key = approvalId (uuid-like).
+  // Value = { resolve, timer, toolCallId }.
+  // When the policy evaluator decides 'ask' or implicit-deny, the executor
+  // calls requestApproval() which sends an approval_request WS message and
+  // awaits the operator's approval_response. A 5-minute timeout auto-denies.
+  const pendingApprovals = new Map();
+  const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
+  // Batch-approve state: when an operator ticks "approve next N matching",
+  // we remember (scopeId, risk) → remaining count for this connection.
+  // Subsequent ask-gated calls that match auto-approve until exhausted.
+  // Resets on disconnect — the operator's approval doesn't carry across
+  // sessions, by design.
+  const batchApprovals = new Map(); // key: `${scopeId}::${risk}` → { remaining, originAppId }
 
   function providerRoute() {
     return (config.api.baseUrl || '').includes('127.0.0.1:8648') ? 'hermes-proxy' : config.api.baseUrl;
   }
+
+  // Per-connection approval requester. The executor calls this when the
+  // policy decides an action needs operator approval (ask gate or implicit
+  // deny allow-once). We send the request to the client and resolve when
+  // approval_response arrives — or auto-deny after APPROVAL_TIMEOUT_MS.
+  function requestApproval(payload) {
+    return new Promise((resolve) => {
+      // Batch-approve short-circuit. If the operator pre-approved the next N
+      // matching calls and this one matches, auto-resolve without rendering
+      // a card. Only applies to ask-gates (not allow-once), so the operator
+      // can't auto-bypass implicit denials.
+      if (payload.kind === 'ask' && payload.scopeId && payload.risk) {
+        const key = `${payload.scopeId}::${payload.risk}`;
+        const batch = batchApprovals.get(key);
+        if (batch && batch.remaining > 0) {
+          batch.remaining -= 1;
+          if (batch.remaining <= 0) batchApprovals.delete(key);
+          resolve({
+            approved: true,
+            note: `batch-approve (${batch.originAppId}, ${batch.remaining} remaining)`,
+            batch: true,
+          });
+          return;
+        }
+      }
+      const approvalId = `appr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const timer = setTimeout(() => {
+        if (pendingApprovals.has(approvalId)) {
+          pendingApprovals.delete(approvalId);
+          resolve({ approved: false, note: 'Operator approval timed out (5m)' });
+        }
+      }, APPROVAL_TIMEOUT_MS);
+      pendingApprovals.set(approvalId, { resolve, timer, toolCallId: payload.toolCallId });
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'approval_request',
+          approvalId,
+          toolCallId: payload.toolCallId,
+          name: payload.name,
+          args: payload.args,
+          kind: payload.kind,           // 'ask' | 'allow-once'
+          risk: payload.risk,
+          reason: payload.reason,
+          gate: payload.gate,
+          scopeId: payload.scopeId,
+          scopeName: payload.scopeName,
+          conversationId: currentConversationId,
+          runId: currentRunId,
+        }));
+      } else {
+        clearTimeout(timer);
+        pendingApprovals.delete(approvalId);
+        resolve({ approved: false, note: 'WebSocket closed before approval' });
+      }
+    });
+  }
+  let currentConversationId = null;
 
   function preview(value, max = 1200) {
     if (value === undefined || value === null) return '';
@@ -115,6 +186,30 @@ wss.on('connection', (ws) => {
       const msg = JSON.parse(data.toString());
 
       switch (msg.type) {
+        case 'approval_response': {
+          // Operator clicked Approve/Deny on a chat approval card. Resolve
+          // the pending promise so the executor unblocks. If the operator
+          // ticked "approve next N matching", register the batch state so
+          // future matching ask-gates auto-approve.
+          const pending = pendingApprovals.get(msg.approvalId);
+          if (pending) {
+            clearTimeout(pending.timer);
+            pendingApprovals.delete(msg.approvalId);
+            pending.resolve({
+              approved: msg.decision === 'approve',
+              note: msg.note || null,
+            });
+          }
+          if (msg.decision === 'approve' && msg.batch && msg.batch.scopeId && msg.batch.risk) {
+            const remaining = parseInt(msg.batch.remaining, 10) || 0;
+            if (remaining > 0) {
+              const key = `${msg.batch.scopeId}::${msg.batch.risk}`;
+              batchApprovals.set(key, { remaining, originAppId: msg.approvalId });
+            }
+          }
+          break;
+        }
+
         case 'chat': {
           let conversationId = msg.conversationId;
 
@@ -124,11 +219,44 @@ wss.on('connection', (ws) => {
             conversationId = conv.id;
             ws.send(JSON.stringify({ type: 'conversation_created', conversationId }));
           }
+          // Make conversation/run ids visible to the per-connection
+          // requestApproval closure so approval_request messages carry them.
+          currentConversationId = conversationId;
 
           const selectedScope = msg.scopeId ? getScope(msg.scopeId) : null;
           const selectedProfileId = msg.profileId || null;
           const selectedToolpackIds = Array.isArray(msg.toolpackIds) ? msg.toolpackIds : (msg.toolpackIds ? String(msg.toolpackIds).split(',') : []);
           const operatorOverride = normalizeOperatorOverride(msg.operatorOverride);
+          // UI context lets the agent answer "what am I looking at?" and
+          // default phantom_* tool args. We inline the *full* scope summary
+          // and toolpack metadata so the agent doesn't burn a tool round-trip
+          // just to know what's authorized in this conversation.
+          // Falls back to a minimal stub if the client didn't send one
+          // (older clients still work).
+          const toolpackMeta = selectedToolpackIds.length
+            ? getToolpacks()
+                .filter((tp) => selectedToolpackIds.includes(tp.id))
+                .map((tp) => ({ id: tp.id, name: tp.name, risks: tp.risks, allowedActions: tp.allowedActions }))
+            : [];
+          const uiContext = msg.uiContext && typeof msg.uiContext === 'object'
+            ? {
+                route: msg.uiContext.route || null,
+                selectedScopeId: msg.uiContext.selectedScopeId || selectedScope?.id || null,
+                selectedAssetId: msg.uiContext.selectedAssetId || null,
+                selectedRunId: msg.uiContext.selectedRunId || null,
+                scope: selectedScope ? {
+                  id: selectedScope.id,
+                  name: selectedScope.name,
+                  targets: selectedScope.targets,
+                  allowed_actions: selectedScope.allowed_actions,
+                  blocked_actions: selectedScope.blocked_actions,
+                  expires_at: selectedScope.expires_at,
+                } : null,
+                toolpackIds: selectedToolpackIds,
+                toolpacks: toolpackMeta,
+                operatorOverride: operatorOverride.enabled ? operatorOverride : null,
+              }
+            : null;
           const governanceSnapshot = operatorOverride.enabled
             ? { policyMode: 'operator-override', operatorOverride }
             : { policyMode: 'governed' };
@@ -286,6 +414,9 @@ wss.on('connection', (ws) => {
               operatorOverride,
               enforceScope: true,
               trace: (event) => trace(run.id, event),
+              uiContext,
+              runId: run.id,
+              requestApproval,
             }
           );
 
@@ -376,6 +507,17 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     console.log('🔌 Client disconnected');
+    // Resolve any pending approval prompts as denied so the executor
+    // unblocks instead of hanging until the 5-minute timeout.
+    for (const [_id, pending] of pendingApprovals) {
+      try {
+        clearTimeout(pending.timer);
+        pending.resolve({ approved: false, note: 'Client disconnected' });
+      } catch {}
+    }
+    pendingApprovals.clear();
+    batchApprovals.clear(); // batch state is per-connection by design
+
     // Abort any running operation when client disconnects
     if (currentAbortController) {
       currentRunStopped = true;

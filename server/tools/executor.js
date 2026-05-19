@@ -7,6 +7,8 @@ import os from 'os';
 import { saveMemory, searchMemories } from '../memory/store.js';
 import { getSetting } from '../memory/store.js';
 import { evaluateToolAction, normalizeOperatorOverride } from '../scope/policy.js';
+import { recordAction, getUsage } from '../scope/rate-limiter.js';
+import { isPhantomTool, executePhantomTool } from './phantom-tools.js';
 import config from '../config.js';
 
 /**
@@ -23,7 +25,18 @@ function preview(value, max = 4000) {
   return text.length > max ? `${text.substring(0, max)}…` : text;
 }
 
-async function runToolImplementation(name, args, onProgress) {
+async function runToolImplementation(name, args, onProgress, options = {}) {
+  // PHANTOM-native domain tools (scopes, assets, findings, runs, reports)
+  // get routed to phantom-tools.js. They get a context bundle so they can
+  // default runId/scopeId from the live run when the LLM omits them.
+  if (isPhantomTool(name)) {
+    return await executePhantomTool(name, args, {
+      scope: options.scope || null,
+      conversationId: options.conversationId || null,
+      runId: options.runId || null,
+      uiContext: options.uiContext || null,
+    });
+  }
   switch (name) {
     case 'execute_command': return await executeCommand(args, onProgress);
     case 'read_file': return await readFileContent(args);
@@ -80,7 +93,96 @@ export async function executeTool(name, args, onProgress, options = {}) {
   }
 
   if (options.enforceScope || Object.prototype.hasOwnProperty.call(options, 'scope')) {
-    const decision = evaluateToolAction({ toolName: name, args, scope: options.scope || null, operatorOverride });
+    const usage = getUsage(options.scope?.id || null, options.runId || null);
+    let decision = evaluateToolAction({ toolName: name, args, scope: options.scope || null, operatorOverride, usage });
+    let approvalNote = null;
+
+    // ── Approval round-trip: ask-gate OR allow-once override card ──
+    //
+    // mode 'ask' → policy says "this needs operator approval before running".
+    // mode 'deny' && !explicit → policy blocked, but operator can grant a
+    //   one-time override via the chat card.
+    // mode 'deny' && explicit → blocked outright (agent should have known
+    //   this was forbidden — see system prompt's ASK-GATED ACTIONS section).
+    const needsAsk = decision.mode === 'ask';
+    const allowOnceEligible = !decision.allowed && decision.mode === 'deny' && decision.explicit === false;
+
+    if ((needsAsk || allowOnceEligible) && typeof options.requestApproval === 'function') {
+      const kind = needsAsk ? 'ask' : 'allow-once';
+      // Emit a trace event so the run timeline shows the pause.
+      const askEvent = options.trace?.({
+        parentEventId: startedEvent?.id || null,
+        type: 'tool.call.approval.requested',
+        phase: 'policy',
+        status: 'pending',
+        toolName: name,
+        input: args,
+        outputPreview: decision.reason,
+        metadata: { ...baseMetadata, decision, kind, gate: decision.gate },
+        startedAt: new Date().toISOString(),
+      });
+
+      let approval;
+      try {
+        approval = await options.requestApproval({
+          toolCallId,
+          name,
+          args,
+          kind,                       // 'ask' | 'allow-once'
+          risk: decision.risk,
+          reason: decision.reason,
+          gate: decision.gate,
+          scopeId: options.scope?.id || null,
+          scopeName: options.scope?.name || null,
+        });
+      } catch (e) {
+        approval = { approved: false, note: `approval channel error: ${e.message}` };
+      }
+
+      options.trace?.({
+        parentEventId: askEvent?.id || null,
+        type: approval?.approved ? 'tool.call.approval.granted' : 'tool.call.approval.denied',
+        phase: 'policy',
+        status: approval?.approved ? 'completed' : 'skipped',
+        toolName: name,
+        input: args,
+        outputPreview: approval?.note || (approval?.approved ? 'Approved by operator' : 'Denied by operator'),
+        metadata: { ...baseMetadata, decision, kind, approval },
+        endedAt: new Date().toISOString(),
+      });
+
+      if (approval?.approved) {
+        approvalNote = approval.note || null;
+        // Re-shape the decision: ask becomes auto, allow-once becomes a
+        // one-time auto with a policyMode flag so the trace records that
+        // the rule was bent for this single call.
+        decision = {
+          ...decision,
+          allowed: true,
+          mode: 'auto',
+          policyMode: 'allow-once',
+          approvalNote: approvalNote,
+        };
+      } else {
+        const noteSuffix = approval?.note ? ` Operator note: ${approval.note}` : '';
+        const message = `Action ${kind === 'ask' ? 'denied at approval gate' : 'remains denied'}: ${decision.reason}.${noteSuffix}`;
+        options.trace?.({
+          parentEventId: startedEvent?.id || null,
+          type: 'tool.call.blocked',
+          phase: 'tool',
+          status: 'skipped',
+          toolName: name,
+          input: args,
+          outputPreview: message,
+          metadata: { ...baseMetadata, decision, risk: decision.risk, targets: decision.targets, policyMode: decision.policyMode || policyMode },
+          startedAt,
+          endedAt: new Date().toISOString(),
+          durationMs: Date.now() - startedMs,
+        });
+        return message;
+      }
+    }
+
     if (!decision.allowed) {
       const message = `Blocked by PHANTOM scope policy: ${decision.reason}`;
       options.trace?.({
@@ -98,10 +200,16 @@ export async function executeTool(name, args, onProgress, options = {}) {
       });
       return message;
     }
-    if (decision.policyMode === 'operator-override') {
+
+    // Record this allowed action for rate-cap accounting.
+    if (options.scope?.id || options.runId) {
+      recordAction(options.scope?.id || null, options.runId || null);
+    }
+
+    if (decision.policyMode === 'operator-override' || decision.policyMode === 'allow-once') {
       options.trace?.({
         parentEventId: startedEvent?.id || null,
-        type: 'tool.call.override',
+        type: decision.policyMode === 'operator-override' ? 'tool.call.override' : 'tool.call.allow-once',
         phase: 'policy',
         status: 'completed',
         toolName: name,
@@ -114,6 +222,7 @@ export async function executeTool(name, args, onProgress, options = {}) {
           targets: decision.targets,
           policyMode: decision.policyMode,
           operatorOverride: decision.operatorOverride,
+          approvalNote,
         },
         startedAt,
         endedAt: new Date().toISOString(),
@@ -123,7 +232,12 @@ export async function executeTool(name, args, onProgress, options = {}) {
   }
 
   try {
-    const result = await runToolImplementation(name, args, onProgress);
+    const result = await runToolImplementation(name, args, onProgress, {
+      scope: options.scope || null,
+      conversationId: options.conversationId || null,
+      runId: options.runId || null,
+      uiContext: options.uiContext || null,
+    });
     if (emitLifecycle) {
       options.trace({
         parentEventId: startedEvent?.id || null,

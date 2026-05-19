@@ -38,6 +38,21 @@
     </div>
   </div>
 
+  <!-- Operator Override · persistent banner.
+       Hidden when override is OFF (display:none via [hidden]). When ON,
+       slides down from the top of the viewport with reason + edit/end
+       actions, pushes app content down, and subtly pulses (respects
+       prefers-reduced-motion). Visible across every route so the operator
+       always sees the governance state. -->
+  <aside id="override-banner" class="override-banner" role="status" aria-live="polite" hidden>
+    <span class="override-banner-icon" aria-hidden="true">⚠</span>
+    <span class="override-banner-title">OPERATOR OVERRIDE ACTIVE</span>
+    <span class="override-banner-reason" id="override-banner-reason"></span>
+    <span class="override-banner-grow"></span>
+    <button type="button" class="override-banner-btn" id="override-banner-edit">Edit</button>
+    <button type="button" class="override-banner-btn danger" id="override-banner-end">End override</button>
+  </aside>
+
   <div id="app">
     <!-- Sidebar -->
     <aside id="sidebar" class="sidebar">
@@ -67,6 +82,7 @@
         <button class="sidebar-nav-item" data-route="graph" title="Graph"><span class="nav-glyph" aria-hidden="true">MAP</span><span class="nav-label">Graph</span></button>
         <button class="sidebar-nav-item" data-route="alerts" title="Alerts"><span class="nav-glyph" aria-hidden="true">ALR</span><span class="nav-label">Alerts</span></button>
         <button class="sidebar-nav-item" data-route="artifacts" title="Artifacts"><span class="nav-glyph" aria-hidden="true">EVD</span><span class="nav-label">Artifacts</span></button>
+        <button class="sidebar-nav-item" data-route="approvals" title="Approvals"><span class="nav-glyph" aria-hidden="true">APV</span><span class="nav-label">Approvals</span></button>
         <button class="sidebar-nav-item" data-route="scope" title="Assets / Scope"><span class="nav-glyph" aria-hidden="true">SCP</span><span class="nav-label">Assets / Scope</span></button>
         <button class="sidebar-nav-item" data-route="settings" title="Settings"><span class="nav-glyph" aria-hidden="true">CFG</span><span class="nav-label">Settings</span></button>
       </nav>
@@ -78,6 +94,19 @@
       <div id="conversation-list" class="conversation-list">
         <!-- Conversations will be rendered here -->
       </div>
+
+      <!-- Operator Override · sidebar entry · primary control surface.
+           Off state = neutral rail dot. On state = amber pulse + label so
+           the operator can never lose track of being in override.
+           Clicking opens the override overlay modal for full configuration. -->
+      <button id="sidebar-override-btn" class="sidebar-override-btn" type="button"
+              data-state="off" aria-label="Operator Override · off" aria-haspopup="dialog" aria-controls="override-modal">
+        <span class="override-dot" aria-hidden="true"></span>
+        <span class="override-label">
+          <strong>Operator Override</strong>
+          <small id="sidebar-override-state">OFF</small>
+        </span>
+      </button>
 
       <div class="sidebar-footer">
         <div id="system-status" class="system-status">
@@ -290,6 +319,25 @@
               </section>
             </div>
 
+            <!-- Posture trending · Phase C. Sits above the lower 3-column
+                 row so the operator sees "are we improving?" on landing.
+                 Hidden until the trending module fetches data; renders
+                 empty-state copy when there are < 1 terminal run. -->
+            <section class="panel cockpit-trending" id="cockpit-trending" aria-label="Posture trending">
+              <div class="panel-hd">
+                <span class="title">Posture trend</span>
+                <span class="sub" id="trending-sub">—</span>
+                <span class="grow"></span>
+                <select id="trending-scope-filter" class="trending-scope-filter" aria-label="Filter trend by scope">
+                  <option value="">All scopes</option>
+                </select>
+                <button class="btn ghost sm" id="trending-refresh" title="Refresh">↻</button>
+              </div>
+              <div class="panel-bd trending-body" id="trending-body">
+                <div class="empty-msg">Loading trend…</div>
+              </div>
+            </section>
+
             <!-- Three-column lower row -->
             <div class="cockpit-row cockpit-row-3">
               <!-- Policy decisions (24h) -->
@@ -366,13 +414,18 @@
             <button id="refresh-runs-btn" class="btn btn-secondary">↻ Refresh</button>
           </div>
           <div class="runs-layout">
-            <aside id="runs-list" class="runs-list"></aside>
+            <aside class="runs-sidebar">
+              <div id="runs-scope-chip" class="runs-scope-chip"></div>
+              <div id="runs-list" class="runs-list"></div>
+            </aside>
 
             <section id="run-detail" class="run-detail">
               <header class="run-detail-hd" id="run-detail-hd"></header>
 
               <nav class="run-tabs" role="tablist" id="run-tabs">
-                <button class="run-tab active" role="tab" data-tab="trace">Trace <span class="ct" id="run-tab-trace-ct"></span></button>
+                <button class="run-tab active" role="tab" data-tab="synthesis">Synthesis</button>
+                <button class="run-tab" role="tab" data-tab="messages">Messages <span class="ct" id="run-tab-messages-ct"></span></button>
+                <button class="run-tab" role="tab" data-tab="trace">Trace <span class="ct" id="run-tab-trace-ct"></span></button>
                 <button class="run-tab" role="tab" data-tab="graph">Graph</button>
                 <button class="run-tab" role="tab" data-tab="artifacts">Artifacts <span class="ct" id="run-tab-artifacts-ct"></span></button>
                 <button class="run-tab" role="tab" data-tab="snapshot">Prompt snapshot</button>
@@ -380,7 +433,13 @@
               </nav>
 
               <div class="run-tab-body" id="run-tab-body">
-                <div class="run-tab-pane trace active" data-pane="trace">
+                <div class="run-tab-pane synthesis active" data-pane="synthesis">
+                  <div class="run-synthesis" id="run-synthesis"></div>
+                </div>
+                <div class="run-tab-pane messages" data-pane="messages" hidden>
+                  <div class="run-messages" id="run-messages"></div>
+                </div>
+                <div class="run-tab-pane trace" data-pane="trace" hidden>
                   <div class="trace-timeline" id="run-trace-timeline"></div>
                 </div>
                 <div class="run-tab-pane graph" data-pane="graph" hidden>
@@ -393,7 +452,7 @@
                   <pre class="run-snapshot" id="run-snapshot"></pre>
                 </div>
                 <div class="run-tab-pane output" data-pane="output" hidden>
-                  <pre class="run-output" id="run-output"></pre>
+                  <div class="run-output" id="run-output"></div>
                 </div>
               </div>
 
@@ -559,6 +618,81 @@
           </div>
         </section>
 
+        <section class="app-page" data-page="approvals" id="approvals-page">
+          <div class="page-header">
+            <div>
+              <p class="eyebrow">Governance · audit trail</p>
+              <h1>Approvals</h1>
+              <p>Every approval, denial, override, and one-time exception — reconstructed from trace events. Filter by decision, risk, or scope; expand a row for full args + operator note.</p>
+            </div>
+            <div class="page-actions">
+              <button id="approvals-refresh-btn" class="btn btn-secondary">↻ Refresh</button>
+            </div>
+          </div>
+
+          <!-- Pending install requests (sec-ops installer). Shown only when
+               there are pending requests so the queue stays focused. Same
+               backend rows the Settings → Tools panel uses; approving here
+               persists everywhere. -->
+          <section class="panel approvals-install-section" id="approvals-installs-section" hidden>
+            <div class="panel-hd">
+              <span class="title">Pending install requests</span>
+              <span class="sub" id="approvals-installs-sub">—</span>
+              <span class="grow"></span>
+            </div>
+            <div class="panel-bd" id="approvals-installs-list"></div>
+          </section>
+
+          <!-- KPI strip -->
+          <div class="cockpit-kpi approvals-kpi" id="approvals-kpi"></div>
+
+          <!-- Sparkline + risk breakdown -->
+          <div class="approvals-summary-row">
+            <section class="panel">
+              <div class="panel-hd"><span class="title">Activity · 14 days</span></div>
+              <div class="panel-bd approvals-sparkline" id="approvals-sparkline"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-hd"><span class="title">By risk class</span></div>
+              <div class="panel-bd approvals-by-risk" id="approvals-by-risk"></div>
+            </section>
+          </div>
+
+          <!-- Filter bar -->
+          <div class="approvals-filter-bar">
+            <label>
+              <span class="lbl">DECISION</span>
+              <select id="approvals-filter-decision">
+                <option value="">All</option>
+                <option value="granted">Granted</option>
+                <option value="denied">Denied</option>
+                <option value="allow-once">Allow once</option>
+                <option value="override">Override</option>
+                <option value="timeout">Timeout</option>
+              </select>
+            </label>
+            <label>
+              <span class="lbl">RISK</span>
+              <select id="approvals-filter-risk">
+                <option value="">All</option>
+                <option value="recon">recon</option>
+                <option value="network-scan">network-scan</option>
+                <option value="exploit">exploit</option>
+                <option value="destructive">destructive</option>
+                <option value="credentialed">credentialed</option>
+                <option value="offline-password-audit">offline-password-audit</option>
+                <option value="online-bruteforce">online-bruteforce</option>
+              </select>
+            </label>
+            <label>
+              <span class="lbl">SINCE</span>
+              <input id="approvals-filter-since" type="date">
+            </label>
+          </div>
+
+          <div id="approvals-list" class="approvals-list"></div>
+        </section>
+
         <section class="app-page" data-page="artifacts" id="artifacts-page">
           <div class="page-header">
             <div>
@@ -671,30 +805,53 @@
                   </div>
                 </section>
 
-                <!-- Step 4: action classes -->
+                <!-- Step 4: action classes (3-state: Allow / Ask / Deny) -->
                 <section class="panel scope-step">
                   <div class="panel-hd">
                     <span class="title">4 · Action classes</span>
-                    <span class="sub">ALLOW / DENY MATRIX</span>
+                    <span class="sub">ALLOW · ASK · DENY</span>
                   </div>
                   <div class="panel-bd">
-                    <p class="action-matrix-hint">An action class with neither ALLOW nor DENY checked is implicitly denied. Locked rows are non-overridable.</p>
-                    <table class="action-class-table" id="scope-action-table" aria-label="Action class allow/deny">
+                    <p class="action-matrix-hint">Each action class can run automatically (<strong>Allow</strong>), pause for operator approval in chat (<strong>Ask</strong>), or be forbidden (<strong>Deny</strong>). Locked rows are non-overridable.</p>
+                    <table class="action-class-table" id="scope-action-table" aria-label="Action class mode matrix">
                       <thead>
                         <tr>
                           <th>CLASS</th>
                           <th>RISK</th>
-                          <th class="ck">ALLOW</th>
-                          <th class="ck">DENY</th>
+                          <th class="ck" colspan="2">MODE</th>
                         </tr>
                       </thead>
                       <tbody>
                         <!-- rows injected by ScopeBuilder.renderActionClassTable() -->
                       </tbody>
                     </table>
-                    <!-- Hidden inputs preserve the existing JS contract -->
+                    <!-- Hidden inputs preserve the legacy CSV contract used by
+                         older policy-evaluator paths. Derived from action_modes. -->
                     <input id="scope-allowed" type="hidden" value="">
                     <input id="scope-blocked" type="hidden" value="">
+                  </div>
+                </section>
+
+                <!-- Step 4b: rules of engagement + ROE template seed -->
+                <section class="panel scope-step">
+                  <div class="panel-hd">
+                    <span class="title">4b · Rules of engagement</span>
+                    <span class="sub">CONTRACT · WINDOWS · CAPS</span>
+                  </div>
+                  <div class="panel-bd">
+                    <label class="field">
+                      <span class="lbl">START FROM A TEMPLATE — seeds action modes, time windows, rate caps, and ROE notes</span>
+                      <select id="scope-roe-template" aria-label="ROE template">
+                        <option value="">No ROE template…</option>
+                      </select>
+                      <small id="scope-roe-template-hint" class="caption" style="color:var(--fg-3);"></small>
+                    </label>
+                    <label class="field">
+                      <span class="lbl">RULES OF ENGAGEMENT — recorded in every trace event under this scope</span>
+                      <textarea id="scope-roe" rows="5" placeholder="• Business hours only.
+• Recon auto · exploit asks · destructive denied.
+• Stop and notify on production-impacting findings."></textarea>
+                    </label>
                   </div>
                 </section>
 
@@ -860,15 +1017,130 @@
                   <button id="refresh-toolpacks-btn" class="btn btn-secondary btn-sm">Refresh</button>
                 </div>
                 <div id="toolpack-settings-list" class="toolpack-settings-list"></div>
+
+                <!-- Sec-ops installer · auto-detects winget/choco/apt/dnf/pacman/brew/wsl
+                     and requests approval-gated installs of base / offensive / blue
+                     tool tiers. Each request lands in the Approvals queue with the
+                     resolved package list and exact command line. -->
+                <div class="prompt-preview-header" style="margin-top:24px;">
+                  <div>
+                    <h3>Sec-ops installer</h3>
+                    <p>Auto-detect host package manager and install standard red/blue tooling. Each request is approval-gated.</p>
+                  </div>
+                  <button id="installer-refresh-btn" class="btn btn-secondary btn-sm">Refresh</button>
+                </div>
+                <div id="installer-host" class="installer-host"></div>
+                <div id="installer-tiers" class="installer-tiers"></div>
+                <div id="installer-requests" class="installer-requests"></div>
               </section>
               <section class="settings-tab-panel" data-settings-panel="advanced">
                 <div id="settings-advanced-overview" class="settings-overview-panel">Loading advanced settings…</div>
+                <!-- Onboarding entry-point. The wizard auto-opens on first run;
+                     this lets operators re-summon it any time. -->
+                <div class="settings-onboarding-card" id="settings-onboarding-card">
+                  <div class="settings-onboarding-text">
+                    <h3>Onboarding wizard</h3>
+                    <p>Walk through provider, scope, and a preview of the end-of-run synthesis.</p>
+                  </div>
+                  <button class="btn btn-secondary" id="settings-onboarding-open">Open wizard</button>
+                </div>
+
+                <!-- LLM-generated synthesis · feature flag.
+                     When on, the end-of-run synthesis card asks the configured
+                     model to rewrite Highlights + Next steps from the run's
+                     actual trace. The numeric/posture fields stay heuristic.
+                     Off by default so first-time operators don't burn quota. -->
+                <div class="settings-onboarding-card" id="settings-synthesis-llm-card">
+                  <div class="settings-onboarding-text">
+                    <h3>LLM-generated synthesis highlights</h3>
+                    <p>Use the configured model to write specific, run-aware Highlights and Next steps. Numeric/posture fields stay heuristic. Off by default.</p>
+                  </div>
+                  <label class="settings-toggle">
+                    <input type="checkbox" id="settings-synthesis-llm-toggle">
+                    <span class="settings-toggle-slider"></span>
+                    <span class="settings-toggle-label">Enable</span>
+                  </label>
+                </div>
               </section>
             </div>
           </div>
         </section>
       </div>
     </main>
+
+    <!-- Operator Override · overlay modal.
+         The deliberate-ceremony surface for entering override. Surfaces the
+         governance contract in plain language (what's bypassed vs what's
+         still recorded) so it's never something the operator drifts into
+         by accident. Reason input is required to enable. -->
+    <div id="override-modal" class="override-modal" role="dialog" aria-modal="true"
+         aria-labelledby="override-modal-title" hidden>
+      <div class="override-modal-backdrop" data-override-close></div>
+      <div class="override-modal-panel">
+        <div class="override-modal-hd">
+          <span class="override-modal-icon" aria-hidden="true">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <circle cx="12" cy="17" r="0.5" fill="currentColor"/>
+            </svg>
+          </span>
+          <div>
+            <p class="eyebrow">Governance · privileged mode</p>
+            <h2 id="override-modal-title">Operator Override</h2>
+          </div>
+          <span class="override-modal-grow"></span>
+          <button type="button" class="btn-icon" data-override-close aria-label="Close override controls">×</button>
+        </div>
+
+        <div class="override-modal-bd">
+          <div class="override-explain">
+            <p>Operator Override lets PHANTOM execute actions <strong>even when scope/target policy gates would block them</strong>. Use it for local testing, fixture validation, and red-team scenarios where you need to deliberately step outside the governed flow.</p>
+            <div class="override-contract">
+              <div class="override-contract-row">
+                <span class="override-contract-mark bypassed">BYPASSED</span>
+                <span>Scope membership, target match, allowed-action gates</span>
+              </div>
+              <div class="override-contract-row">
+                <span class="override-contract-mark preserved">PRESERVED</span>
+                <span>Risk classification, audit trace, run snapshots</span>
+              </div>
+              <div class="override-contract-row">
+                <span class="override-contract-mark preserved">PRESERVED</span>
+                <span>Operator's authorization context (reason is recorded in every trace event)</span>
+              </div>
+            </div>
+          </div>
+
+          <label class="override-toggle-row">
+            <input type="checkbox" id="override-modal-toggle" />
+            <span class="override-toggle-track" aria-hidden="true"><span class="override-toggle-thumb"></span></span>
+            <span>
+              <strong id="override-toggle-label">Override is OFF</strong>
+              <small id="override-toggle-sub">Toggle on to bypass scope gates for this session.</small>
+            </span>
+          </label>
+
+          <label class="override-reason-field">
+            <span class="lbl">REASON · required when enabling</span>
+            <input type="text" id="override-modal-reason" placeholder="e.g. Local testing / fixture validation" maxlength="180" />
+            <small>Recorded into every trace event while override is active.</small>
+          </label>
+
+          <dl class="override-stats">
+            <dt>Session activations</dt><dd id="override-stat-activations">0</dd>
+            <dt>Trace events recorded under override</dt><dd id="override-stat-events">0</dd>
+          </dl>
+        </div>
+
+        <div class="override-modal-ft">
+          <button type="button" class="btn btn-secondary" data-override-close>Cancel</button>
+          <button type="button" class="btn btn-secondary danger" id="override-modal-disable" disabled>End override</button>
+          <button type="button" class="btn btn-primary" id="override-modal-save">Save</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Sudo Password Modal -->
     <div id="sudo-modal" class="sudo-modal" style="display:none;">
@@ -1186,6 +1458,35 @@
   </div>
 
 
+    <!-- First-run onboarding wizard.
+         Hidden by default. window.OnboardingWizard.maybeOpen() asks
+         /api/onboarding/status and slides this in when firstRun === true.
+         The "Re-run onboarding" button in Settings calls
+         OnboardingWizard.open() to summon it explicitly. -->
+    <div id="onboarding-modal" class="onboarding-modal hidden" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" hidden>
+      <div class="onboarding-backdrop" data-onboarding-close></div>
+      <div class="onboarding-panel">
+        <header class="onboarding-hd">
+          <p class="eyebrow">PHANTOM · welcome</p>
+          <h2 id="onboarding-title">Get set up in 4 steps</h2>
+          <button class="btn-icon onboarding-close" data-onboarding-close aria-label="Skip onboarding">×</button>
+        </header>
+        <ol class="onboarding-stepper" id="onboarding-stepper" aria-label="Onboarding progress">
+          <li class="step is-current" data-step="welcome">Welcome</li>
+          <li class="step" data-step="provider">Provider</li>
+          <li class="step" data-step="scope">First scope</li>
+          <li class="step" data-step="preview">Preview</li>
+        </ol>
+        <div class="onboarding-body" id="onboarding-body"></div>
+        <footer class="onboarding-ft">
+          <button class="btn btn-secondary" data-onboarding-skip>Skip for now</button>
+          <span class="onboarding-spacer"></span>
+          <button class="btn btn-secondary" data-onboarding-back hidden>← Back</button>
+          <button class="btn btn-primary" data-onboarding-next>Next →</button>
+        </footer>
+      </div>
+    </div>
+
     <div id="command-palette" class="command-palette cmdk-modal hidden" role="dialog" aria-modal="true" aria-labelledby="command-palette-title">
       <div class="command-palette-backdrop cmdk-backdrop" data-command-close></div>
       <div class="command-palette-panel cmdk">
@@ -1203,19 +1504,24 @@
       </div>
     </div>
 
-  <script src="js/markdown.js"></script>
+  <script type="module" src="js/markdown.js"></script>
   <script src="js/state-icons.js"></script>
   <script src="js/chat.js"></script>
   <script src="js/router.js"></script>
   <script src="js/settings.js"></script>
+  <script src="js/synthesis-card.js"></script>
+  <script src="js/onboarding-wizard.js"></script>
   <script src="js/pages/settings-page-presenter.js"></script>
   <script src="js/pages/settings-page.js"></script>
   <script src="js/pages/runs-page.js"></script>
+  <script src="js/pages/trending-panel.js"></script>
+  <script src="js/pages/installer-panel.js"></script>
   <script src="js/graph/graph-layout.js"></script>
   <script src="js/graph/graph-presenter.js"></script>
   <script src="js/pages/graph-page.js"></script>
   <script src="js/pages/artifacts-page.js"></script>
   <script src="js/pages/alerts-page.js"></script>
+  <script src="js/pages/approvals-page.js"></script>
   <script src="js/scope/scope-builder.js"></script>
   <script src="js/pages/scope-page.js"></script>
   <script src="js/management.js"></script>

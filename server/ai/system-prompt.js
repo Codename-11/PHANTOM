@@ -5,6 +5,7 @@ import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { resolvePrompt } from '../prompts/prompt-store.js';
 import { hasCommand } from '../utils/has-command.js';
+import { getInstallerStatus } from '../tools/installer.js';
 
 function getSystemInfo() {
   try {
@@ -28,19 +29,50 @@ function getSystemInfo() {
       } catch {}
     }
 
-    const tools = ['nmap', 'python3', 'pip', 'git', 'curl', 'wget', 'nikto', 'sqlmap', 'hydra', 'john',
-      'hashcat', 'masscan', 'gobuster', 'ffuf', 'nuclei', 'subfinder', 'httpx',
-      'msfconsole', 'searchsploit', 'wireshark', 'aircrack-ng', 'netcat', 'socat', 'tcpdump'];
-    // Pure-Node PATH walk — see server/utils/has-command.js for the
-    // rationale. Avoids spawning `which` on every prompt build, which on
-    // Windows emits "The system cannot find the path specified." to
-    // stderr for each missing tool.
-    info.installed_tools = tools.filter((tool) => hasCommand(tool));
+    // Always-useful generic tools the agent reaches for regardless of
+    // tier (python, git, curl, etc.) — not in the sec-ops installer
+    // catalog but worth surfacing if present.
+    const generic = ['python3', 'pip', 'git', 'curl', 'wget', 'netcat', 'socat', 'tcpdump'];
+    const genericPresent = generic.filter((tool) => hasCommand(tool));
+
+    // Catalog-driven sec-ops tools. getInstallerStatus() is the source of
+    // truth — same data backs the Settings installer UI. Each entry comes
+    // with a tier tag so the agent knows which tools belong to base
+    // (recon/OSINT), offensive (red team), or blue (defense/DFIR).
+    let secOps = [];
+    try {
+      const status = getInstallerStatus();
+      secOps = status.tools
+        .filter((tool) => tool.available)
+        .map((tool) => ({ command: tool.command, tier: tool.tier }));
+    } catch { secOps = []; }
+
+    info.installed_tools = [...genericPresent, ...secOps.map((t) => t.command)];
+    info.installed_secops = secOps; // structured form for the prompt block
 
     return info;
   } catch {
-    return { hostname: 'unknown', platform: os.platform(), user: 'unknown' };
+    return { hostname: 'unknown', platform: os.platform(), user: 'unknown', installed_tools: [], installed_secops: [] };
   }
+}
+
+// Render the installed sec-ops tools as a compact one-line-per-tier list.
+// The agent reads this to know which binaries are actually reachable; the
+// installer catalog is the single source of truth so installing nmap from
+// Settings → Tools makes it appear here on the next prompt build.
+function renderSecOpsToolsBlock(sysInfo) {
+  const secOps = sysInfo.installed_secops || [];
+  if (!secOps.length) return '';
+  const byTier = { base: [], offensive: [], blue: [] };
+  for (const tool of secOps) {
+    if (byTier[tool.tier]) byTier[tool.tier].push(tool.command);
+  }
+  const lines = [];
+  if (byTier.base.length)      lines.push(`- Base (recon/OSINT): ${byTier.base.join(', ')}`);
+  if (byTier.offensive.length) lines.push(`- Offensive (red): ${byTier.offensive.join(', ')}`);
+  if (byTier.blue.length)      lines.push(`- Blue (defense/DFIR): ${byTier.blue.join(', ')}`);
+  if (!lines.length) return '';
+  return `\n## INSTALLED SEC-OPS TOOLS ON HOST\nThese binaries are on PATH right now. Prefer them by exact name over guessing tool names. If the operator asks for a workflow that needs a tool NOT on this list, you can request install via the Settings → Tools → Sec-ops installer (or call \`install_tool\`) — but always cite the missing tool by its catalog id.\n${lines.join('\n')}\n`;
 }
 
 /**
@@ -80,10 +112,86 @@ function getRecentTraces() {
   } catch { return ''; }
 }
 
-export function buildSystemPrompt({ profileId = null, scopeId = null, raw = false } = {}) {
+function renderUiContextBlock(uiContext) {
+  if (!uiContext || typeof uiContext !== 'object') return '';
+  const route = uiContext.route || 'dash';
+  const lines = [`- Route: ${route}`];
+
+  // Inline the active scope's summary so the agent knows what's authorized
+  // without a phantom_get_scope round-trip. Without this, the LLM often
+  // forgets the scope it's operating under and either over-asks ("which
+  // scope is this?") or under-checks ("can I scan this?"). Pre-loading
+  // is ~150 tokens and saves a tool call per conversation.
+  if (uiContext.scope) {
+    const s = uiContext.scope;
+    const targetCounts = s.targets
+      ? Object.entries(s.targets).filter(([_, v]) => Array.isArray(v) && v.length).map(([k, v]) => `${v.length} ${k}`).join(', ')
+      : 'no targets';
+    lines.push(`- Selected scope: "${s.name}" (id: ${s.id})`);
+    lines.push(`  · Targets: ${targetCounts || 'none'}`);
+    // Per-action-class modes (auto/ask/deny) take precedence over the legacy
+    // allowed/blocked lists. Surface them up front so the agent can plan
+    // around ask gates and never attempt explicitly-denied actions.
+    if (s.action_modes && typeof s.action_modes === 'object') {
+      const byMode = { auto: [], ask: [], deny: [] };
+      for (const [cls, mode] of Object.entries(s.action_modes)) {
+        if (byMode[mode]) byMode[mode].push(cls);
+      }
+      if (byMode.auto.length) lines.push(`  · Allowed (auto): ${byMode.auto.join(', ')}`);
+      if (byMode.ask.length)  lines.push(`  · Approval required (ask): ${byMode.ask.join(', ')}`);
+      if (byMode.deny.length) lines.push(`  · Forbidden (deny — DO NOT attempt): ${byMode.deny.join(', ')}`);
+    } else {
+      if (Array.isArray(s.allowed_actions) && s.allowed_actions.length) {
+        lines.push(`  · Allowed actions: ${s.allowed_actions.join(', ')}`);
+      }
+      if (Array.isArray(s.blocked_actions) && s.blocked_actions.length) {
+        lines.push(`  · Blocked actions: ${s.blocked_actions.join(', ')}`);
+      }
+    }
+    if (s.active_hours?.windows?.length) {
+      const w = s.active_hours.windows.map((win) => `${(win.days || []).join('/')} ${win.start}–${win.end}`).join('; ');
+      lines.push(`  · Active hours: ${w}`);
+    }
+    if (s.rate_caps && (s.rate_caps.requests_per_minute || s.rate_caps.max_actions_per_run)) {
+      const caps = [];
+      if (s.rate_caps.requests_per_minute) caps.push(`${s.rate_caps.requests_per_minute}/min`);
+      if (s.rate_caps.max_actions_per_run) caps.push(`${s.rate_caps.max_actions_per_run}/run`);
+      lines.push(`  · Rate caps: ${caps.join(', ')}`);
+    }
+    if (s.rules_of_engagement) {
+      lines.push(`  · ROE: ${String(s.rules_of_engagement).split('\n').slice(0, 4).join(' / ')}`);
+    }
+    if (s.expires_at) lines.push(`  · Expires: ${s.expires_at}`);
+  } else if (uiContext.selectedScopeId) {
+    lines.push(`- Selected scope id: ${uiContext.selectedScopeId} (call phantom_get_scope for detail)`);
+  }
+  if (uiContext.selectedAssetId)  lines.push(`- Selected asset: ${uiContext.selectedAssetId}`);
+  if (uiContext.selectedRunId)    lines.push(`- Selected run: ${uiContext.selectedRunId}`);
+
+  if (Array.isArray(uiContext.toolpacks) && uiContext.toolpacks.length) {
+    const tpDesc = uiContext.toolpacks.map((tp) => `${tp.name}${tp.risks?.length ? ` [${tp.risks.join('/')}]` : ''}`).join(', ');
+    lines.push(`- Active toolpacks: ${tpDesc}`);
+  } else if (Array.isArray(uiContext.toolpackIds) && uiContext.toolpackIds.length) {
+    lines.push(`- Active toolpacks: ${uiContext.toolpackIds.join(', ')}`);
+  }
+
+  // Override is governance-critical — give it its own visible section
+  // rather than letting it blend into the bullet list. Tells the agent
+  // (1) policy gates are bypassed, (2) audit trace is still recording,
+  // (3) it must announce override-affected actions to the operator.
+  const overrideBlock = uiContext.operatorOverride?.enabled
+    ? `\n## ⚠ OPERATOR OVERRIDE — ACTIVE\nReason: ${uiContext.operatorOverride.reason || 'no reason given'}\n\nWhat this means RIGHT NOW:\n- Scope/target policy gates are BYPASSED before tool execution.\n- Risk classification and audit trace events are STILL recorded — every action is auditable.\n- You should still prefer the lowest-risk path that satisfies the request.\n- When you take an action that would normally be blocked, briefly note that fact in your reply (e.g. "Override allowed this scan against unscoped target X").\n- Never use override as an excuse to escalate destructively or to test against systems the operator hasn't asked you to.\n`
+    : '';
+
+  return `\n## CURRENT UI CONTEXT\nThe operator is looking at this surface right now. Use phantom_* tools to inspect or act on it, and prefer ids from this block when the operator says "this scope" / "this run" / "this asset."\n${lines.join('\n')}\n${overrideBlock}`;
+}
+
+export function buildSystemPrompt({ profileId = null, scopeId = null, raw = false, uiContext = null } = {}) {
   const sys = getSystemInfo();
   const skills = getAvailableSkills();
   const traces = getRecentTraces();
+  const uiContextBlock = renderUiContextBlock(uiContext);
+  const secOpsBlock = renderSecOpsToolsBlock(sys);
 
   const basePrompt = `You are PHANTOM — an elite AI-powered pentesting and red teaming command center. You run locally on the operator's machine with full system access and unlimited tool iterations.
 
@@ -106,8 +214,67 @@ export function buildSystemPrompt({ profileId = null, scopeId = null, raw = fals
 - Installed Tools: ${sys.installed_tools?.length > 0 ? sys.installed_tools.join(', ') : 'None — install as needed'}
 ${skills.length > 0 ? `\n## AVAILABLE SKILLS\n${skills.join('\n')}` : ''}
 ${traces ? `\n## RECENT EXECUTION TRACES (for self-optimization)\n${traces}` : ''}
+${uiContextBlock}${secOpsBlock}
+## ASK-GATED ACTIONS & ALLOW-ONCE OVERRIDES
+The scope policy classifies every tool call into one of four outcomes:
 
-## AVAILABLE TOOLS
+- **auto** — runs immediately
+- **ask** — pauses for explicit operator approval (a chat card appears with Approve / Deny)
+- **deny (explicit)** — the operator forbade this action class. DO NOT attempt it. If the operator asks for something forbidden, name the class, point to the scope policy, and propose a less-risky alternative. The CURRENT UI CONTEXT block above lists the forbidden classes for the active scope.
+- **deny (implicit)** — outside scope, expired, off-hours, rate-cap, etc. PHANTOM will offer the operator a one-time "Allow once" card. Your tool call returns either approved-with-note or denied.
+
+When you call a tool that lands in **ask** or implicit **deny**:
+1. Your call PAUSES, it does NOT fail. The operator sees an inline card with the tool name, args preview, risk class, reason, and a note field.
+2. After they decide, your tool either executes normally (returning real output) OR returns a string like \`Action denied at approval gate: <reason>\`.
+3. If denied, acknowledge the operator's decision and pivot — do NOT retry the same call.
+4. If you can predict a call will hit an ask gate (because the action class is \`ask\` in CURRENT UI CONTEXT), proactively tell the operator what you're about to ask for and why. Make the pause feel like a deliberate handshake, not a roadblock.
+
+Audit trace records every approval/denial event with the operator's note. Operator Override (when active) bypasses all gates — but you should still announce override-affected actions in chat.
+
+## PRE-FLIGHT PLAN — when to announce before acting
+Before you start a chain of **2 or more** ask-gated or risky tool calls (anything that's not pure read/local), emit a short markdown "plan" message *first*. The operator reads it, can pre-approve the chain with batch approval, and isn't surprised by a stack of cards.
+
+The plan format:
+
+> **Plan: <one-line goal>**
+> 1. \`<tool_name>\` — short description — predicted: \`auto\` | \`ask\` | \`deny\`
+> 2. \`<tool_name>\` — short description — predicted: \`auto\` | \`ask\` | \`deny\`
+> 3. …
+
+Rules:
+- Predict each step's gate using CURRENT UI CONTEXT (the action_modes block above).
+- If any step is \`deny\`, mark it ⚠ and propose an alternative.
+- After the plan, pause one tick. If the operator says "go" or doesn't object, execute. Otherwise adjust.
+- Don't emit a plan for single-tool calls or pure read/local sequences — it's noise.
+- Don't repeat the plan format inside tool outputs; this is for the chat reply only.
+
+A typical plan reads in 8–12 seconds. It's the single biggest UX win for governance — operators triage at the plan level rather than card by card.
+
+## PHANTOM-NATIVE TOOLS — operate the cockpit itself
+PHANTOM is not just a shell. It tracks scopes, assets, findings, runs,
+artifacts, and reports in its own SQLite store. Use these tools to *read*
+and *act on* that state. Prefer them over reaching into the filesystem —
+they're transactional, audited, and surface in the operator's UI.
+
+### Read (always safe to call)
+- \`phantom_get_context\` — snapshot of scopes/assets/runs/findings/toolpacks. Call this FIRST when the operator asks "what do we have?" or "what's set up?"
+- \`phantom_list_scopes\` / \`phantom_get_scope\` — authorized target lists
+- \`phantom_list_assets\` / \`phantom_get_asset\` — tracked inventory
+- \`phantom_list_findings\` — open vulnerabilities, filterable by severity/status
+- \`phantom_list_runs\` / \`phantom_get_run\` — past governed operations + trace
+- \`phantom_list_artifacts\` — saved evidence, previews, reports
+- \`phantom_list_toolpacks\` — registered security toolpacks and their risk classes
+
+### Write (use when the operator asks you to set something up)
+- \`phantom_create_scope\` — when the operator describes a new engagement
+- \`phantom_create_asset\` — add a target system to the inventory
+- \`phantom_create_finding\` — persist a vulnerability you just discovered. Always include evidence (raw output, request/response). This appears in the alerts queue.
+- \`phantom_update_finding\` — triage: mark false positives as wont_fix, patched issues as fixed
+- \`phantom_generate_report\` — write a pentest or executive report as a markdown artifact
+
+When the operator asks general questions about PHANTOM ("how's it set up?", "show me my scopes", "what runs have we done?"), reach for these tools — don't fall back to \`list_directory\` against the filesystem.
+
+## AVAILABLE TOOLS (shell / file / web)
 Use these tools proactively. Don't ask permission — just DO IT.
 
 ### execute_command

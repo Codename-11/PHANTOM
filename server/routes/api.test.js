@@ -147,6 +147,78 @@ describe('API Routes Integration', () => {
     const prompt = await res.json();
     assert.ok(prompt.content.includes('You are PHANTOM'));
     assert.ok(!JSON.stringify(prompt).includes('sudo_password'));
+
+    // Synthesis: real run plus the stub-preview variant.
+    res = await fetch(`${baseUrl}/runs/${run.id}/synthesis`);
+    assert.strictEqual(res.status, 200);
+    const synthesis = await res.json();
+    assert.strictEqual(synthesis.v, 1);
+    assert.strictEqual(synthesis.runId, run.id);
+    assert.ok(synthesis.posture && typeof synthesis.posture.score === 'number');
+    assert.ok(Array.isArray(synthesis.highlights));
+    assert.ok(Array.isArray(synthesis.nextSteps));
+
+    res = await fetch(`${baseUrl}/runs/${run.id}/synthesis?preview=stub`);
+    assert.strictEqual(res.status, 200);
+    const stub = await res.json();
+    assert.strictEqual(stub.runId, 'preview-run');
+    assert.strictEqual(stub.posture.rating, 'fair');
+  });
+
+  test('Sec-ops installer exposes status, preview, request lifecycle without exec', async () => {
+    let res = await fetch(`${baseUrl}/installer/status`);
+    assert.strictEqual(res.status, 200);
+    const status = await res.json();
+    assert.ok(status.host && typeof status.host.os === 'string');
+    assert.ok(Array.isArray(status.tools));
+    assert.ok(status.byTier.base && status.byTier.offensive && status.byTier.blue);
+
+    res = await fetch(`${baseUrl}/installer/catalog`);
+    assert.strictEqual(res.status, 200);
+    const catalog = await res.json();
+    assert.deepStrictEqual(catalog.tiers, ['base', 'offensive', 'blue']);
+    assert.ok(catalog.tools.length >= 20);
+
+    res = await fetch(`${baseUrl}/installer/preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tier: 'base' }),
+    });
+    assert.strictEqual(res.status, 200);
+    const preview = await res.json();
+    assert.ok(Array.isArray(preview.plan) && preview.plan.length >= 5);
+    assert.ok(preview.summary.total === preview.plan.length);
+
+    res = await fetch(`${baseUrl}/installer/preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.strictEqual(res.status, 400);
+
+    // Request → cancel lifecycle (we deliberately don't approve here; the
+    // approve path actually spawns package managers and would break CI).
+    res = await fetch(`${baseUrl}/installer/request`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ toolIds: ['nmap', 'ffuf'], note: 'integration test' }),
+    });
+    assert.strictEqual(res.status, 200);
+    const reqResp = await res.json();
+    const request = reqResp.request;
+    assert.ok(request.id);
+    assert.strictEqual(request.status, 'pending');
+    assert.deepStrictEqual(request.toolIds, ['nmap', 'ffuf']);
+
+    res = await fetch(`${baseUrl}/installer/requests`);
+    const list = await res.json();
+    assert.ok(list.some(r => r.id === request.id));
+
+    res = await fetch(`${baseUrl}/installer/requests/${request.id}/cancel`, { method: 'POST' });
+    assert.strictEqual(res.status, 200);
+    const cancelled = await res.json();
+    assert.strictEqual(cancelled.status, 'cancelled');
+
+    // Double-cancel must fail with 409.
+    res = await fetch(`${baseUrl}/installer/requests/${request.id}/cancel`, { method: 'POST' });
+    assert.strictEqual(res.status, 409);
   });
 
   test('Scope and prompt APIs support governed run administration', async () => {
