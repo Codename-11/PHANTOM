@@ -89,7 +89,7 @@ features:
       <li>Watch the agent in chat, replay the run later</li>
       <li>Generate exec summaries, evidence bundles, and pentest reports as durable artifacts</li>
     </ul>
-    <a class="cta" href="/PHANTOM/guide/getting-started.html">Get set up in 5 minutes →</a>
+    <a class="cta" href="./guide/getting-started.html">Get set up in 5 minutes →</a>
   </div>
   <div class="surface-card">
     <div class="surface-tag">For governance</div>
@@ -100,6 +100,6 @@ features:
       <li>Operator override is a deliberate ceremony with full audit trace</li>
       <li>Sec-Ops installer follows the same approval queue as any other privileged action</li>
     </ul>
-    <a class="cta" href="/PHANTOM/features/scopes-and-policy.html">Read the governance model →</a>
+    <a class="cta" href="./features/scopes-and-policy.html">Read the governance model →</a>
   </div>
 </div>

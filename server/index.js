@@ -39,12 +39,39 @@ app.use(express.json({ limit: '50mb' }));
 // API routes
 app.use('/api', apiRouter);
 
+// ─── Built-in user-docs (/docs) ────────────────────────────────────────
+// Serves the VitePress build from user-docs/.vitepress/dist when the
+// `docs_enabled` setting is on (default '1') AND the dist exists. The
+// dist is produced by `npm run build:docs`. If the build is missing we
+// log a friendly hint at boot rather than 404-ing without context.
+//
+// The route is decided at boot — toggling the setting requires a restart.
+// That's a deliberate tradeoff: changing whether docs are served means
+// re-mounting middleware, which Express doesn't support gracefully in
+// the middle of a request lifecycle. Restart cost is one second.
+const docsDist = join(ROOT, 'user-docs', '.vitepress', 'dist');
+const docsEnabled = getSetting('docs_enabled', '1') === '1';
+const docsBuilt = existsSync(join(docsDist, 'index.html'));
+if (docsEnabled && docsBuilt) {
+  // Trailing-slash redirect so /docs lands at /docs/ (VitePress assets
+  // resolve from the base path). Using a regex route with explicit
+  // anchors because Express's default non-strict routing would otherwise
+  // match the trailing-slash form too — creating a redirect loop.
+  app.get(/^\/docs$/, (req, res) => res.redirect(301, '/docs/'));
+  app.use('/docs', express.static(docsDist, { fallthrough: false, maxAge: '1h' }));
+} else if (docsEnabled && !docsBuilt) {
+  console.warn('[PHANTOM] user-docs enabled but not built. Run `npm run build:docs` to enable the /docs route.');
+}
+
 // Serve frontend
 const distPath = join(ROOT, 'frontend');
 if (existsSync(distPath)) {
   app.use(express.static(distPath));
   app.get('*', (req, res) => {
-    if (!req.path.startsWith('/api') && !req.path.startsWith('/ws')) {
+    // Excluded prefixes: API, WebSocket upgrade, and the docs route (if
+    // mounted above — express.static handles it; the catch-all just
+    // shouldn't intercept what's already served).
+    if (!req.path.startsWith('/api') && !req.path.startsWith('/ws') && !req.path.startsWith('/docs')) {
       res.sendFile(join(distPath, 'index.html'));
     }
   });

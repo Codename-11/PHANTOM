@@ -85,6 +85,10 @@
         <button class="sidebar-nav-item" data-route="approvals" title="Approvals"><span class="nav-glyph" aria-hidden="true">APV</span><span class="nav-label">Approvals</span></button>
         <button class="sidebar-nav-item" data-route="scope" title="Assets / Scope"><span class="nav-glyph" aria-hidden="true">SCP</span><span class="nav-label">Assets / Scope</span></button>
         <button class="sidebar-nav-item" data-route="settings" title="Settings"><span class="nav-glyph" aria-hidden="true">CFG</span><span class="nav-label">Settings</span></button>
+        <!-- Docs link · opens the built-in user-docs in a new tab so the
+             operator's run state isn't disturbed. Hidden when /api/settings
+             reports docsEnabled === false. -->
+        <a class="sidebar-nav-item sidebar-docs-link" href="/docs/" target="_blank" rel="noopener" id="sidebar-docs-link" title="User docs (opens in new tab)" hidden><span class="nav-glyph" aria-hidden="true">DOC</span><span class="nav-label">Docs ↗</span></a>
       </nav>
 
       <div class="sidebar-search">
@@ -1057,6 +1061,23 @@
                   </div>
                   <label class="settings-toggle">
                     <input type="checkbox" id="settings-synthesis-llm-toggle">
+                    <span class="settings-toggle-slider"></span>
+                    <span class="settings-toggle-label">Enable</span>
+                  </label>
+                </div>
+
+                <!-- Built-in user-docs · feature flag.
+                     When on, the PHANTOM server serves the user-facing VitePress
+                     site at /docs. Built once via `npm run build:docs`; toggling
+                     this off skips mounting the static handler on next restart.
+                     On by default. -->
+                <div class="settings-onboarding-card" id="settings-docs-card">
+                  <div class="settings-onboarding-text">
+                    <h3>Built-in user docs</h3>
+                    <p>Serve the user-facing docs site at <code>/docs</code> from this server. Restart required after toggling. Default on.</p>
+                  </div>
+                  <label class="settings-toggle">
+                    <input type="checkbox" id="settings-docs-toggle">
                     <span class="settings-toggle-slider"></span>
                     <span class="settings-toggle-label">Enable</span>
                   </label>

@@ -165,6 +165,33 @@ describe('API Routes Integration', () => {
     assert.strictEqual(stub.posture.rating, 'fair');
   });
 
+  test('Settings exposes docsEnabled (default on) and PUT round-trips the flag', async () => {
+    // GET — default should be on.
+    let res = await fetch(`${baseUrl}/settings`);
+    let s = await res.json();
+    assert.strictEqual(s.docsEnabled, true, 'docs are on by default');
+
+    // PUT off.
+    res = await fetch(`${baseUrl}/settings`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ docsEnabled: false }),
+    });
+    assert.strictEqual(res.status, 200);
+    res = await fetch(`${baseUrl}/settings`);
+    s = await res.json();
+    assert.strictEqual(s.docsEnabled, false, 'PUT { docsEnabled:false } persists');
+
+    // PUT back on, leave the world as we found it for any later tests.
+    res = await fetch(`${baseUrl}/settings`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ docsEnabled: true }),
+    });
+    assert.strictEqual(res.status, 200);
+    res = await fetch(`${baseUrl}/settings`);
+    s = await res.json();
+    assert.strictEqual(s.docsEnabled, true);
+  });
+
   test('Sec-ops installer exposes status, preview, request lifecycle without exec', async () => {
     let res = await fetch(`${baseUrl}/installer/status`);
     assert.strictEqual(res.status, 200);

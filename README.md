@@ -109,8 +109,16 @@ Open <http://localhost:5173>.
 For a production-style local server without the Vite dev process:
 
 ```bash
-npm run build
+npm run build     # builds frontend AND user-docs together
 npm start
+```
+
+The built-in user-docs site is served at `http://localhost:1337/docs/` whenever the `docs_enabled` flag is on (default). Toggle from **Settings → Advanced → Built-in user docs**; the change requires a server restart because the static handler mounts at boot. Run `npm run build:docs` separately to refresh just the docs after editing pages in `user-docs/`.
+
+For docs hot-reload while authoring:
+
+```bash
+npm run dev:docs   # VitePress dev server on port 5174
 ```
 
 ## 🏗️ Architecture

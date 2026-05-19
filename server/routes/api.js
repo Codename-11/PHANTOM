@@ -364,15 +364,24 @@ router.get('/settings', (req, res) => {
     workspace: settings.workspace || config.workspace,
     sudoConfigured: !!settings.sudo_password,
     synthesisLlmEnabled: settings.synthesis_llm_enabled === '1',
+    // docs_enabled defaults to ON so first-time operators land on a useful
+    // /docs route without ceremony. Restart required after toggling.
+    docsEnabled: (settings.docs_enabled ?? '1') === '1',
   });
 });
 
 router.put('/settings', (req, res) => {
-  const { provider, baseUrl, apiKey, model, temperature, maxTokens, sudoPassword, workspace, synthesisLlmEnabled } = req.body;
+  const { provider, baseUrl, apiKey, model, temperature, maxTokens, sudoPassword, workspace, synthesisLlmEnabled, docsEnabled } = req.body;
   // Feature flag: LLM-enriched synthesis highlights/nextSteps. Persisted
   // as '0' / '1' in the settings table; read by /api/runs/:id/synthesis.
   if (synthesisLlmEnabled !== undefined) {
     setSetting('synthesis_llm_enabled', synthesisLlmEnabled ? '1' : '0');
+  }
+  // Feature flag: serve user-docs at /docs from this server. Toggling
+  // takes effect after a restart (the static middleware is mounted at
+  // boot). Default is ON.
+  if (docsEnabled !== undefined) {
+    setSetting('docs_enabled', docsEnabled ? '1' : '0');
   }
 
   // Provider must be handled before baseUrl so explicit baseUrl wins, but

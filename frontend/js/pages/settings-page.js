@@ -10,6 +10,8 @@ window.SettingsPage = {
     this.renderStaticPanels();
     this.initOnboardingControl();
     this.initSynthesisLlmToggle();
+    this.initDocsToggle();
+    this.initSidebarDocsLink();
 
     window.addEventListener('phantom:route', (event) => {
       if (event.detail?.route === 'settings') {
@@ -44,6 +46,64 @@ window.SettingsPage = {
         alert(`Failed to update setting: ${err.message}`);
       }
     });
+  },
+
+  // Built-in user-docs toggle (Advanced panel). Mirrors the LLM-synthesis
+  // toggle's shape — read state on mount, PUT on change. A note appears
+  // below if the toggle's new value won't take effect until restart.
+  initDocsToggle() {
+    const toggle = document.getElementById('settings-docs-toggle');
+    if (!toggle || toggle.dataset.bound === '1') return;
+    toggle.dataset.bound = '1';
+    fetch('/api/settings').then(r => r.json()).then(s => {
+      toggle.checked = s.docsEnabled !== false;
+      toggle.dataset.initial = toggle.checked ? '1' : '0';
+    }).catch(() => {});
+    toggle.addEventListener('change', async () => {
+      try {
+        await fetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ docsEnabled: toggle.checked }),
+        });
+        // Surface the restart-required note when the new state differs
+        // from boot — the static handler is mounted at server startup and
+        // can't be swapped mid-process.
+        const card = document.getElementById('settings-docs-card');
+        if (card) {
+          const initial = toggle.dataset.initial === '1';
+          const drift = initial !== toggle.checked;
+          let hint = card.querySelector('.settings-docs-restart-hint');
+          if (drift && !hint) {
+            hint = document.createElement('p');
+            hint.className = 'settings-docs-restart-hint';
+            hint.textContent = 'Restart the server (`npm run dev` or `npm start`) for this change to take effect.';
+            card.appendChild(hint);
+          } else if (!drift && hint) {
+            hint.remove();
+          }
+        }
+      } catch (err) {
+        toggle.checked = !toggle.checked;
+        alert(`Failed to update setting: ${err.message}`);
+      }
+    });
+  },
+
+  // Sidebar Docs link visibility — only show when the server reports
+  // docsEnabled and the build is reachable. We probe HEAD /docs/ once
+  // on mount; the link stays hidden if the build is missing even when
+  // the flag is on, so operators don't click into a 404.
+  async initSidebarDocsLink() {
+    const link = document.getElementById('sidebar-docs-link');
+    if (!link || link.dataset.bound === '1') return;
+    link.dataset.bound = '1';
+    try {
+      const settings = await fetch('/api/settings').then(r => r.json());
+      if (!settings.docsEnabled) return;
+      const head = await fetch('/docs/', { method: 'HEAD' }).catch(() => null);
+      if (head && head.ok) link.removeAttribute('hidden');
+    } catch {}
   },
 
   // "Open wizard" button on Advanced panel. Resets the sticky completion

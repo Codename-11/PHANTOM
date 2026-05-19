@@ -1,27 +1,44 @@
 import { defineConfig } from 'vitepress'
 
+// Base path is env-driven so the same source produces two deploys:
+//   - default `/docs/` for the in-app embedded build the PHANTOM server
+//     serves at http://localhost:1337/docs/
+//   - `VITEPRESS_BASE=/PHANTOM/` for the GitHub Pages deploy at
+//     https://codename-11.github.io/PHANTOM/
+// Head meta (favicon, canonical, og:image) doesn't auto-apply base, so
+// we thread `BASE` through everything by hand.
+const BASE = process.env.VITEPRESS_BASE || '/docs/'
+const CANONICAL_HOST = 'https://codename-11.github.io'
+const CANONICAL_URL = `${CANONICAL_HOST}${BASE === '/docs/' ? '/PHANTOM/' : BASE}`
+const ABS_LOGO = `${CANONICAL_URL}logo.svg`
+const ABS_OG_IMAGE = `${CANONICAL_URL}og-image.png`
+
 export default defineConfig({
-  base: '/PHANTOM/',
+  base: BASE,
   title: 'PHANTOM',
   description: 'PHANTOM — Governed AI Security-Ops Cockpit. Trace-first runs, policy-gated tools, durable evidence, graph replay.',
 
   head: [
     // Favicon — base path is NOT auto-applied to head entries in VitePress,
-    // so hard-prefix with /PHANTOM/ to match the GitHub Pages deploy.
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/PHANTOM/logo.svg' }],
-    ['link', { rel: 'apple-touch-icon', href: '/PHANTOM/logo.svg' }],
+    // so hard-prefix with BASE to match whichever deploy target we built for.
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: `${BASE}logo.svg` }],
+    ['link', { rel: 'apple-touch-icon', href: `${BASE}logo.svg` }],
 
-    // Canonical
-    ['link', { rel: 'canonical', href: 'https://codename-11.github.io/PHANTOM/' }],
+    // Canonical always points at the public GitHub Pages URL even on the
+    // in-app build — operators sharing a link from their local instance
+    // shouldn't paste localhost URLs.
+    ['link', { rel: 'canonical', href: CANONICAL_HOST + '/PHANTOM/' }],
 
     // Open Graph — crawlers need absolute URLs for previews on Slack/Discord/etc.
+    // We always point OG at the public GitHub Pages URL because link previews
+    // shouldn't crawl a localhost.
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:site_name', content: 'PHANTOM' }],
     ['meta', { property: 'og:title', content: 'PHANTOM — Governed AI Security-Ops Cockpit' }],
     ['meta', { property: 'og:description', content: 'Local-first command center for authorized security research with scoped autonomous runs, policy-gated tools, durable traces, artifacts, and graph replay.' }],
-    ['meta', { property: 'og:url', content: 'https://codename-11.github.io/PHANTOM/' }],
-    ['meta', { property: 'og:image', content: 'https://codename-11.github.io/PHANTOM/og-image.png' }],
-    ['meta', { property: 'og:image:secure_url', content: 'https://codename-11.github.io/PHANTOM/og-image.png' }],
+    ['meta', { property: 'og:url', content: CANONICAL_HOST + '/PHANTOM/' }],
+    ['meta', { property: 'og:image', content: CANONICAL_HOST + '/PHANTOM/og-image.png' }],
+    ['meta', { property: 'og:image:secure_url', content: CANONICAL_HOST + '/PHANTOM/og-image.png' }],
     ['meta', { property: 'og:image:type', content: 'image/png' }],
     ['meta', { property: 'og:image:width', content: '1200' }],
     ['meta', { property: 'og:image:height', content: '630' }],
@@ -31,7 +48,7 @@ export default defineConfig({
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:title', content: 'PHANTOM — Governed AI Security-Ops Cockpit' }],
     ['meta', { name: 'twitter:description', content: 'Trace-first runs, policy-gated tools, durable evidence, graph replay.' }],
-    ['meta', { name: 'twitter:image', content: 'https://codename-11.github.io/PHANTOM/og-image.png' }],
+    ['meta', { name: 'twitter:image', content: CANONICAL_HOST + '/PHANTOM/og-image.png' }],
     ['meta', { name: 'twitter:image:alt', content: 'PHANTOM — Governed AI Security-Ops Cockpit.' }],
 
     // Theme — matches PHANTOM SEC UI Kit base background.
@@ -109,7 +126,8 @@ export default defineConfig({
     ],
 
     footer: {
-      message: 'PHANTOM is for <a href="/PHANTOM/security">authorized security testing only</a>. MIT License.',
+      // Use a base-relative path so this works under both /docs/ and /PHANTOM/.
+      message: `PHANTOM is for <a href="${BASE}security">authorized security testing only</a>. MIT License.`,
       copyright: '© Codename-11 / Axiom-Labs',
     },
 

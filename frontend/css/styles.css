@@ -6375,6 +6375,21 @@ svg.ico [stroke] {
 .toolpack-avail.is-partial { color: var(--sev-high); border-color: var(--sev-high-line); background: var(--sev-high-bg); }
 .toolpack-avail.is-none    { color: var(--sev-crit); border-color: var(--sev-crit-line); background: var(--sev-crit-bg); }
 
+/* Sidebar Docs link · same chrome as other nav items but opens in a new
+   tab. The `↗` glyph in the label hints "external/new tab" so the
+   operator isn't surprised when their run state stays put. */
+.sidebar-docs-link { text-decoration: none; }
+.sidebar-docs-link[hidden] { display: none; }
+
+/* Restart-required hint that appears under the docs toggle when the
+   toggle's value differs from boot. Quiet caption so it doesn't pull
+   focus from the toggle's own state. */
+.settings-docs-restart-hint {
+  margin: 8px 0 0 0;
+  font-family: var(--font-mono); font-size: var(--fs-11);
+  color: var(--sev-high);
+}
+
 
 /* ═══ Kit alignment pass 30 — Stop-condition + LLM-synthesis + unified
    approvals + privilege handling polish ═══ */
