@@ -1,0 +1,8 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'>
+  <rect x='1' y='1' width='94' height='94' fill='#0a0c10' stroke='#5fb6ff' stroke-opacity='.22' stroke-width='2'/>
+  <path d='M1 14 V1 H14 M82 1 H95 V14 M1 82 V95 H14 M82 95 H95 V82' stroke='#5fb6ff' stroke-width='2.6' fill='none'/>
+  <rect x='22' y='40' width='14' height='16' fill='#e8edf5' opacity='.35'/>
+  <rect x='42' y='40' width='14' height='16' fill='#e8edf5' opacity='.7'/>
+  <rect x='62' y='40' width='14' height='16' fill='#5fb6ff'/>
+  <path d='M62 36 V40 M76 36 V40 M62 56 V60 M76 56 V60' stroke='#5fb6ff' stroke-width='1.4' fill='none'/>
+</svg>
