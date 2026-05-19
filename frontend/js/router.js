@@ -1,6 +1,7 @@
 window.Router = {
-  current: 'chat',
-  routes: ['chat', 'runs', 'graph', 'artifacts', 'scope', 'settings'],
+  current: 'dash',
+  defaultRoute: 'dash',
+  routes: ['dash', 'chat', 'runs', 'graph', 'alerts', 'artifacts', 'scope', 'settings'],
 
   init() {
     this.chatArea = document.getElementById('chat-area');
@@ -15,12 +16,12 @@ window.Router = {
       });
     });
 
-    const initialRoute = window.location.hash.replace('#', '') || 'chat';
+    const initialRoute = window.location.hash.replace('#', '') || this.defaultRoute;
     this.navigate(initialRoute, { replace: true });
   },
 
   navigate(route, { replace = false } = {}) {
-    if (!this.routes.includes(route)) route = 'chat';
+    if (!this.routes.includes(route)) route = this.defaultRoute;
     this.current = route;
 
     const isChat = route === 'chat';
@@ -37,15 +38,18 @@ window.Router = {
     });
 
     if (!replace) {
-      const hash = route === 'chat' ? '#chat' : `#${route}`;
+      const hash = `#${route}`;
       if (window.location.hash !== hash) window.history.pushState({ route }, '', hash);
     }
+
+    // Page-specific show hooks
+    if (route === 'dash') window.Dash?.show?.();
 
     window.dispatchEvent(new CustomEvent('phantom:route', { detail: { route } }));
   },
 };
 
 window.addEventListener('popstate', () => {
-  const route = window.location.hash.replace('#', '') || 'chat';
+  const route = window.location.hash.replace('#', '') || window.Router.defaultRoute;
   window.Router.navigate(route, { replace: true });
 });

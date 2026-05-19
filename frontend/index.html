@@ -9,17 +9,48 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='16' y='16' width='68' height='68' rx='10' fill='%230a0c10'/><path d='M24 30h52M24 50h52M24 70h32' stroke='%235fb6ff' stroke-width='7' stroke-linecap='round'/></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><rect x='1' y='1' width='94' height='94' fill='%230a0c10' stroke='%235fb6ff' stroke-opacity='.22' stroke-width='2'/><path d='M1 14 V1 H14 M82 1 H95 V14 M1 82 V95 H14 M82 95 H95 V82' stroke='%235fb6ff' stroke-width='2.6' fill='none'/><rect x='22' y='40' width='14' height='16' fill='%23e8edf5' opacity='.35'/><rect x='42' y='40' width='14' height='16' fill='%23e8edf5' opacity='.7'/><rect x='62' y='40' width='14' height='16' fill='%235fb6ff'/><path d='M62 36 V40 M76 36 V40 M62 56 V60 M76 56 V60' stroke='%235fb6ff' stroke-width='1.4' fill='none'/></svg>">
 </head>
 <body>
   <!-- PHANTOM SEC UI kit: calm dark operational shell, no decorative matrix layer. -->
+
+  <!-- Boot splash · packet-train mark · fades after first paint or phantom:ready -->
+  <div id="splash-overlay" class="splash-overlay" aria-hidden="true">
+    <div class="splash-stack">
+      <svg width="160" height="160" viewBox="0 0 96 96" fill="none" aria-label="PHANTOM SEC initializing">
+        <rect x="1" y="1" width="94" height="94" stroke="#5fb6ff" stroke-opacity=".22" stroke-width="1"/>
+        <path d="M1 14 V1 H14 M82 1 H95 V14 M1 82 V95 H14 M82 95 H95 V82" stroke="#5fb6ff" stroke-width="1.6" fill="none"/>
+        <line class="baseline" x1="14" y1="48" x2="82" y2="48" stroke="#5fb6ff" stroke-opacity=".28" stroke-width="1" stroke-dasharray="3 2"/>
+        <rect class="pkt p1" x="6" y="40" width="14" height="16"/>
+        <rect class="pkt p2" x="6" y="40" width="14" height="16"/>
+        <rect class="pkt p3" x="6" y="40" width="14" height="16"/>
+        <g class="ticks"><path d="M46 36 V40 M60 36 V40 M46 56 V60 M60 56 V60" stroke="#5fb6ff" stroke-width="1.4" fill="none"/></g>
+        <rect class="scan" x="46" y="47" width="14" height="2" fill="#5fb6ff" rx="1"/>
+        <g class="verify"><circle cx="79" cy="86" r="3" fill="#4ade80"/></g>
+      </svg>
+      <div class="splash-word">PHANTOM SEC<span class="splash-sub">GOVERNED AI · SECURITY OPS</span></div>
+      <div class="splash-row">
+        <span class="splash-spinner" aria-hidden="true"></span>
+        <span class="splash-caption splash-init">INITIALIZING</span>
+        <span id="splash-counter" class="splash-caption splash-counter">INSPECTED · <b>0042</b></span>
+        <span id="splash-scope" class="splash-caption splash-scope">SCOPE · STANDBY</span>
+      </div>
+    </div>
+  </div>
 
   <div id="app">
     <!-- Sidebar -->
     <aside id="sidebar" class="sidebar">
       <div class="sidebar-header">
         <div class="logo">
-          <span class="logo-icon" aria-hidden="true">PH</span>
+          <svg class="logo-mark" width="26" height="26" viewBox="0 0 96 96" fill="none" aria-hidden="true">
+            <rect x="1" y="1" width="94" height="94" stroke="#5fb6ff" stroke-opacity=".22" stroke-width="2"/>
+            <path d="M1 14 V1 H14 M82 1 H95 V14 M1 82 V95 H14 M82 95 H95 V82" stroke="#5fb6ff" stroke-width="2.6" fill="none"/>
+            <rect class="pkt p1" x="6" y="40" width="14" height="16"/>
+            <rect class="pkt p2" x="6" y="40" width="14" height="16"/>
+            <rect class="pkt p3" x="6" y="40" width="14" height="16"/>
+            <g class="ticks"><path d="M46 36 V40 M60 36 V40 M46 56 V60 M60 56 V60" stroke="#5fb6ff" stroke-width="2" fill="none"/></g>
+          </svg>
           <span class="logo-text">PHANTOM</span>
         </div>
         <button id="new-chat-btn" class="btn-icon" title="New Chat">
@@ -30,12 +61,14 @@
       </div>
 
       <nav class="sidebar-nav" aria-label="Primary navigation">
-        <button class="sidebar-nav-item active" data-route="chat"><span class="nav-glyph" aria-hidden="true">CMD</span><span>Chat</span></button>
-        <button class="sidebar-nav-item" data-route="runs"><span class="nav-glyph" aria-hidden="true">RUN</span><span>Runs</span></button>
-        <button class="sidebar-nav-item" data-route="graph"><span class="nav-glyph" aria-hidden="true">MAP</span><span>Graph</span></button>
-        <button class="sidebar-nav-item" data-route="artifacts"><span class="nav-glyph" aria-hidden="true">EVD</span><span>Artifacts</span></button>
-        <button class="sidebar-nav-item" data-route="scope"><span class="nav-glyph" aria-hidden="true">SCP</span><span>Assets / Scope</span></button>
-        <button class="sidebar-nav-item" data-route="settings"><span class="nav-glyph" aria-hidden="true">CFG</span><span>Settings</span></button>
+        <button class="sidebar-nav-item active" data-route="dash" title="Dash"><span class="nav-glyph" aria-hidden="true">DSH</span><span class="nav-label">Dash</span></button>
+        <button class="sidebar-nav-item" data-route="chat" title="Chat"><span class="nav-glyph" aria-hidden="true">CMD</span><span class="nav-label">Chat</span></button>
+        <button class="sidebar-nav-item" data-route="runs" title="Runs"><span class="nav-glyph" aria-hidden="true">RUN</span><span class="nav-label">Runs</span></button>
+        <button class="sidebar-nav-item" data-route="graph" title="Graph"><span class="nav-glyph" aria-hidden="true">MAP</span><span class="nav-label">Graph</span></button>
+        <button class="sidebar-nav-item" data-route="alerts" title="Alerts"><span class="nav-glyph" aria-hidden="true">ALR</span><span class="nav-label">Alerts</span></button>
+        <button class="sidebar-nav-item" data-route="artifacts" title="Artifacts"><span class="nav-glyph" aria-hidden="true">EVD</span><span class="nav-label">Artifacts</span></button>
+        <button class="sidebar-nav-item" data-route="scope" title="Assets / Scope"><span class="nav-glyph" aria-hidden="true">SCP</span><span class="nav-label">Assets / Scope</span></button>
+        <button class="sidebar-nav-item" data-route="settings" title="Settings"><span class="nav-glyph" aria-hidden="true">CFG</span><span class="nav-label">Settings</span></button>
       </nav>
 
       <div class="sidebar-search">
@@ -51,10 +84,17 @@
           <span class="status-dot offline"></span>
           <span class="status-text">Disconnected</span>
         </div>
-        <button id="settings-btn" class="btn-icon" title="Settings">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button id="sidebar-collapse-btn" class="btn-icon sidebar-collapse-btn" type="button" title="Collapse sidebar" aria-controls="sidebar" aria-pressed="false" aria-label="Collapse sidebar">
+          <svg class="chev-collapse" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="11 17 6 12 11 7"></polyline>
+            <polyline points="18 17 13 12 18 7"></polyline>
+          </svg>
+        </button>
+        <button id="settings-btn" class="btn-icon" title="Settings" aria-label="Settings">
+          <!-- Lucide / Feather `settings` cog · 24×24 stroke icon -->
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
             <circle cx="12" cy="12" r="3"/>
-            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
           </svg>
         </button>
       </div>
@@ -69,20 +109,74 @@
             <path d="M3 12h18M3 6h18M3 18h18"/>
           </svg>
         </button>
-        <div class="top-bar-actions">
-          <button id="command-palette-trigger" class="command-trigger" title="Open command palette (Ctrl/⌘+K)">
-            <span>Search commands, runs, scopes</span><kbd>⌘K</kbd>
-          </button>
-          <button class="btn btn-sm btn-secondary" data-route="chat" title="Chat">Chat</button>
-          <button class="btn btn-sm btn-secondary" data-route="runs" title="Run history">Runs</button>
-          <button class="btn btn-sm btn-secondary" data-route="artifacts" title="Saved artifacts">Artifacts</button>
-          <button class="btn btn-sm btn-secondary" data-route="scope" title="Assets and scope">Assets</button>
-          <button id="quick-model-btn" class="btn btn-sm btn-secondary" title="Quick model switch">Model</button>
-          <button id="manage-btn" class="btn btn-sm btn-secondary" title="MCP &amp; Skills">Manage</button>
-        </div>
+
+        <!-- LEFT: dynamic breadcrumb (route + optional sub-state) -->
+        <nav id="top-bar-crumbs" class="crumbs" aria-label="Breadcrumb">
+          <span class="here">Dash</span>
+        </nav>
+
+        <!-- CENTER-RIGHT: command palette trigger (the operator hub) -->
+        <button id="command-palette-trigger" class="command-trigger" title="Open command palette (Ctrl+K)">
+          <span class="cmd-trigger-glyph" aria-hidden="true">⌕</span>
+          <span class="cmd-trigger-label">Search commands, runs, scopes…</span>
+          <kbd class="modkey-chip"><span class="modkey">Ctrl</span>+<span class="modkey-letter">K</span></kbd>
+        </button>
+
+        <!-- RIGHT: scope-strip · alerts-bell · status-chip -->
         <div class="top-bar-info">
-          <span id="current-model" class="model-badge">No Model</span>
-          <span id="connection-status" class="connection-badge offline">● Offline</span>
+          <button type="button" id="active-scope-strip" class="scope-strip" data-empty="true"
+                  aria-haspopup="dialog" aria-expanded="false" aria-controls="run-config-popover">
+            <span class="lbl">SCOPE</span>
+            <span class="name">No scope selected</span>
+            <span class="meta"></span>
+            <span class="chev" aria-hidden="true">▾</span>
+          </button>
+
+          <button id="alerts-bell" class="alerts-bell" data-route="alerts"
+                  title="Open alert queue" aria-label="Open alert queue">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+            <span id="alerts-bell-count" class="alerts-bell-count" hidden>0</span>
+          </button>
+
+          <span id="topbar-status-chip" class="status-chip" data-state="offline" aria-live="polite">
+            <span id="current-model" class="status-chip-model">No model</span>
+            <span class="status-chip-sep" aria-hidden="true">·</span>
+            <span id="connection-status" class="status-chip-dot connection-badge offline" aria-label="Connection status">●</span>
+          </span>
+
+          <div id="run-config-popover" class="run-config-popover hidden" role="dialog" aria-modal="false" aria-labelledby="run-config-title">
+            <div class="run-config-hd">
+              <h3 id="run-config-title">Run configuration</h3>
+              <button class="btn-icon" data-run-config-close aria-label="Close">×</button>
+            </div>
+            <div class="run-config-bd">
+              <label class="field active-scope-control">
+                <span class="lbl">ACTIVE SCOPE</span>
+                <select id="active-scope-select" aria-label="Active run scope"><option value="">No scope selected</option></select>
+              </label>
+              <label class="field active-scope-control">
+                <span class="lbl">TOOLPACKS</span>
+                <select id="active-toolpack-select" aria-label="Active security toolpacks" multiple size="1"></select>
+              </label>
+              <div class="field run-config-override operator-override-control" title="Bypass governed scope gates for this test run. Risk classification and audit trace events are still recorded.">
+                <label class="lbl">
+                  <input type="checkbox" id="operator-override-enabled" aria-label="Enable Operator Override for this run">
+                  OPERATOR OVERRIDE
+                </label>
+                <input id="operator-override-reason" class="operator-override-reason" type="text" placeholder="Override reason" aria-label="Operator Override reason" disabled>
+              </div>
+              <span id="active-scope-warning" class="scope-warning">Risky tools require a selected scope.</span>
+              <span id="active-scope-summary" class="scope-summary">No active scope</span>
+            </div>
+            <div class="run-config-ft">
+              <span class="run-config-status" id="run-config-status">Risky actions require an active scope.</span>
+              <button class="btn ghost sm" data-run-config-close>Done</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -98,37 +192,22 @@
 
         <!-- Welcome Screen -->
         <div id="welcome-screen" class="welcome-screen">
-          <div class="welcome-mark" aria-hidden="true">PH</div>
+          <div class="welcome-mark" aria-hidden="true">
+            <svg width="120" height="120" viewBox="0 0 96 96" fill="none">
+              <rect x="1" y="1" width="94" height="94" stroke="#5fb6ff" stroke-opacity=".22" stroke-width="1"/>
+              <path d="M1 14 V1 H14 M82 1 H95 V14 M1 82 V95 H14 M82 95 H95 V82" stroke="#5fb6ff" stroke-width="1.6" fill="none"/>
+              <line class="baseline" x1="14" y1="48" x2="82" y2="48" stroke="#5fb6ff" stroke-opacity=".28" stroke-width="1" stroke-dasharray="3 2"/>
+              <rect class="pkt p1" x="6" y="40" width="14" height="16"/>
+              <rect class="pkt p2" x="6" y="40" width="14" height="16"/>
+              <rect class="pkt p3" x="6" y="40" width="14" height="16"/>
+              <g class="ticks"><path d="M46 36 V40 M60 36 V40 M46 56 V60 M60 56 V60" stroke="#5fb6ff" stroke-width="1.4" fill="none"/></g>
+              <rect class="scan" x="46" y="47" width="14" height="2" fill="#5fb6ff" rx="1"/>
+              <g class="verify"><circle cx="79" cy="86" r="3" fill="#4ade80"/></g>
+            </svg>
+          </div>
           <h1 class="welcome-title">PHANTOM</h1>
           <p class="welcome-subtitle">Governed AI Security-Ops Cockpit</p>
-          <div class="welcome-features">
-            <div class="feature-card">
-              <span class="feature-icon">NET</span>
-              <span class="feature-text">Scoped Recon &amp; Discovery</span>
-            </div>
-            <div class="feature-card">
-              <span class="feature-icon">POL</span>
-              <span class="feature-text">Policy-Gated Tooling</span>
-            </div>
-            <div class="feature-card">
-              <span class="feature-icon">WEB</span>
-              <span class="feature-text">Web Recon &amp; Research</span>
-            </div>
-            <div class="feature-card">
-              <span class="feature-icon">AUD</span>
-              <span class="feature-text">Offline Password Audit</span>
-            </div>
-            <div class="feature-card">
-              <span class="feature-icon">OSINT</span>
-              <span class="feature-text">OSINT &amp; Evidence Capture</span>
-            </div>
-            <div class="feature-card">
-              <span class="feature-icon">TRC</span>
-              <span class="feature-text">Trace Replay &amp; Audit</span>
-            </div>
-          </div>
-          <p class="welcome-hint">Select a governed scope, prompt profile, and toolpack before running risky actions. Configure models in <button id="welcome-settings-btn" class="inline-link">Settings</button>.</p>
-          <p class="welcome-hint" style="margin-top:4px; color: var(--text-muted);">Drop images for authorized OSINT workflows; PHANTOM redacts sensitive metadata in run snapshots.</p>
+          <p class="welcome-hint">Type below to start an authorized operation, or open <button class="inline-link" data-route="dash">Dash</button> for the overview.</p>
         </div>
 
         <!-- Messages Container -->
@@ -158,25 +237,125 @@
           </button>
         </div>
         <div class="input-footer">
-          <span class="input-hint">Governed tools • Scope gates risky actions • Drop images for OSINT • Authorized targets only</span>
-          <label class="active-scope-control">Scope
-            <select id="active-scope-select" aria-label="Active run scope"><option value="">No scope selected</option></select>
-          </label>
-          <span id="active-scope-warning" class="scope-warning">Risky tools require a selected scope.</span>
-          <span id="active-scope-summary" class="scope-summary">No active scope</span>
-          <label class="active-scope-control operator-override-control" title="Bypass governed scope gates for this test run. Risk classification and audit trace events are still recorded.">
-            <input type="checkbox" id="operator-override-enabled" aria-label="Enable Operator Override for this run">
-            Operator Override
-          </label>
-          <input id="operator-override-reason" class="operator-override-reason" type="text" placeholder="Override reason" aria-label="Operator Override reason" disabled>
-          <label class="active-scope-control">Toolpacks
-            <select id="active-toolpack-select" aria-label="Active security toolpacks" multiple size="1"></select>
-          </label>
+          <span class="input-hint">Authorized testing only · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to send · scope &amp; toolpacks set in the topbar.</span>
         </div>
       </div>
 
       <!-- Routed Pages -->
       <div id="page-container" class="page-container hidden">
+        <section class="app-page" data-page="dash" id="dash-page">
+          <div class="page-header">
+            <div>
+              <p class="eyebrow">Overview</p>
+              <h1>Dash</h1>
+              <p>Live operational overview · scoped runs · untriaged alerts · policy decisions.</p>
+            </div>
+          </div>
+
+          <!-- Cockpit summary (kit-aligned). Hidden until data arrives;
+               when empty it falls back to .welcome-features (existing). -->
+          <section id="cockpit" class="cockpit hidden" aria-label="Operations overview">
+            <!-- KPI strip -->
+            <div class="cockpit-kpi" id="cockpit-kpi">
+              <!-- 6 .stat tiles injected by chat.js renderCockpit() -->
+            </div>
+
+            <!-- Two-column upper row -->
+            <div class="cockpit-row cockpit-row-2">
+              <!-- Live runs panel (spans 2 grid columns) -->
+              <section class="panel cockpit-runs" aria-label="Live runs">
+                <div class="panel-hd">
+                  <span class="title">Live runs</span>
+                  <span class="sub" id="cockpit-runs-sub">GOVERNED · 0 ACTIVE</span>
+                  <span class="grow"></span>
+                  <button class="btn ghost sm" id="cockpit-runs-refresh" title="Refresh">↻</button>
+                  <button class="btn primary sm" data-route="chat">New run</button>
+                </div>
+                <div class="panel-bd" id="cockpit-runs-list">
+                  <!-- run rows injected -->
+                </div>
+              </section>
+
+              <!-- Untriaged alerts panel -->
+              <section class="panel cockpit-alerts" aria-label="Untriaged alerts">
+                <div class="panel-hd">
+                  <span class="title">Untriaged alerts</span>
+                  <span class="sub" id="cockpit-alerts-sub">0 NEW · 60M</span>
+                  <span class="grow"></span>
+                  <button class="btn ghost sm" data-route="alerts" id="cockpit-alerts-open">Open queue</button>
+                </div>
+                <div class="panel-bd" id="cockpit-alerts-list">
+                  <!-- alert rows injected -->
+                </div>
+              </section>
+            </div>
+
+            <!-- Three-column lower row -->
+            <div class="cockpit-row cockpit-row-3">
+              <!-- Policy decisions (24h) -->
+              <section class="panel cockpit-policy" aria-label="Policy decisions (24h)">
+                <div class="panel-hd">
+                  <span class="title">Policy decisions · 24h</span>
+                  <span class="sub" id="cockpit-policy-sub">—</span>
+                </div>
+                <div class="panel-bd" id="cockpit-policy-body">
+                  <!-- bars + top reasons injected -->
+                </div>
+              </section>
+
+              <!-- Toolpack availability -->
+              <section class="panel cockpit-toolpacks" aria-label="Toolpack availability">
+                <div class="panel-hd">
+                  <span class="title">Toolpacks</span>
+                  <span class="sub" id="cockpit-toolpacks-sub">—</span>
+                </div>
+                <div class="panel-bd" id="cockpit-toolpacks-list">
+                  <!-- toolpack rows injected -->
+                </div>
+              </section>
+
+              <!-- Asset health · top movers -->
+              <section class="panel cockpit-movers" aria-label="Asset health · top movers">
+                <div class="panel-hd">
+                  <span class="title">Asset health · top movers</span>
+                  <span class="sub" id="cockpit-movers-sub">—</span>
+                </div>
+                <div class="panel-bd" id="cockpit-movers-list">
+                  <!-- mover rows injected -->
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <!-- Empty-state fallback — only shown when there's nothing to display in the cockpit -->
+          <div class="welcome-features cockpit-empty-fallback">
+            <div class="feature-card">
+              <span class="feature-icon">NET</span>
+              <span class="feature-text">Scoped Recon &amp; Discovery</span>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">POL</span>
+              <span class="feature-text">Policy-Gated Tooling</span>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">WEB</span>
+              <span class="feature-text">Web Recon &amp; Research</span>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">AUD</span>
+              <span class="feature-text">Offline Password Audit</span>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">OSINT</span>
+              <span class="feature-text">OSINT &amp; Evidence Capture</span>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">TRC</span>
+              <span class="feature-text">Trace Replay &amp; Audit</span>
+            </div>
+          </div>
+        </section>
+
         <section class="app-page" data-page="runs" id="runs-page">
           <div class="page-header">
             <div>
@@ -188,7 +367,52 @@
           </div>
           <div class="runs-layout">
             <aside id="runs-list" class="runs-list"></aside>
-            <section id="run-detail" class="run-detail"></section>
+
+            <section id="run-detail" class="run-detail">
+              <header class="run-detail-hd" id="run-detail-hd"></header>
+
+              <nav class="run-tabs" role="tablist" id="run-tabs">
+                <button class="run-tab active" role="tab" data-tab="trace">Trace <span class="ct" id="run-tab-trace-ct"></span></button>
+                <button class="run-tab" role="tab" data-tab="graph">Graph</button>
+                <button class="run-tab" role="tab" data-tab="artifacts">Artifacts <span class="ct" id="run-tab-artifacts-ct"></span></button>
+                <button class="run-tab" role="tab" data-tab="snapshot">Prompt snapshot</button>
+                <button class="run-tab" role="tab" data-tab="output">Output</button>
+              </nav>
+
+              <div class="run-tab-body" id="run-tab-body">
+                <div class="run-tab-pane trace active" data-pane="trace">
+                  <div class="trace-timeline" id="run-trace-timeline"></div>
+                </div>
+                <div class="run-tab-pane graph" data-pane="graph" hidden>
+                  <div class="run-graph-preview" id="run-graph-preview"></div>
+                </div>
+                <div class="run-tab-pane artifacts" data-pane="artifacts" hidden>
+                  <div class="run-artifact-grid" id="run-artifact-grid"></div>
+                </div>
+                <div class="run-tab-pane snapshot" data-pane="snapshot" hidden>
+                  <pre class="run-snapshot" id="run-snapshot"></pre>
+                </div>
+                <div class="run-tab-pane output" data-pane="output" hidden>
+                  <pre class="run-output" id="run-output"></pre>
+                </div>
+              </div>
+
+              <div class="run-replay-bar" id="run-replay-bar">
+                <button class="btn ghost sm" id="run-replay-play-btn" aria-label="Play replay">▶</button>
+                <button class="btn ghost sm" id="run-replay-step-btn" aria-label="Step">⟶</button>
+                <button class="btn ghost sm" id="run-replay-reset-btn" aria-label="Reset">↺</button>
+                <span class="run-replay-counter" id="run-replay-counter">— / —</span>
+                <div class="run-replay-progress"><i id="run-replay-progress-fill"></i><span class="blocked-mark" id="run-replay-blocked-mark" hidden></span></div>
+                <span class="run-replay-ts" id="run-replay-ts">—</span>
+              </div>
+            </section>
+
+            <aside class="run-meta-drawer" id="run-meta-drawer">
+              <div class="run-meta-section" data-section="run"><h3>Run</h3><dl id="run-meta-run"></dl></div>
+              <div class="run-meta-section" data-section="scope"><h3>Scope</h3><dl id="run-meta-scope"></dl></div>
+              <div class="run-meta-section" data-section="prompt"><h3>Prompt</h3><dl id="run-meta-prompt"></dl></div>
+              <div class="run-meta-section" data-section="artifacts"><h3>Artifacts</h3><ul class="run-meta-artifacts" id="run-meta-artifacts"></ul></div>
+            </aside>
           </div>
         </section>
 
@@ -202,6 +426,14 @@
             <div class="page-actions graph-actions">
               <span id="graph-live-indicator" class="graph-live-indicator idle">Historical</span>
               <span id="graph-stats" class="graph-stats">No graph loaded</span>
+              <div class="seg-group graph-view-seg" role="tablist" aria-label="Graph view">
+                <button class="seg pressed" data-graph-view="run" type="button">Run</button>
+                <button class="seg" data-graph-view="topology" type="button">Topology</button>
+                <button class="seg" data-graph-view="asset" type="button">Asset</button>
+              </div>
+              <div class="graph-filters">
+                <button class="filter-chip active" data-graph-filter="show-blocked" id="graph-blocked-chip" type="button">show blocked <span class="x">×</span></button>
+              </div>
               <button id="graph-follow-btn" class="btn btn-secondary" aria-pressed="true">⏱ Following live</button>
               <button id="graph-replay-prev-btn" class="btn btn-secondary" aria-label="Previous replay step">⟵ Step</button>
               <button id="graph-replay-play-btn" class="btn btn-secondary" aria-pressed="false">▶ Replay</button>
@@ -216,13 +448,114 @@
             <aside id="graph-runs-list" class="runs-list graph-runs-list" aria-label="Runs with graphs"></aside>
             <section class="graph-workspace">
               <div id="graph-replay-panel" class="graph-replay-panel" aria-label="Replay timeline"></div>
-              <div id="graph-canvas" class="graph-canvas" role="region" aria-label="Operational graph viewer"></div>
+              <div class="graph-canvas-wrapper">
+                <div id="graph-canvas" class="graph-canvas" role="region" aria-label="Operational graph viewer"></div>
+                <div class="graph-legend" aria-hidden="true">
+                  <div class="row"><span class="swatch flow"></span>Flow</div>
+                  <div class="row"><span class="swatch finding"></span>Finding</div>
+                  <div class="row"><span class="swatch blocked"></span>Blocked</div>
+                  <div class="row"><span class="swatch artifact"></span>Artifact</div>
+                </div>
+              </div>
               <div id="graph-zoom-controls" class="graph-zoom-controls" aria-label="Graph zoom controls">
                 <button id="graph-zoom-in-btn" class="btn btn-secondary btn-sm" aria-label="Zoom in">+</button>
                 <button id="graph-zoom-out-btn" class="btn btn-secondary btn-sm" aria-label="Zoom out">−</button>
               </div>
               <aside id="graph-node-detail" class="graph-node-detail" aria-label="Selected graph node detail"></aside>
             </section>
+          </div>
+        </section>
+
+        <section class="app-page" data-page="alerts" id="alerts-page">
+          <div class="page-header alerts-page-header">
+            <div>
+              <p class="eyebrow">Triage</p>
+              <h1>Alert queue</h1>
+              <p>Open findings with severity ≥ medium. Acknowledge to clear from the queue.</p>
+            </div>
+          </div>
+
+          <!-- Toolbar -->
+          <div class="alerts-toolbar">
+            <label class="alerts-search">
+              <span class="glyph" aria-hidden="true">⌕</span>
+              <input id="alerts-search-input" type="search" placeholder="id, asset, rule, CVE" autocomplete="off">
+            </label>
+            <div class="alerts-filter-chips" id="alerts-filter-chips">
+              <button class="filter-chip active" data-filter="sev" data-value="high+">sev ≥ high <span class="x">×</span></button>
+              <button class="filter-chip active" data-filter="status" data-value="open">status: open <span class="x">×</span></button>
+            </div>
+            <button class="filter-add" id="alerts-add-filter">+ filter</button>
+            <span class="grow"></span>
+            <div class="seg-group" role="tablist" aria-label="View">
+              <button class="seg pressed" data-view="queue">Queue</button>
+              <button class="seg" data-view="grid">Grid</button>
+              <button class="seg" data-view="map">Map</button>
+            </div>
+            <button class="btn ghost sm" id="alerts-export-btn">Export</button>
+          </div>
+
+          <!-- Layout: queue + drawer -->
+          <div class="alerts-layout">
+            <section class="alerts-queue" id="alerts-queue">
+              <table class="alerts-table" aria-label="Alert queue">
+                <colgroup>
+                  <col class="c-sev"  style="width:3px"/>
+                  <col class="c-id"   style="width:86px"/>
+                  <col class="c-sevb" style="width:70px"/>
+                  <col class="c-title"/>
+                  <col class="c-asset" style="width:160px"/>
+                  <col class="c-rule"  style="width:150px"/>
+                  <col class="c-host"  style="width:140px"/>
+                  <col class="c-status" style="width:100px"/>
+                  <col class="c-age"   style="width:60px"/>
+                  <col class="c-menu"  style="width:32px"/>
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th class="sev-col" aria-label="severity"></th>
+                    <th class="id-col">ID</th>
+                    <th class="sev-badge-col">SEV</th>
+                    <th class="title-col">FINDING</th>
+                    <th class="asset-col">ASSET</th>
+                    <th class="rule-col">RULE</th>
+                    <th class="host-col">HOST:PORT</th>
+                    <th class="status-col">STATUS</th>
+                    <th class="age-col">AGE</th>
+                    <th class="menu-col"></th>
+                  </tr>
+                </thead>
+                <tbody id="alerts-tbody">
+                  <!-- rows injected by alerts-page.js -->
+                </tbody>
+              </table>
+              <div class="alerts-footer-bar" id="alerts-footer-bar">
+                <span class="alerts-counts" id="alerts-counts">— findings</span>
+                <span class="grow"></span>
+                <span class="alerts-kbd"><kbd>↑↓</kbd> navigate · <kbd>E</kbd> investigate · <kbd>X</kbd> dismiss</span>
+              </div>
+            </section>
+
+            <aside class="alerts-drawer hidden" id="alerts-drawer" aria-label="Alert detail">
+              <div class="drawer-hd" id="alerts-drawer-hd">
+                <!-- injected -->
+              </div>
+              <div class="drawer-tabs" role="tablist" id="alerts-drawer-tabs">
+                <button class="drawer-tab active" role="tab" data-tab="evidence">Evidence</button>
+                <button class="drawer-tab" role="tab" data-tab="asset">Asset</button>
+                <button class="drawer-tab" role="tab" data-tab="trace">Trace</button>
+                <button class="drawer-tab" role="tab" data-tab="history">History</button>
+              </div>
+              <div class="drawer-bd" id="alerts-drawer-bd">
+                <!-- tab panels injected -->
+              </div>
+              <div class="drawer-ft" id="alerts-drawer-ft">
+                <button class="btn primary sm" id="alerts-ack-btn">Acknowledge</button>
+                <button class="btn ghost sm" id="alerts-openrun-btn">Open run</button>
+                <button class="btn ghost sm" id="alerts-report-btn">Draft report</button>
+                <button class="btn ghost sm" id="alerts-more-btn" aria-label="More">⋯</button>
+              </div>
+            </aside>
           </div>
         </section>
 
@@ -234,14 +567,20 @@
               <p>Durable previews, reports, trace exports, and evidence written under the PHANTOM workspace.</p>
             </div>
             <div class="page-actions">
-              <select id="artifact-type-filter" class="artifact-filter" aria-label="Filter artifact type">
-                <option value="">All types</option>
-                <option value="html">HTML previews</option>
-                <option value="markdown">Markdown reports</option>
-                <option value="jsonl">Trace exports</option>
-                <option value="evidence">Evidence bundles</option>
-              </select>
               <button id="refresh-artifacts-btn" class="btn btn-secondary">↻ Refresh</button>
+            </div>
+          </div>
+          <div class="artifacts-toolbar">
+            <label class="alerts-search">
+              <span class="glyph" aria-hidden="true">⌕</span>
+              <input id="artifacts-search-input" type="search" placeholder="title, id, type" autocomplete="off">
+            </label>
+            <div class="artifacts-filter-chips" id="artifacts-filter-chips">
+              <button class="filter-chip active" data-artifact-filter="all" type="button">all <span class="ct" id="art-ct-all">·</span></button>
+              <button class="filter-chip" data-artifact-filter="html" type="button">reports</button>
+              <button class="filter-chip" data-artifact-filter="markdown" type="button">summaries</button>
+              <button class="filter-chip" data-artifact-filter="evidence" type="button">evidence</button>
+              <button class="filter-chip" data-artifact-filter="jsonl" type="button">inventories</button>
             </div>
           </div>
           <div class="artifacts-layout">
@@ -263,29 +602,203 @@
               <button id="refresh-scopes-btn" class="btn btn-secondary">↻ Refresh</button>
             </div>
           </div>
-          <div class="asset-workspace">
-            <aside class="asset-sidebar">
-              <div class="asset-toolbar">
-                <input id="asset-search" placeholder="Search assets…" />
-                <select id="asset-type-filter" aria-label="Asset type filter">
-                  <option value="">All types</option>
-                  <option value="network">Networks</option>
-                  <option value="device">Devices</option>
-                  <option value="web_app">Web apps</option>
-                  <option value="url">URLs</option>
-                  <option value="domain">Domains</option>
-                </select>
-              </div>
-              <div class="asset-mode-tabs" role="tablist" aria-label="Asset workspace tabs">
-                <button class="asset-mode-tab active" data-asset-mode="assets">Assets</button>
-                <button class="asset-mode-tab" data-asset-mode="scopes">Scopes</button>
-                <button class="asset-mode-tab" data-asset-mode="compare">Compare</button>
-              </div>
-              <div id="asset-list" class="asset-list"></div>
-            </aside>
-            <main id="asset-main" class="asset-main"></main>
-            <aside id="asset-inspector" class="asset-inspector"></aside>
+          <div class="asset-mode-tabs" role="tablist" aria-label="Scope workspace tabs">
+            <button class="asset-mode-tab" data-asset-mode="assets">Assets</button>
+            <button class="asset-mode-tab active" data-asset-mode="scopes">Scopes</button>
+            <button class="asset-mode-tab" data-asset-mode="compare">Compare</button>
           </div>
+
+          <!-- Scopes mode panel — kit-aligned 2-col builder -->
+          <div id="scope-mode-panel" class="mode-panel">
+            <div class="scope-builder-layout">
+              <!-- LEFT: builder -->
+              <div class="scope-builder-left">
+
+                <!-- Step 1: intent templates -->
+                <section class="panel scope-step">
+                  <div class="panel-hd">
+                    <span class="title">1 · Intent template</span>
+                    <span class="sub">PICK A STARTING POINT</span>
+                  </div>
+                  <div class="panel-bd">
+                    <div class="intent-grid" id="scope-intent-grid">
+                      <!-- intent-tile cards injected by scope-page.js from /api/scopes/templates -->
+                    </div>
+                  </div>
+                </section>
+
+                <!-- Step 2: identity -->
+                <section class="panel scope-step">
+                  <div class="panel-hd"><span class="title">2 · Identity</span></div>
+                  <div class="panel-bd scope-grid">
+                    <label class="field">
+                      <span class="lbl">NAME</span>
+                      <input id="scope-name" type="text" placeholder="Q2-WEB-PROD" autocomplete="off">
+                    </label>
+                    <label class="field">
+                      <span class="lbl">EXPIRES</span>
+                      <input id="scope-expires" type="datetime-local">
+                    </label>
+                    <label class="field span-2">
+                      <span class="lbl">OWNER</span>
+                      <input id="scope-owner" type="text" placeholder="security-lead@example.local">
+                    </label>
+                    <label class="field span-2">
+                      <span class="lbl">RULES OF ENGAGEMENT</span>
+                      <textarea id="scope-notes" rows="3" placeholder="Notes the operator should see at run-start…"></textarea>
+                    </label>
+                  </div>
+                </section>
+
+                <!-- Step 3: targets -->
+                <section class="panel scope-step">
+                  <div class="panel-hd">
+                    <span class="title">3 · Targets</span>
+                    <span class="sub" id="scope-target-count">0 ITEMS</span>
+                  </div>
+                  <div class="panel-bd">
+                    <label class="field">
+                      <span class="lbl">PASTE TARGETS — domains, IPs, CIDRs, URLs, host:port</span>
+                      <textarea id="scope-target-input" rows="3" placeholder="webapp.example.local&#10;10.0.0.0/24&#10;api.example.local:443"></textarea>
+                    </label>
+                    <div class="target-chips" id="scope-target-chips" role="list">
+                      <!-- chips injected by ScopeBuilder.renderTargetChips() -->
+                    </div>
+                    <div class="asset-pick">
+                      <span class="lbl">— OR — pick saved assets</span>
+                      <select id="scope-asset-select" multiple size="3"></select>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- Step 4: action classes -->
+                <section class="panel scope-step">
+                  <div class="panel-hd">
+                    <span class="title">4 · Action classes</span>
+                    <span class="sub">ALLOW / DENY MATRIX</span>
+                  </div>
+                  <div class="panel-bd">
+                    <p class="action-matrix-hint">An action class with neither ALLOW nor DENY checked is implicitly denied. Locked rows are non-overridable.</p>
+                    <table class="action-class-table" id="scope-action-table" aria-label="Action class allow/deny">
+                      <thead>
+                        <tr>
+                          <th>CLASS</th>
+                          <th>RISK</th>
+                          <th class="ck">ALLOW</th>
+                          <th class="ck">DENY</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <!-- rows injected by ScopeBuilder.renderActionClassTable() -->
+                      </tbody>
+                    </table>
+                    <!-- Hidden inputs preserve the existing JS contract -->
+                    <input id="scope-allowed" type="hidden" value="">
+                    <input id="scope-blocked" type="hidden" value="">
+                  </div>
+                </section>
+
+                <!-- Step 5: toolpacks -->
+                <section class="panel scope-step">
+                  <div class="panel-hd"><span class="title">5 · Toolpacks</span></div>
+                  <div class="panel-bd">
+                    <div class="toolpack-grid" id="scope-toolpack-grid">
+                      <!-- toolpack cards injected -->
+                    </div>
+                  </div>
+                </section>
+
+                <!-- Step 6: actions -->
+                <section class="panel scope-step">
+                  <div class="panel-bd scope-actions">
+                    <button class="btn ghost" id="scope-dryrun-btn">Run policy dry-run</button>
+                    <button class="btn primary" id="scope-save-btn">Save scope</button>
+                    <span class="grow"></span>
+                    <button class="btn ghost danger" id="scope-archive-btn">Archive</button>
+                    <button class="btn ghost" id="scope-cancel-btn">Cancel</button>
+                  </div>
+                </section>
+
+              </div>
+
+              <!-- RIGHT: policy preview drawer (sticky) -->
+              <aside class="scope-policy-drawer">
+                <div class="drawer-hd">
+                  <span class="head-line"><span class="sev-badge" style="background:var(--policy-bg);color:var(--policy);">POLICY</span><span>Live preview</span></span>
+                  <h2 id="scope-policy-title">No scope yet</h2>
+                  <div class="drawer-sub" id="scope-policy-sub">Build a scope on the left, then dry-run.</div>
+                </div>
+                <div class="drawer-bd" id="scope-policy-preview">
+                  <!-- ScopeBuilder.renderPolicyPreview() target — id preserved -->
+                </div>
+                <div class="drawer-ft">
+                  <button class="btn ghost sm" id="scope-policy-refresh">↻ Refresh</button>
+                  <span class="grow"></span>
+                  <span class="drawer-sub" id="scope-policy-stamp">—</span>
+                </div>
+              </aside>
+            </div>
+          </div>
+
+          <!-- Assets / Compare modes (Phase C5 owns these) -->
+          <div id="assets-mode-panel" class="mode-panel hidden">
+            <div class="asset-workspace">
+              <aside class="asset-sidebar">
+                <div class="asset-toolbar">
+                  <input id="asset-search" placeholder="Search assets…" />
+                  <select id="asset-type-filter" aria-label="Asset type filter">
+                    <option value="">All types</option>
+                    <option value="network">Networks</option>
+                    <option value="device">Devices</option>
+                    <option value="web_app">Web apps</option>
+                    <option value="url">URLs</option>
+                    <option value="domain">Domains</option>
+                  </select>
+                </div>
+                <div id="asset-list" class="asset-list"></div>
+              </aside>
+              <main id="asset-main" class="asset-main"></main>
+              <aside id="asset-inspector" class="asset-inspector"></aside>
+            </div>
+          </div>
+
+          <div id="compare-mode-panel" class="mode-panel hidden">
+            <div id="compare-mount" class="empty-msg">Snapshot comparison surface (Phase C5).</div>
+          </div>
+
+          <!-- Asset profile drawer (Kit alignment pass 5) -->
+          <aside id="asset-profile-drawer" class="asset-drawer hidden" role="dialog" aria-modal="true" aria-labelledby="asset-drawer-title">
+            <div class="asset-drawer-backdrop" data-asset-drawer-close></div>
+            <div class="asset-drawer-panel">
+              <div class="drawer-hd asset-drawer-hd">
+                <div class="head-line">
+                  <span class="sev-badge" id="asset-drawer-type">—</span>
+                  <span class="status-pill" id="asset-drawer-criticality">—</span>
+                  <span class="grow"></span>
+                  <button class="btn-icon" data-asset-drawer-close aria-label="Close">×</button>
+                </div>
+                <h2 id="asset-drawer-title">—</h2>
+                <div class="drawer-sub" id="asset-drawer-sub">—</div>
+              </div>
+              <div class="drawer-tabs" role="tablist" id="asset-drawer-tabs">
+                <button class="drawer-tab active" role="tab" data-tab="overview">Overview</button>
+                <button class="drawer-tab" role="tab" data-tab="findings">Findings <span class="tab-ct" id="asset-tab-findings-ct"></span></button>
+                <button class="drawer-tab" role="tab" data-tab="services">Services <span class="tab-ct" id="asset-tab-services-ct"></span></button>
+                <button class="drawer-tab" role="tab" data-tab="history">History <span class="tab-ct" id="asset-tab-history-ct"></span></button>
+                <button class="drawer-tab" role="tab" data-tab="baselines">Baselines <span class="tab-ct" id="asset-tab-baselines-ct"></span></button>
+                <button class="drawer-tab" role="tab" data-tab="scopes">Scope membership <span class="tab-ct" id="asset-tab-scopes-ct"></span></button>
+              </div>
+              <div class="drawer-bd asset-drawer-bd" id="asset-drawer-bd">
+                <!-- Active tab panel injected -->
+              </div>
+              <div class="drawer-ft asset-drawer-ft">
+                <button class="btn primary sm" id="asset-drawer-audit-btn">Run scoped audit</button>
+                <button class="btn ghost sm" id="asset-drawer-export-btn">Export profile</button>
+                <span class="grow"></span>
+                <button class="btn ghost sm danger" id="asset-drawer-archive-btn">Archive</button>
+              </div>
+            </div>
+          </aside>
         </section>
 
         <section class="app-page" data-page="settings" id="settings-page">
@@ -396,7 +909,7 @@
               <span class="proxy-dot"></span>
               <div>
                 <strong id="quick-model-label">Model route</strong>
-                <small id="quick-endpoint-label">http://127.0.0.1:8648/v1</small>
+                <small id="quick-endpoint-label">http://127.0.0.1:8645/v1</small>
               </div>
             </div>
             <button class="btn btn-primary" data-route="settings" id="open-settings-page-btn">Open Settings Page</button>
@@ -415,22 +928,29 @@
             </button>
           </section>
 
-          <!-- Hermes Proxy Configuration -->
+          <!-- LLM Provider Configuration -->
           <section class="settings-section proxy-settings">
-            <h3>Hermes OAuth Proxy</h3>
+            <h3>LLM Provider</h3>
             <p class="settings-note">
-              PHANTOM is wired to the local Hermes proxy. Pick a model; Hermes routes it to the right subscription provider (Grok, Codex, Nous) and injects OAuth automatically.
+              PHANTOM speaks OpenAI-compatible chat completions to whichever endpoint is selected. The Hermes Proxy default routes Claude Pro / ChatGPT Pro / SuperGrok subscriptions via local OAuth; switch to a direct vendor (xAI, OpenAI, OpenRouter, Groq, DeepSeek, Together, local Ollama / LM Studio) by changing the dropdown below.
             </p>
             <div class="proxy-card">
               <div class="proxy-status-row">
                 <span class="proxy-dot"></span>
                 <div>
-                  <strong>Single endpoint</strong>
-                  <small id="proxy-endpoint-label">http://127.0.0.1:8648/v1</small>
+                  <strong id="proxy-provider-name">Hermes Proxy</strong>
+                  <small id="proxy-endpoint-label">http://127.0.0.1:8645/v1</small>
                 </div>
               </div>
               <div class="form-group">
-                <label for="setting-provider-preset">Model Route</label>
+                <label for="setting-provider-id">Provider</label>
+                <select id="setting-provider-id">
+                  <!-- Populated from /api/providers on settings load. -->
+                </select>
+                <small id="setting-provider-desc">Local OAuth-backed proxy that routes Claude Pro / ChatGPT Pro / SuperGrok subscriptions through one OpenAI-compatible endpoint.</small>
+              </div>
+              <div class="form-group">
+                <label for="setting-provider-preset">Model</label>
                 <select id="setting-provider-preset">
                   <option value="grok-4.3">Grok · grok-4.3</option>
                   <option value="grok-4.20-reasoning">Grok Reasoning · grok-4.20-reasoning</option>
@@ -439,18 +959,13 @@
                   <option value="gpt-5.3-codex">Codex Research · gpt-5.3-codex</option>
                   <option value="custom">Custom model slug…</option>
                 </select>
-                <small>Routing is model-based: Grok slugs → xAI OAuth, GPT/Codex slugs → OpenAI Codex OAuth.</small>
+                <small id="setting-model-hint">Model suggestions update when you change the provider above.</small>
               </div>
               <div class="form-group" id="custom-model-group">
                 <label for="setting-model">Model ID</label>
                 <input type="text" id="setting-model" placeholder="grok-4.3" list="model-suggestions" />
                 <datalist id="model-suggestions">
-                  <option value="grok-4.3">
-                  <option value="grok-4.20-reasoning">
-                  <option value="gpt-5.4">
-                  <option value="gpt-5.4-mini">
-                  <option value="gpt-5.3-codex">
-                  <option value="hermes-4-405b">
+                  <!-- Populated from the selected provider's suggested models. -->
                 </datalist>
               </div>
               <details class="advanced-proxy-settings">
@@ -458,15 +973,15 @@
                 <div class="form-group">
                   <label for="setting-base-url">Base URL</label>
                   <input type="url" id="setting-base-url" placeholder="http://127.0.0.1:8645/v1" />
-                  <small>Default should stay on the Hermes proxy unless testing another endpoint.</small>
+                  <small id="setting-base-url-hint">Auto-filled from the selected provider. Override here for self-hosted endpoints.</small>
                 </div>
                 <div class="form-group">
-                  <label for="setting-api-key">Bearer Token</label>
+                  <label for="setting-api-key">Bearer Token / API Key</label>
                   <div class="input-with-toggle">
                     <input type="password" id="setting-api-key" placeholder="hermes-proxy" />
                     <button id="toggle-api-key" class="btn-icon-sm" title="Show/Hide">Show</button>
                   </div>
-                  <small>Any value works. The proxy replaces it with your real OAuth token.</small>
+                  <small id="setting-api-key-hint">Any value works for Hermes — the proxy substitutes your real OAuth token per request.</small>
                 </div>
               </details>
             </div>
@@ -482,9 +997,11 @@
               </div>
             </div>
             <div class="form-actions">
-              <button id="test-connection" class="btn btn-secondary">Test Proxy</button>
+              <button id="test-connection" class="btn btn-secondary">Test Connection</button>
+              <button id="refresh-models" class="btn btn-secondary" type="button">Refresh Models</button>
               <span id="test-result" class="test-result"></span>
             </div>
+            <small id="model-source-hint" class="model-source-hint"></small>
           </section>
 
           <!-- System Access -->
@@ -669,24 +1186,25 @@
   </div>
 
 
-    <div id="command-palette" class="command-palette hidden" role="dialog" aria-modal="true" aria-labelledby="command-palette-title">
-      <div class="command-palette-backdrop" data-command-close></div>
-      <div class="command-palette-panel">
+    <div id="command-palette" class="command-palette cmdk-modal hidden" role="dialog" aria-modal="true" aria-labelledby="command-palette-title">
+      <div class="command-palette-backdrop cmdk-backdrop" data-command-close></div>
+      <div class="command-palette-panel cmdk">
         <div class="command-palette-head">
           <p class="eyebrow">Command</p>
           <h2 id="command-palette-title">PHANTOM command palette</h2>
           <button class="btn-icon" data-command-close aria-label="Close command palette">×</button>
         </div>
-        <label class="command-search">
+        <label class="command-search cmdk-input">
           <span>⌕</span>
           <input id="command-palette-input" type="search" placeholder="Search routes, settings, scopes, evidence…" autocomplete="off">
         </label>
-        <div id="command-palette-results" class="command-results" role="listbox" aria-label="Command results"></div>
-        <p class="command-palette-foot"><kbd>Enter</kbd> run command <kbd>Esc</kbd> close</p>
+        <div id="command-palette-results" class="command-results cmdk-list" role="listbox" aria-label="Command results"></div>
+        <p class="command-palette-foot cmdk-ft"><kbd>Enter</kbd> run command <kbd>Esc</kbd> close</p>
       </div>
     </div>
 
   <script src="js/markdown.js"></script>
+  <script src="js/state-icons.js"></script>
   <script src="js/chat.js"></script>
   <script src="js/router.js"></script>
   <script src="js/settings.js"></script>
@@ -697,6 +1215,7 @@
   <script src="js/graph/graph-presenter.js"></script>
   <script src="js/pages/graph-page.js"></script>
   <script src="js/pages/artifacts-page.js"></script>
+  <script src="js/pages/alerts-page.js"></script>
   <script src="js/scope/scope-builder.js"></script>
   <script src="js/pages/scope-page.js"></script>
   <script src="js/management.js"></script>

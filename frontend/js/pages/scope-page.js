@@ -6,13 +6,16 @@ window.ScopePage = {
   toolpacks: [],
   selectedAssetId: null,
   selectedScopeId: null,
-  mode: 'assets',
+  selectedTemplateId: null,
+  selectedToolpackIds: new Set(),
+  mode: 'scopes',
   assetFilter: { query: '', type: '' },
+  _scopeBoundOnce: false,
 
   init() {
     document.getElementById('refresh-scopes-btn')?.addEventListener('click', () => this.loadAll());
-    document.getElementById('new-asset-btn')?.addEventListener('click', () => { this.mode = 'assets'; this.renderAssetEditor(); });
-    document.getElementById('new-scope-btn')?.addEventListener('click', () => { this.mode = 'scopes'; this.renderScopeEditor(); });
+    document.getElementById('new-asset-btn')?.addEventListener('click', () => { this.setMode('assets'); this.renderAssetEditor(); });
+    document.getElementById('new-scope-btn')?.addEventListener('click', () => { this.setMode('scopes'); this.renderScopeEditor(); });
     document.getElementById('asset-search')?.addEventListener('input', (event) => {
       this.assetFilter.query = event.target.value;
       this.loadAssets();
@@ -27,15 +30,73 @@ window.ScopePage = {
     window.addEventListener('phantom:route', (event) => {
       if (event.detail?.route === 'scope') this.loadAll();
     });
+    this.bindScopeBuilderOnce();
     this.loadScopesForSelector();
     if (window.Router?.current === 'scope') setTimeout(() => this.loadAll(), 0);
+    if (typeof bindAssetDrawerOnce === 'function') bindAssetDrawerOnce();
+  },
+
+  bindScopeBuilderOnce() {
+    if (this._scopeBoundOnce) return;
+    this._scopeBoundOnce = true;
+    // Target parsing on blur or paste
+    const ta = document.getElementById('scope-target-input');
+    if (ta) {
+      ta.addEventListener('blur', () => this.parseTargetInput());
+      ta.addEventListener('paste', () => setTimeout(() => this.parseTargetInput(), 0));
+    }
+    // Action-class table delegated change handler
+    const tbl = document.getElementById('scope-action-table');
+    tbl?.addEventListener('change', (e) => {
+      const t = e.target;
+      if (!(t instanceof HTMLInputElement)) return;
+      if (t.dataset.actionAllow || t.dataset.actionDeny) this.syncActionClassHiddenInputs();
+    });
+    // Chip removal
+    const chips = document.getElementById('scope-target-chips');
+    chips?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-remove-target]');
+      if (!btn) return;
+      const id = btn.dataset.removeTarget;
+      const chip = btn.closest('.target-chip');
+      if (chip) chip.remove();
+      this.updateTargetCount();
+    });
+    // Intent tile delegated click
+    document.getElementById('scope-intent-grid')?.addEventListener('click', (e) => {
+      const tile = e.target.closest('[data-template-id]');
+      if (!tile) return;
+      this.applyScopeTemplate(tile.dataset.templateId);
+    });
+    // Toolpack card delegated click
+    document.getElementById('scope-toolpack-grid')?.addEventListener('click', (e) => {
+      const card = e.target.closest('[data-toolpack-id]');
+      if (!card) return;
+      const id = card.dataset.toolpackId;
+      if (this.selectedToolpackIds.has(id)) this.selectedToolpackIds.delete(id);
+      else this.selectedToolpackIds.add(id);
+      card.classList.toggle('selected', this.selectedToolpackIds.has(id));
+    });
+    // Action buttons
+    document.getElementById('scope-save-btn')?.addEventListener('click', (e) => this.saveScopeFromBuilder(e));
+    document.getElementById('scope-dryrun-btn')?.addEventListener('click', () => this.previewScopePolicy());
+    document.getElementById('scope-policy-refresh')?.addEventListener('click', () => this.previewScopePolicy());
+    document.getElementById('scope-cancel-btn')?.addEventListener('click', () => this.resetScopeBuilder());
+    document.getElementById('scope-archive-btn')?.addEventListener('click', () => this.archiveCurrentScope());
   },
 
   async loadAll() {
-    await Promise.all([this.loadAssets(false), this.loadScopes(false), this.loadComparisons(false), this.loadScopeTemplates(false), this.loadToolpacks(false)]);
+    await Promise.all([
+      this.loadAssets(false),
+      this.loadScopes(false),
+      this.loadComparisons(false),
+      this.loadScopeTemplates(),
+      this.loadToolpacks(),
+    ]);
     await this.loadAssetOperationalDetails();
     this.renderCurrentMode();
     this.renderActiveSelector();
+    if (this.mode === 'scopes') this.renderScopeBuilderShell();
   },
 
   async loadAssetOperationalDetails() {
@@ -85,14 +146,19 @@ window.ScopePage = {
 
   async loadScopesForSelector() {
     try {
-      await Promise.all([this.loadScopes(false), this.loadToolpacks(false)]);
+      await Promise.all([this.loadScopes(false), this.loadToolpacks(), this.loadScopeTemplates()]);
       this.renderActiveSelector();
+      if (this.mode === 'scopes') this.renderScopeBuilderShell();
     } catch {}
   },
 
   setMode(mode) {
     this.mode = mode;
     document.querySelectorAll('[data-asset-mode]').forEach(button => button.classList.toggle('active', button.dataset.assetMode === mode));
+    // Show only the active mode panel
+    document.getElementById('scope-mode-panel')?.classList.toggle('hidden', mode !== 'scopes');
+    document.getElementById('assets-mode-panel')?.classList.toggle('hidden', mode !== 'assets');
+    document.getElementById('compare-mode-panel')?.classList.toggle('hidden', mode !== 'compare');
     this.renderCurrentMode();
   },
 
@@ -131,6 +197,326 @@ window.ScopePage = {
     select.innerHTML = this.toolpacks.map(pack => `<option value="${this.escapeAttribute(pack.id)}" ${selected.has(pack.id) ? 'selected' : ''}>${this.escapeHtml(pack.name)}</option>`).join('');
   },
 
+  // ─── Scopes mode (2-col kit builder) ───
+  renderScopesWorkspace() {
+    this.renderScopeBuilderShell();
+  },
+
+  renderScopeBuilderShell() {
+    this.renderIntentTiles();
+    this.renderActionClassTable();
+    this.renderToolpackGrid();
+    this.renderAssetPicker();
+    // initialise hidden inputs from current table state
+    this.syncActionClassHiddenInputs();
+    this.updateTargetCount();
+    // Initialise drawer with idle preview
+    this.renderPolicyDrawer(null);
+  },
+
+  renderIntentTiles() {
+    const grid = document.getElementById('scope-intent-grid');
+    if (!grid) return;
+    if (!this.scopeTemplates.length) {
+      grid.innerHTML = '<div class="empty-msg">Loading intent templates…</div>';
+      return;
+    }
+    grid.innerHTML = this.scopeTemplates.map(template => {
+      const risk = this.templateRisk(template);
+      const active = template.id === this.selectedTemplateId ? 'active' : '';
+      return `<button type="button" class="intent-tile ${active}" data-template-id="${this.escapeAttribute(template.id)}">`
+        + `<span class="risk ${this.escapeAttribute(risk)}">${this.escapeHtml(risk)}</span>`
+        + `<span class="name">${this.escapeHtml(template.name)}</span>`
+        + `<span class="desc">${this.escapeHtml(template.summary || '')}</span>`
+        + `</button>`;
+    }).join('');
+  },
+
+  templateRisk(template) {
+    const blocked = (template.blockedActions || []).join(',');
+    if (/destructive|exploit/.test(blocked) && (template.allowedActions || []).some(a => /credential|brute/.test(a))) return 'high';
+    if ((template.allowedActions || []).some(a => /network-scan|web-vuln|credentialed|exploit/.test(a))) return 'med';
+    if (!template.allowedActions || !template.allowedActions.length) return 'info';
+    return 'low';
+  },
+
+  renderActionClassTable() {
+    const tbl = document.getElementById('scope-action-table');
+    if (!tbl) return;
+    const tbody = tbl.querySelector('tbody');
+    if (!tbody) return;
+    const allowed = this.csv('scope-allowed');
+    const blocked = this.csv('scope-blocked');
+    tbody.innerHTML = window.ScopeBuilder?.renderActionClassTable({ allowed, blocked }) || '';
+  },
+
+  renderToolpackGrid() {
+    const grid = document.getElementById('scope-toolpack-grid');
+    if (!grid) return;
+    if (!this.toolpacks.length) {
+      grid.innerHTML = '<div class="empty-msg">No toolpacks available.</div>';
+      return;
+    }
+    grid.innerHTML = this.toolpacks.map(pack => {
+      const selected = this.selectedToolpackIds.has(pack.id) ? 'selected' : '';
+      return `<button type="button" class="toolpack-card ${selected}" data-toolpack-id="${this.escapeAttribute(pack.id)}">`
+        + `<span class="name">${this.escapeHtml(pack.name)}</span>`
+        + `<span class="desc">${this.escapeHtml(pack.summary || pack.tools || '')}</span>`
+        + `</button>`;
+    }).join('');
+  },
+
+  renderAssetPicker() {
+    const select = document.getElementById('scope-asset-select');
+    if (!select) return;
+    const selected = new Set(Array.from(select.selectedOptions || []).map(o => o.value));
+    select.innerHTML = this.assets.map(asset => `<option value="${this.escapeAttribute(asset.id)}" ${selected.has(asset.id) ? 'selected' : ''}>${this.escapeHtml(asset.name)} · ${this.escapeHtml(asset.type)}</option>`).join('');
+  },
+
+  syncActionClassHiddenInputs() {
+    const allowedEls = document.querySelectorAll('#scope-action-table input[data-action-allow]:checked');
+    const deniedEls = document.querySelectorAll('#scope-action-table input[data-action-deny]:checked');
+    const allowed = Array.from(allowedEls).map(el => el.dataset.actionAllow);
+    const blocked = Array.from(deniedEls).map(el => el.dataset.actionDeny);
+    const allowEl = document.getElementById('scope-allowed');
+    const blockEl = document.getElementById('scope-blocked');
+    if (allowEl) allowEl.value = allowed.join(', ');
+    if (blockEl) blockEl.value = blocked.join(', ');
+  },
+
+  updateTargetCount() {
+    const chips = document.querySelectorAll('#scope-target-chips .target-chip');
+    const lbl = document.getElementById('scope-target-count');
+    if (lbl) lbl.textContent = `${chips.length} ITEM${chips.length === 1 ? '' : 'S'}`;
+  },
+
+  async parseTargetInput() {
+    const ta = document.getElementById('scope-target-input');
+    const chipsEl = document.getElementById('scope-target-chips');
+    if (!ta || !chipsEl) return;
+    const input = ta.value.trim();
+    if (!input) return;
+    try {
+      const parsed = await this.fetchJSON('/api/scopes/parse-targets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input }),
+      });
+      const targets = parsed.targets || parsed.scopeFields || parsed;
+      chipsEl.innerHTML = window.ScopeBuilder?.renderTargetChips(targets) || '';
+      this.updateTargetCount();
+    } catch (err) {
+      chipsEl.innerHTML = `<span class="caption" style="color:var(--sev-crit);">Parse failed: ${this.escapeHtml(err.message)}</span>`;
+    }
+  },
+
+  applyScopeTemplate(id) {
+    const template = this.scopeTemplates.find(item => item.id === id);
+    if (!template) return;
+    this.selectedTemplateId = id;
+    document.querySelectorAll('#scope-intent-grid .intent-tile').forEach(el => {
+      el.classList.toggle('active', el.dataset.templateId === id);
+    });
+    const draft = window.ScopeBuilder?.templateToDraft(template) || template;
+    const name = document.getElementById('scope-name');
+    if (name && !name.value) name.value = String(draft.nameSuffix || template.name).toUpperCase().replace(/\s+/g, '-');
+    const allowEl = document.getElementById('scope-allowed');
+    const blockEl = document.getElementById('scope-blocked');
+    if (allowEl) allowEl.value = (draft.allowedActions || []).join(', ');
+    if (blockEl) blockEl.value = (draft.blockedActions || []).join(', ');
+    const notes = document.getElementById('scope-notes');
+    if (notes && !notes.value) notes.value = draft.notes || '';
+    // Apply toolpacks
+    this.selectedToolpackIds = new Set(draft.toolpackIds || []);
+    this.renderToolpackGrid();
+    // Re-render the action class table to reflect new allow/deny state
+    this.renderActionClassTable();
+  },
+
+  collectTargetChips() {
+    const chipEls = document.querySelectorAll('#scope-target-chips .target-chip');
+    const fields = { hosts: [], domains: [], cidrs: [], urls: [], assetIds: [] };
+    chipEls.forEach(el => {
+      const kind = el.dataset.kind || 'host';
+      const value = el.dataset.value || '';
+      if (!value) return;
+      if (kind === 'url') fields.urls.push(value);
+      else if (kind === 'domain') fields.domains.push(value);
+      else if (kind === 'cidr') fields.cidrs.push(value);
+      else if (kind === 'asset') fields.assetIds.push(value);
+      else fields.hosts.push(value);
+    });
+    // Also collect any selected asset rows from the picker
+    const picker = document.getElementById('scope-asset-select');
+    if (picker) Array.from(picker.selectedOptions || []).forEach(o => fields.assetIds.push(o.value));
+    return fields;
+  },
+
+  scopePayloadFromBuilder() {
+    const targets = this.collectTargetChips();
+    targets.toolpackIds = Array.from(this.selectedToolpackIds);
+    return {
+      name: document.getElementById('scope-name')?.value || '',
+      targets,
+      allowedActions: this.csv('scope-allowed'),
+      blockedActions: this.csv('scope-blocked'),
+      expiresAt: document.getElementById('scope-expires')?.value || null,
+      owner: document.getElementById('scope-owner')?.value || null,
+      notes: document.getElementById('scope-notes')?.value || '',
+    };
+  },
+
+  async previewScopePolicy() {
+    const scope = this.scopePayloadFromBuilder();
+    // Build sample commands from a few targets
+    const sampleTargets = [
+      ...(scope.targets.hosts || []).slice(0, 2),
+      ...(scope.targets.domains || []).slice(0, 2),
+      ...(scope.targets.urls || []).slice(0, 1),
+    ];
+    const samples = sampleTargets.length ? sampleTargets : ['example.local'];
+    try {
+      const decisions = await Promise.all(samples.map(async (t) => {
+        try {
+          const decision = await this.fetchJSON('/api/scopes/evaluate-draft', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              toolName: 'execute_command',
+              args: { command: `curl -sS ${t}` },
+              scope,
+            }),
+          });
+          return { ...decision, target: t };
+        } catch (err) {
+          return { allowed: false, reason: err.message, target: t, risk: 'unknown' };
+        }
+      }));
+      const allowed = decisions.filter(d => d.allowed).length;
+      const blocked = decisions.length - allowed;
+      const decision = { allowed, blocked, samples: decisions.map(d => ({
+        allowed: d.allowed, risk: d.risk, target: d.target, reason: d.reason,
+      })) };
+      this.renderPolicyDrawer(decision, scope);
+    } catch (err) {
+      this.renderPolicyDrawer({ allowed: false, reason: err.message, risk: 'unknown', targets: [] }, scope);
+    }
+  },
+
+  renderPolicyDrawer(decision, scope = null) {
+    const body = document.getElementById('scope-policy-preview');
+    const title = document.getElementById('scope-policy-title');
+    const sub = document.getElementById('scope-policy-sub');
+    const stamp = document.getElementById('scope-policy-stamp');
+    if (body) body.innerHTML = window.ScopeBuilder?.renderPolicyPreview(decision) || '';
+    if (decision == null) {
+      if (title) title.textContent = scope?.name || 'No scope yet';
+      if (sub) sub.textContent = 'Build a scope on the left, then dry-run.';
+      if (stamp) stamp.textContent = '—';
+      return;
+    }
+    if (typeof decision.allowed === 'number') {
+      if (title) title.textContent = scope?.name || 'Dry-run preview';
+      if (sub) sub.textContent = `Allowed: ${decision.allowed} · Blocked: ${decision.blocked}`;
+    } else {
+      if (title) title.textContent = scope?.name || (decision.allowed ? 'Allowed' : 'Blocked');
+      if (sub) sub.textContent = decision.reason || '';
+    }
+    if (stamp) stamp.textContent = new Date().toLocaleTimeString();
+  },
+
+  async saveScopeFromBuilder(event) {
+    if (event) event.preventDefault();
+    const payload = this.scopePayloadFromBuilder();
+    if (!payload.name) {
+      alert('Scope name is required.');
+      return;
+    }
+    const id = this.selectedScopeId;
+    try {
+      const res = await fetch(id ? `/api/scopes/${encodeURIComponent(id)}` : '/api/scopes', {
+        method: id ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const saved = await res.json();
+      this.selectedScopeId = saved.id;
+      await this.loadAll();
+    } catch (err) {
+      alert(`Save failed: ${err.message}`);
+    }
+  },
+
+  resetScopeBuilder() {
+    this.selectedScopeId = null;
+    this.selectedTemplateId = null;
+    this.selectedToolpackIds = new Set();
+    ['scope-name', 'scope-expires', 'scope-owner', 'scope-notes', 'scope-target-input'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    const chips = document.getElementById('scope-target-chips');
+    if (chips) chips.innerHTML = '';
+    const allow = document.getElementById('scope-allowed');
+    const block = document.getElementById('scope-blocked');
+    if (allow) allow.value = '';
+    if (block) block.value = '';
+    this.renderScopeBuilderShell();
+  },
+
+  async archiveCurrentScope() {
+    const id = this.selectedScopeId;
+    if (!id) { alert('Select a saved scope to archive.'); return; }
+    if (!confirm('Archive this scope?')) return;
+    try {
+      const res = await fetch(`/api/scopes/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ archived: true }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      this.resetScopeBuilder();
+      await this.loadAll();
+    } catch (err) {
+      alert(`Archive failed: ${err.message}`);
+    }
+  },
+
+  // ─── Editor entry points kept for compatibility ───
+  renderScopeEditor() {
+    this.setMode('scopes');
+    this.resetScopeBuilder();
+  },
+
+  renderScopeDetail(id) {
+    const scope = this.scopes.find(item => item.id === id);
+    if (!scope) return this.renderScopeEditor();
+    this.selectedScopeId = id;
+    // Hydrate the builder form with the selected scope
+    const raw = scope.raw_targets || scope.targets || {};
+    document.getElementById('scope-name').value = scope.name || '';
+    document.getElementById('scope-expires').value = scope.expires_at || '';
+    document.getElementById('scope-owner').value = scope.owner || '';
+    document.getElementById('scope-notes').value = scope.notes || '';
+    document.getElementById('scope-allowed').value = (scope.allowed_actions || []).join(', ');
+    document.getElementById('scope-blocked').value = (scope.blocked_actions || []).join(', ');
+    this.selectedToolpackIds = new Set(raw.toolpackIds || []);
+    // Hydrate target chips
+    const chips = document.getElementById('scope-target-chips');
+    const flatTargets = [
+      ...(raw.urls || []).map(v => ({ kind: 'url', value: v })),
+      ...(raw.domains || []).map(v => ({ kind: 'domain', value: v })),
+      ...(raw.hosts || []).map(v => ({ kind: 'host', value: v })),
+      ...(raw.cidrs || []).map(v => ({ kind: 'cidr', value: v })),
+      ...(raw.assetIds || []).map(v => ({ kind: 'asset', value: v })),
+    ];
+    if (chips) chips.innerHTML = window.ScopeBuilder?.renderTargetChips(flatTargets) || '';
+    this.renderScopeBuilderShell();
+    this.updateTargetCount();
+  },
+
+  // ─── Assets mode (untouched in this pass) ───
   renderAssetsWorkspace() {
     this.renderAssetList();
     const asset = this.assets.find(item => item.id === this.selectedAssetId) || this.assets[0];
@@ -232,7 +618,7 @@ window.ScopePage = {
     document.querySelector('[data-action="edit-asset"]')?.addEventListener('click', () => this.renderAssetEditor(asset));
     document.querySelector('[data-action="snapshot"]')?.addEventListener('click', () => this.renderSnapshotEditor(asset));
     document.querySelector('[data-action="finding"]')?.addEventListener('click', () => this.renderFindingEditor(asset));
-    document.querySelector('[data-action="scope-from-asset"]')?.addEventListener('click', () => this.renderScopeEditor(null, [asset.id]));
+    document.querySelector('[data-action="scope-from-asset"]')?.addEventListener('click', () => { this.setMode('scopes'); this.resetScopeBuilder(); this.selectedToolpackIds = new Set(); });
     document.querySelectorAll('[data-run-graph]').forEach(button => button.addEventListener('click', () => {
       if (window.GraphPage) window.GraphPage.selectedRunId = button.dataset.runGraph;
       window.Router?.navigate?.('graph');
@@ -273,14 +659,16 @@ window.ScopePage = {
   },
 
   renderEmptyAssets() {
-    document.getElementById('asset-main').innerHTML = '<div class="empty-msg">Create an asset to start tracking targets, history, findings, and mitigation state.</div>';
-    document.getElementById('asset-inspector').innerHTML = '<div class="inspector-card">Assets are durable operational records. Scopes can reference assets for governed runs.</div>';
+    const main = document.getElementById('asset-main');
+    const inspector = document.getElementById('asset-inspector');
+    if (main) main.innerHTML = '<div class="empty-msg">Create an asset to start tracking targets, history, findings, and mitigation state.</div>';
+    if (inspector) inspector.innerHTML = '<div class="inspector-card">Assets are durable operational records. Scopes can reference assets for governed runs.</div>';
   },
 
   renderAssetEditor(asset = null) {
     const main = document.getElementById('asset-main');
     const inspector = document.getElementById('asset-inspector');
-    this.mode = 'assets';
+    this.setMode('assets');
     this.renderAssetList();
     if (inspector) inspector.innerHTML = '<div class="inspector-card">Canonical asset state is saved server-side. Credential references are redacted in API/UI responses.</div>';
     if (!main) return;
@@ -385,165 +773,11 @@ window.ScopePage = {
     });
   },
 
-  renderScopesWorkspace() {
-    this.renderScopeList();
-    const scope = this.scopes.find(item => item.id === this.selectedScopeId) || this.scopes[0];
-    if (scope) this.renderScopeDetail(scope.id);
-    else this.renderScopeEditor();
-  },
-
-  renderScopeList() {
-    const list = document.getElementById('asset-list');
-    if (!list) return;
-    if (!this.scopes.length) {
-      list.innerHTML = '<div class="empty-msg">No scopes yet. Scopes combine assets, raw targets, and risk policy.</div>';
-      return;
-    }
-    list.innerHTML = this.scopes.map(scope => `
-      <button class="asset-list-item ${scope.id === this.selectedScopeId ? 'active' : ''}" data-scope-id="${this.escapeAttribute(scope.id)}">
-        <span class="asset-type-icon">🎯</span>
-        <span class="asset-list-body"><strong>${this.escapeHtml(scope.name)}</strong><small>${this.escapeHtml((scope.raw_targets?.assetIds || []).length)} assets · expires ${this.escapeHtml(scope.expires_at || 'never')}</small></span>
-      </button>`).join('');
-    list.querySelectorAll('[data-scope-id]').forEach(button => button.addEventListener('click', () => this.renderScopeDetail(button.dataset.scopeId)));
-  },
-
-  renderScopeDetail(id) {
-    const scope = this.scopes.find(item => item.id === id);
-    if (!scope) return this.renderScopeEditor();
-    this.selectedScopeId = id;
-    this.renderScopeList();
-    const selectedAssets = (scope.raw_targets?.assetIds || []).map(assetId => this.assets.find(asset => asset.id === assetId)).filter(Boolean);
-    const toolpackIds = scope.raw_targets?.toolpackIds || [];
-    document.getElementById('asset-main').innerHTML = `
-      <div class="asset-hero"><div><p class="eyebrow">Governed scope</p><h2>${this.escapeHtml(scope.name)}</h2><p>${this.escapeHtml(scope.notes || 'No ROE notes.')}</p></div><span class="run-pill running">active</span></div>
-      <div class="asset-metric-grid"><div><span>Assets</span><strong>${selectedAssets.length}</strong></div><div><span>Hosts</span><strong>${(scope.targets?.hosts || []).length}</strong></div><div><span>Allowed</span><strong>${(scope.allowed_actions || []).join(', ') || 'default'}</strong></div><div><span>Blocked</span><strong>${(scope.blocked_actions || []).join(', ') || '—'}</strong></div></div>
-      <section class="inspector-card"><h3>Included assets</h3>${selectedAssets.map(asset => `<span class="asset-chip">${this.iconForAsset(asset.type)} ${this.escapeHtml(asset.name)}</span>`).join('') || '<div class="empty-msg">Raw-target-only scope.</div>'}</section>
-      <section class="inspector-card"><h3>Expanded targets</h3>${this.renderTargetSummary(scope.targets || {})}</section>
-      <section class="inspector-card"><h3>Toolpack defaults</h3>${toolpackIds.map(id => `<span class="asset-chip">${this.escapeHtml(this.toolpacks.find(pack => pack.id === id)?.name || id)}</span>`).join('') || '<div class="empty-msg">Select toolpacks from Chat or Settings.</div>'}</section>`;
-    document.getElementById('asset-inspector').innerHTML = `
-      <div class="inspector-card"><h3>Scope actions</h3><div class="inspector-actions"><button class="btn btn-secondary btn-sm" id="use-scope-btn">Use for chat</button><button class="btn btn-secondary btn-sm" id="edit-scope-btn">Edit scope</button></div></div>
-      <div class="inspector-card"><h3>Dry-run policy</h3><input id="detail-policy-command" placeholder="nmap -sV ${this.escapeAttribute((scope.targets?.hosts || scope.targets?.domains || ['target'])[0] || 'target')}" /><button class="btn btn-secondary btn-sm" id="detail-policy-check">Check command</button><div id="detail-policy-result">No check yet.</div></div>`;
-    document.getElementById('use-scope-btn')?.addEventListener('click', () => {
-      const select = document.getElementById('active-scope-select');
-      if (select) { select.value = scope.id; this.renderActiveScopeSummary(); }
-      const toolSelect = document.getElementById('active-toolpack-select');
-      if (toolSelect && toolpackIds.length) Array.from(toolSelect.options).forEach(option => { option.selected = toolpackIds.includes(option.value); });
-    });
-    document.getElementById('edit-scope-btn')?.addEventListener('click', () => this.renderScopeEditor(scope));
-    document.getElementById('detail-policy-check')?.addEventListener('click', async () => {
-      const command = document.getElementById('detail-policy-command')?.value || '';
-      const result = document.getElementById('detail-policy-result');
-      const decision = await this.fetchJSON(`/api/scopes/${encodeURIComponent(scope.id)}/evaluate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ toolName: 'execute_command', args: { command } }) });
-      if (result) result.innerHTML = window.ScopeBuilder?.renderPolicyPreview(decision) || this.escapeHtml(decision.reason);
-    });
-  },
-
-  renderScopeEditor(scope = null, preselectedAssetIds = []) {
-    this.mode = 'scopes';
-    document.querySelectorAll('[data-asset-mode]').forEach(button => button.classList.toggle('active', button.dataset.assetMode === 'scopes'));
-    const raw = scope?.raw_targets || scope?.targets || {};
-    const selected = new Set([...(raw.assetIds || []), ...preselectedAssetIds]);
-    const templateOptions = this.scopeTemplates.map(template => `<option value="${this.escapeAttribute(template.id)}">${this.escapeHtml(template.name)} — ${this.escapeHtml(template.summary)}</option>`).join('');
-    const toolpackOptions = this.toolpacks.map(pack => `<label class="asset-checkbox compact"><input type="checkbox" class="scope-toolpack" value="${this.escapeAttribute(pack.id)}" ${(raw.toolpackIds || []).includes(pack.id) ? 'checked' : ''}>${this.escapeHtml(pack.name)}<small>${this.escapeHtml(pack.summary)}</small></label>`).join('');
-    document.getElementById('asset-main').innerHTML = `
-      <form id="scope-editor" class="asset-form scope-builder-form">
-        <h2>${scope ? 'Edit governed scope' : 'New governed scope'}</h2>
-        <div class="scope-builder-steps">
-          <section class="inspector-card"><p class="eyebrow">1 · Intent</p><label>Template <select id="scope-template"><option value="">Custom governed scope</option>${templateOptions}</select></label><label>Name <input id="scope-name" value="${this.escapeAttribute(scope?.name || '')}" required></label></section>
-          <section class="inspector-card"><p class="eyebrow">2 · Targets</p><label>Paste targets <textarea id="scope-target-paste" rows="5" placeholder="https://app.example.com\nexample.com\n10.0.0.0/24\n192.168.1.10:22"></textarea></label><button type="button" class="btn btn-secondary btn-sm" id="parse-scope-targets">Parse targets</button><div id="scope-target-chips" class="target-chip-row">${window.ScopeBuilder?.renderTargetChips([]) || ''}</div></section>
-          <section class="inspector-card"><p class="eyebrow">3 · Assets</p><div class="asset-selector-grid">${this.assets.map(asset => `<label class="asset-checkbox"><input type="checkbox" value="${this.escapeAttribute(asset.id)}" ${selected.has(asset.id) ? 'checked' : ''}>${this.iconForAsset(asset.type)} ${this.escapeHtml(asset.name)}<small>${this.escapeHtml(asset.environment || asset.type)}</small></label>`).join('') || '<div class="empty-msg">Create assets first or enter raw targets.</div>'}</div></section>
-          <section class="inspector-card"><p class="eyebrow">4 · Policy</p><div class="form-row"><label>Allowed risks <input id="scope-allowed" value="${this.escapeAttribute((scope?.allowed_actions || []).join(', '))}" placeholder="recon, network-scan"></label><label>Blocked risks <input id="scope-blocked" value="${this.escapeAttribute((scope?.blocked_actions || []).join(', '))}" placeholder="exploit, destructive"></label></div><label>Toolpacks <div class="asset-selector-grid compact-grid">${toolpackOptions || '<div class="empty-msg">No toolpacks available.</div>'}</div></label></section>
-        </div>
-        <details open><summary>Raw target fields</summary><label>Raw hosts <input id="scope-hosts" value="${this.escapeAttribute((raw.hosts || []).join(', '))}"></label><label>Raw domains <input id="scope-domains" value="${this.escapeAttribute((raw.domains || []).join(', '))}"></label><label>Raw CIDRs <input id="scope-cidrs" value="${this.escapeAttribute((raw.cidrs || []).join(', '))}"></label><label>Raw URLs <input id="scope-urls" value="${this.escapeAttribute((raw.urls || []).join(', '))}"></label></details>
-        <div class="form-row"><label>Expires <input id="scope-expires" placeholder="ISO timestamp" value="${this.escapeAttribute(scope?.expires_at || '')}"></label><label>Dry-run command <input id="scope-policy-command" placeholder="nmap -sV example.com"></label></div>
-        <label>ROE notes <textarea id="scope-notes" rows="4">${this.escapeHtml(scope?.notes || '')}</textarea></label>
-        <div id="scope-policy-preview">${window.ScopeBuilder?.renderPolicyPreview(null) || ''}</div>
-        <div class="form-actions"><button class="btn btn-primary" type="submit">Save scope</button><button class="btn btn-secondary" type="button" id="scope-dry-run-btn">Dry-run policy</button></div>
-      </form>`;
-    document.getElementById('asset-inspector').innerHTML = '<div class="inspector-card">Scope Builder converts pasted targets into editable raw fields, applies intent templates, and previews the same policy gate used before tool execution.</div>';
-    document.getElementById('scope-editor').addEventListener('submit', (event) => this.saveScope(event, scope?.id || null));
-    document.getElementById('scope-template')?.addEventListener('change', (event) => this.applyScopeTemplate(event.target.value));
-    document.getElementById('parse-scope-targets')?.addEventListener('click', () => this.parseScopeTargets());
-    document.getElementById('scope-dry-run-btn')?.addEventListener('click', () => this.previewScopePolicy());
-  },
-
-  async parseScopeTargets() {
-    const input = document.getElementById('scope-target-paste')?.value || '';
-    const parsed = await this.fetchJSON('/api/scopes/parse-targets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input }) });
-    const chips = document.getElementById('scope-target-chips');
-    if (chips) chips.innerHTML = window.ScopeBuilder?.renderTargetChips(parsed.targets || []) || '';
-    const fields = parsed.scopeFields || {};
-    this.appendCsv('scope-hosts', fields.hosts);
-    this.appendCsv('scope-domains', fields.domains);
-    this.appendCsv('scope-cidrs', fields.cidrs);
-    this.appendCsv('scope-urls', fields.urls);
-  },
-
-  applyScopeTemplate(id) {
-    const template = this.scopeTemplates.find(item => item.id === id);
-    if (!template) return;
-    const draft = window.ScopeBuilder?.templateToDraft(template) || template;
-    const name = document.getElementById('scope-name');
-    if (name && !name.value) name.value = draft.nameSuffix;
-    document.getElementById('scope-allowed').value = (draft.allowedActions || []).join(', ');
-    document.getElementById('scope-blocked').value = (draft.blockedActions || []).join(', ');
-    const notes = document.getElementById('scope-notes');
-    if (notes && !notes.value) notes.value = draft.notes || '';
-    document.querySelectorAll('.scope-toolpack').forEach(input => { input.checked = (draft.toolpackIds || []).includes(input.value); });
-  },
-
-  async previewScopePolicy() {
-    const command = document.getElementById('scope-policy-command')?.value || '';
-    const preview = document.getElementById('scope-policy-preview');
-    const scope = this.scopePayloadFromForm();
-    const decision = await this.fetchJSON('/api/scopes/evaluate-draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ toolName: 'execute_command', args: { command }, scope }) });
-    if (preview) preview.innerHTML = window.ScopeBuilder?.renderPolicyPreview(decision) || this.escapeHtml(decision.reason);
-  },
-
-  appendCsv(id, values = []) {
-    const input = document.getElementById(id);
-    if (!input || !values?.length) return;
-    const current = new Set(this.csvValue(input.value));
-    values.forEach(value => current.add(value));
-    input.value = Array.from(current).join(', ');
-  },
-
-  scopePayloadFromForm() {
-    const assetIds = Array.from(document.querySelectorAll('.asset-checkbox input:checked')).filter(input => !input.classList.contains('scope-toolpack')).map(input => input.value);
-    const toolpackIds = Array.from(document.querySelectorAll('.scope-toolpack:checked')).map(input => input.value);
-    return {
-      name: document.getElementById('scope-name').value,
-      targets: {
-        assetIds,
-        toolpackIds,
-        hosts: this.csv('scope-hosts'),
-        domains: this.csv('scope-domains'),
-        cidrs: this.csv('scope-cidrs'),
-        urls: this.csv('scope-urls'),
-      },
-      allowedActions: this.csv('scope-allowed'),
-      blockedActions: this.csv('scope-blocked'),
-      expiresAt: document.getElementById('scope-expires').value || null,
-      notes: document.getElementById('scope-notes').value,
-    };
-  },
-
-  async saveScope(event, id = null) {
-    event.preventDefault();
-    const payload = this.scopePayloadFromForm();
-    const res = await fetch(id ? `/api/scopes/${encodeURIComponent(id)}` : '/api/scopes', { method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const saved = await res.json();
-    this.selectedScopeId = saved.id;
-    await this.loadAll();
-    this.setMode('scopes');
-  },
-
   renderCompareWorkspace() {
-    const list = document.getElementById('asset-list');
-    if (list) list.innerHTML = this.comparisons.length ? this.comparisons.map(comp => `<button class="asset-list-item"><span class="asset-type-icon">⇄</span><span class="asset-list-body"><strong>${this.escapeHtml(comp.title)}</strong><small>${this.escapeHtml(comp.summary)}</small></span></button>`).join('') : '<div class="empty-msg">No comparisons yet. Create snapshots from an asset, then compare.</div>';
+    const mount = document.getElementById('compare-mount');
+    if (!mount) return;
     const snapshots = this.assets.flatMap(asset => (asset.snapshots || []).map(s => ({ ...s, assetName: asset.name })));
-    document.getElementById('asset-main').innerHTML = `
+    mount.innerHTML = `
       <div class="asset-hero"><div><p class="eyebrow">Mitigation verification</p><h2>Before / after comparison</h2><p>Compare baseline snapshots to verify what changed after mitigation.</p></div></div>
       <form id="compare-form" class="asset-form compact-form">
         <label>Before <select id="compare-before">${snapshots.map(s => `<option value="${this.escapeAttribute(s.id)}">${this.escapeHtml(s.assetName)} · ${this.escapeHtml(s.title)} · ${this.escapeHtml(s.healthScore ?? '—')}</option>`).join('')}</select></label>
@@ -551,7 +785,6 @@ window.ScopePage = {
         <button class="btn btn-primary" ${snapshots.length < 2 ? 'disabled' : ''}>Compare snapshots</button>
       </form>
       <div class="comparison-grid">${this.comparisons.map(c => this.renderComparisonCard(c)).join('') || '<div class="empty-msg">Comparison results will appear here.</div>'}</div>`;
-    document.getElementById('asset-inspector').innerHTML = '<div class="inspector-card">Use rerun templates from Runs/API to produce after-mitigation checks, then compare snapshots here.</div>';
     document.getElementById('compare-form')?.addEventListener('submit', event => this.saveComparison(event));
   },
 
@@ -567,10 +800,6 @@ window.ScopePage = {
 
   renderComparisonCard(c) {
     return `<article class="comparison-card"><strong>${this.escapeHtml(c.title)}</strong><p>${this.escapeHtml(c.summary)}</p><div class="asset-chip-row"><span class="asset-chip">Health ${this.escapeHtml(c.diff?.healthDelta ?? 0)}</span><span class="asset-chip">Resolved ${this.escapeHtml(c.diff?.resolvedFindings ?? 0)}</span><span class="asset-chip">Added ${this.escapeHtml(c.diff?.addedFindings ?? 0)}</span></div></article>`;
-  },
-
-  renderTargetSummary(targets) {
-    return ['hosts', 'domains', 'cidrs', 'urls'].map(key => `<div class="target-row"><span>${key}</span><strong>${this.escapeHtml((targets[key] || []).join(', ') || '—')}</strong></div>`).join('');
   },
 
   parseAddresses(text) {
@@ -596,3 +825,317 @@ window.ScopePage = {
   escapeHtml(value) { const div = document.createElement('div'); div.textContent = value == null ? '' : String(value); return div.innerHTML; },
   escapeAttribute(value) { return this.escapeHtml(value).replace(/"/g, '&quot;'); },
 };
+
+// ─── Asset Profile drawer (Kit alignment pass 5) ────────────────────────
+let currentAssetDrawer = null;
+
+async function openAssetDrawer(assetId) {
+  const overlay = document.getElementById('asset-profile-drawer');
+  if (!overlay || !assetId) return;
+  overlay.classList.remove('hidden');
+  document.body.classList.add('drawer-open');
+  // Load detail
+  try {
+    const [asset, findingsRes, scopesRes] = await Promise.all([
+      fetch(`/api/assets/${encodeURIComponent(assetId)}`).then(r => r.json()).catch(() => null),
+      fetch(`/api/findings?assetId=${encodeURIComponent(assetId)}&limit=100`).then(r => r.json()).catch(() => []),
+      fetch('/api/scopes').then(r => r.json()).catch(() => []),
+    ]);
+    if (!asset) return;
+    const findings = Array.isArray(findingsRes) ? findingsRes : (findingsRes.findings || []);
+    const scopes = Array.isArray(scopesRes) ? scopesRes : (scopesRes.scopes || []);
+    currentAssetDrawer = { asset, findings, scopes };
+    renderAssetDrawerHeader();
+    renderAssetDrawerTab('overview');
+    activateAssetDrawerTab('overview');
+  } catch (err) {
+    console.warn('Asset drawer load failed:', err);
+  }
+}
+
+function closeAssetDrawer() {
+  const overlay = document.getElementById('asset-profile-drawer');
+  if (!overlay) return;
+  overlay.classList.add('hidden');
+  document.body.classList.remove('drawer-open');
+  currentAssetDrawer = null;
+}
+
+function renderAssetDrawerHeader() {
+  if (!currentAssetDrawer) return;
+  const { asset, findings, scopes } = currentAssetDrawer;
+  const typeEl = document.getElementById('asset-drawer-type');
+  const critEl = document.getElementById('asset-drawer-criticality');
+  const titleEl = document.getElementById('asset-drawer-title');
+  const subEl = document.getElementById('asset-drawer-sub');
+  if (typeEl) typeEl.textContent = (asset.type || 'asset').toUpperCase();
+  if (critEl) critEl.textContent = (asset.criticality || 'medium').toUpperCase();
+  if (titleEl) titleEl.textContent = asset.name || asset.id;
+  const sub = [
+    asset.owner,
+    asset.environment,
+    asset.last_seen_at ? `last seen ${assetDrawerTimeAgo(asset.last_seen_at)}` : null,
+  ].filter(Boolean).join(' · ');
+  if (subEl) subEl.textContent = sub || '—';
+  // Update tab counts
+  const fct = document.getElementById('asset-tab-findings-ct');
+  const sct = document.getElementById('asset-tab-services-ct');
+  const hct = document.getElementById('asset-tab-history-ct');
+  const bct = document.getElementById('asset-tab-baselines-ct');
+  const scct = document.getElementById('asset-tab-scopes-ct');
+  const snapshots = Array.isArray(asset.snapshots) ? asset.snapshots : (currentAssetDrawer.snapshots || []);
+  if (fct) fct.textContent = `· ${findings.length}`;
+  if (sct) sct.textContent = `· ${(asset.services || []).length}`;
+  if (hct) hct.textContent = `· ${findings.length + snapshots.length}`;
+  if (bct) bct.textContent = `· ${snapshots.length}`;
+  const membership = scopes.filter(s => scopeIncludesAsset(s, asset));
+  if (scct) scct.textContent = `· ${membership.length}`;
+}
+
+function renderAssetDrawerTab(tab) {
+  if (!currentAssetDrawer) return;
+  const bd = document.getElementById('asset-drawer-bd');
+  if (!bd) return;
+  const { asset, findings, scopes } = currentAssetDrawer;
+
+  if (tab === 'overview') {
+    // Health derivation: 100 - weighted finding severity sum (open findings only)
+    const weight = { critical: 25, high: 15, medium: 8, low: 3, info: 0 };
+    const open = findings.filter(f => f.status === 'open');
+    const score = Math.max(20, 100 - open.reduce((a, f) => a + (weight[f.severity] || 0), 0));
+    const counts = ['critical','high','medium','low','info'].reduce((m, s) => (m[s] = open.filter(f => f.severity === s).length, m), {});
+    const cls = score < 40 ? 'critical' : score < 70 ? 'attention' : '';
+    bd.innerHTML = `
+      <section class="health-card ${cls}">
+        <div class="health-score">${score}<span class="denom">/100</span></div>
+        <div>
+          <div class="health-bar"><i style="width:${score}%"></i></div>
+          <div style="margin-top:6px;font-family:var(--font-mono);font-size:var(--fs-10);color:var(--fg-3);">${open.length} OPEN · ${findings.length - open.length} CLOSED</div>
+        </div>
+        <div class="severity-distro">
+          ${counts.critical ? `<span class="sev crit">CRIT <span class="ct">${counts.critical}</span></span>` : ''}
+          ${counts.high     ? `<span class="sev high">HIGH <span class="ct">${counts.high}</span></span>` : ''}
+          ${counts.medium   ? `<span class="sev med">MED <span class="ct">${counts.medium}</span></span>`  : ''}
+          ${counts.low      ? `<span class="sev low">LOW <span class="ct">${counts.low}</span></span>`    : ''}
+          ${counts.info     ? `<span class="sev info">INFO <span class="ct">${counts.info}</span></span>` : ''}
+          ${!open.length ? `<span class="sev info">No open findings</span>` : ''}
+        </div>
+      </section>
+      <dl class="identity-grid">
+        <dt>ID</dt><dd style="font-family:var(--font-mono);">${assetDrawerEscape((asset.id || '').slice(0, 12))}${asset.id && asset.id.length > 12 ? '…' : ''}</dd>
+        <dt>Type</dt><dd>${assetDrawerEscape(asset.type || '')}</dd>
+        <dt>Owner</dt><dd>${assetDrawerEscape(asset.owner || '—')}</dd>
+        <dt>Env</dt><dd>${assetDrawerEscape(asset.environment || '—')}</dd>
+        <dt>Addrs</dt><dd style="font-family:var(--font-mono);font-size:var(--fs-11);">${(asset.addresses || []).map(a => assetDrawerEscape(a.value)).join(', ') || '—'}</dd>
+        <dt>Services</dt><dd style="font-family:var(--font-mono);font-size:var(--fs-11);">${(asset.services || []).map(s => `${assetDrawerEscape(String(s.port||''))}/${assetDrawerEscape(s.protocol||'')} ${assetDrawerEscape(s.name||'')}`).join(', ') || '—'}</dd>
+        <dt>Tags</dt><dd><div class="tag-list">${(asset.tags || []).map(t => `<span class="tag-pill">${assetDrawerEscape(typeof t === 'string' ? t : (t.tag || t.name || ''))}</span>`).join('') || '—'}</div></dd>
+        <dt>Notes</dt><dd>${assetDrawerEscape(asset.notes || '—')}</dd>
+      </dl>
+    `;
+  } else if (tab === 'findings') {
+    bd.innerHTML = `
+      <table class="asset-table" aria-label="Findings for asset">
+        <thead><tr>
+          <th class="sev-col" aria-label="severity"></th>
+          <th>ID</th>
+          <th>SEV</th>
+          <th>TITLE</th>
+          <th>RULE</th>
+          <th>CWE/CVE</th>
+          <th>FIRST SEEN</th>
+          <th>STATUS</th>
+        </tr></thead>
+        <tbody>
+          ${findings.length ? findings.map(f => {
+            const rule = (f.metadata && f.metadata.rule) || '—';
+            const cwecve = (f.metadata && (f.metadata.cwe || f.metadata.cve)) || '—';
+            const firstSeen = f.first_seen_at ? String(f.first_seen_at).slice(0, 10) : '—';
+            return `
+            <tr class="${assetDrawerSevClass(f.severity)} linkable" data-finding-id="${assetDrawerEscape(f.id)}">
+              <td class="sev-col"></td>
+              <td class="id-col">${assetDrawerEscape((f.id || '').slice(0, 8))}</td>
+              <td><span class="sev-badge ${assetDrawerSevClass(f.severity)}">${assetDrawerEscape((f.severity||'').toUpperCase())}</span></td>
+              <td>${assetDrawerEscape(f.title)}</td>
+              <td style="font-family:var(--font-mono);font-size:var(--fs-10);color:var(--fg-2);">${assetDrawerEscape(rule)}</td>
+              <td style="font-family:var(--font-mono);font-size:var(--fs-10);color:var(--fg-2);">${assetDrawerEscape(cwecve)}</td>
+              <td style="font-family:var(--font-mono);font-size:var(--fs-10);color:var(--fg-mono-ts);">${assetDrawerEscape(firstSeen)}</td>
+              <td><span class="status-pill ${assetDrawerEscape(f.status)}">${assetDrawerEscape((f.status||'').toUpperCase())}</span></td>
+            </tr>
+          `;}).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--fg-3);padding:20px;">No findings recorded for this asset.</td></tr>`}
+        </tbody>
+      </table>
+    `;
+  } else if (tab === 'services') {
+    bd.innerHTML = `
+      <table class="asset-table" aria-label="Services">
+        <thead><tr><th>PORT</th><th>PROTO</th><th>SERVICE</th><th>BANNER</th><th>TLS</th></tr></thead>
+        <tbody>
+          ${(asset.services || []).length ? (asset.services || []).map(s => {
+            const tls = s.tls || (s.metadata && s.metadata.tls) || '—';
+            return `
+            <tr>
+              <td style="font-family:var(--font-mono);">${assetDrawerEscape(String(s.port||''))}</td>
+              <td style="font-family:var(--font-mono);">${assetDrawerEscape(s.protocol || '')}</td>
+              <td>${assetDrawerEscape(s.name || '—')}</td>
+              <td style="font-family:var(--font-mono);font-size:var(--fs-11);color:var(--fg-2);">${assetDrawerEscape(s.banner || s.url || '—')}</td>
+              <td style="font-family:var(--font-mono);font-size:var(--fs-11);color:var(--fg-2);">${assetDrawerEscape(tls)}</td>
+            </tr>
+          `;}).join('') : `<tr><td colspan="5" style="text-align:center;color:var(--fg-3);padding:20px;">No services recorded.</td></tr>`}
+        </tbody>
+      </table>
+    `;
+  } else if (tab === 'history') {
+    const snapshots = Array.isArray(asset.snapshots) ? asset.snapshots : (currentAssetDrawer.snapshots || []);
+    const events = [];
+    findings.forEach(f => events.push({
+      ts: f.first_seen_at || f.created_at || '',
+      kind: 'finding',
+      title: f.title || f.id,
+    }));
+    snapshots.forEach(s => events.push({
+      ts: s.captured_at || s.created_at || '',
+      kind: 'snapshot',
+      title: s.title || 'Asset snapshot',
+    }));
+    events.sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
+    bd.innerHTML = events.length ? `
+      <ul class="asset-history">
+        ${events.map(ev => `
+          <li class="hist-row">
+            <span class="hist-ts mono">${assetDrawerEscape(String(ev.ts).slice(0, 10) || '—')}</span>
+            <span class="hist-kind ${assetDrawerEscape(ev.kind)}">${assetDrawerEscape(ev.kind.toUpperCase())}</span>
+            <span class="hist-label">${assetDrawerEscape(ev.title)}</span>
+          </li>
+        `).join('')}
+      </ul>
+    ` : `<div style="padding:24px;text-align:center;color:var(--fg-3);">No history events recorded for this asset.</div>`;
+  } else if (tab === 'baselines') {
+    const renderBaselines = (snapshots) => {
+      if (!snapshots || !snapshots.length) {
+        bd.innerHTML = `<div style="padding:24px;text-align:center;color:var(--fg-3);">No baselines captured for this asset.</div>`;
+        return;
+      }
+      bd.innerHTML = snapshots.map(s => {
+        const counts = s.findingCounts || {};
+        const score = s.healthScore == null ? '—' : Number(s.healthScore);
+        const cls = (typeof score === 'number' && score < 40) ? 'critical' : (typeof score === 'number' && score < 70) ? 'attention' : '';
+        const capturedAt = s.captured_at ? String(s.captured_at).slice(0, 10) : '—';
+        return `
+          <div class="baseline-card ${cls}">
+            <div class="hd"><span class="title">${assetDrawerEscape(s.title || 'Asset snapshot')}</span><span class="ts mono">${assetDrawerEscape(capturedAt)}</span></div>
+            <div class="bd">
+              <div class="score">${assetDrawerEscape(String(score))}<span class="denom">/100</span></div>
+              <div class="counts">CRIT ${Number(counts.critical || 0)} · HIGH ${Number(counts.high || 0)} · MED ${Number(counts.medium || 0)} · LOW ${Number(counts.low || 0)}</div>
+            </div>
+            ${s.summary ? `<div class="summary">${assetDrawerEscape(s.summary)}</div>` : ''}
+          </div>
+        `;
+      }).join('');
+    };
+    const cached = Array.isArray(asset.snapshots) ? asset.snapshots : (currentAssetDrawer.snapshots || null);
+    if (cached) {
+      renderBaselines(cached);
+    } else {
+      bd.innerHTML = `<div style="padding:24px;text-align:center;color:var(--fg-3);">Loading baselines…</div>`;
+      fetch(`/api/assets/${encodeURIComponent(asset.id)}/snapshots`).then(r => r.ok ? r.json() : []).catch(() => []).then(list => {
+        const arr = Array.isArray(list) ? list : [];
+        currentAssetDrawer.snapshots = arr;
+        renderAssetDrawerHeader();
+        renderBaselines(arr);
+      });
+    }
+  } else if (tab === 'scopes') {
+    const membership = scopes.filter(s => scopeIncludesAsset(s, asset));
+    bd.innerHTML = membership.length
+      ? membership.map(s => `
+          <div class="scope-membership-row">
+            <span class="name">${assetDrawerEscape(s.name)}</span>
+            <span class="expires">${s.expires_at ? `expires ${assetDrawerEscape(String(s.expires_at).slice(0,10))}` : 'no expiry'}</span>
+            <div class="actions">
+              ${(s.allowed_actions||[]).map(a => `<span class="chip allow">${assetDrawerEscape(a)}</span>`).join('')}
+              ${(s.blocked_actions||[]).map(a => `<span class="chip block">${assetDrawerEscape(a)}</span>`).join('')}
+            </div>
+          </div>
+        `).join('')
+      : `<div style="padding:24px;text-align:center;color:var(--fg-3);">This asset is not currently in any active scope.</div>`;
+  }
+}
+
+function activateAssetDrawerTab(tab) {
+  document.querySelectorAll('#asset-drawer-tabs .drawer-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+}
+
+function scopeIncludesAsset(scope, asset) {
+  const t = scope.targets || scope.raw_targets || {};
+  if ((t.assetIds || []).includes(asset.id)) return true;
+  const addrs = (asset.addresses || []).map(a => (a.value || '').toLowerCase());
+  const name = (asset.name || '').toLowerCase();
+  for (const k of ['domains','hosts','urls','cidrs']) {
+    for (const v of (t[k] || [])) {
+      const val = String(v).toLowerCase();
+      if (addrs.some(a => a.includes(val) || val.includes(a))) return true;
+      if (name && (name.includes(val) || val.includes(name))) return true;
+    }
+  }
+  return false;
+}
+
+// Wire it up — called from ScopePage.init()
+function bindAssetDrawerOnce() {
+  if (window.__assetDrawerBound) return;
+  window.__assetDrawerBound = true;
+  // Close handlers
+  document.querySelectorAll('[data-asset-drawer-close]').forEach(el => el.addEventListener('click', closeAssetDrawer));
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && currentAssetDrawer) closeAssetDrawer();
+  });
+  // Tab clicks
+  document.getElementById('asset-drawer-tabs')?.addEventListener('click', e => {
+    const tab = e.target.closest('.drawer-tab')?.dataset.tab;
+    if (!tab) return;
+    activateAssetDrawerTab(tab);
+    renderAssetDrawerTab(tab);
+  });
+  // Asset row click (delegate from #assets-mode-panel)
+  document.getElementById('assets-mode-panel')?.addEventListener('click', e => {
+    const row = e.target.closest('[data-asset-id]');
+    if (!row) return;
+    // Only trigger drawer when clicking the asset list row itself
+    if (!row.classList.contains('asset-list-item')) return;
+    e.preventDefault();
+    openAssetDrawer(row.dataset.assetId);
+  });
+  // Footer actions
+  document.getElementById('asset-drawer-audit-btn')?.addEventListener('click', () => {
+    if (!currentAssetDrawer) return;
+    window.Router?.navigate?.('chat');
+    closeAssetDrawer();
+  });
+  document.getElementById('asset-drawer-export-btn')?.addEventListener('click', () => {
+    if (!currentAssetDrawer) return;
+    const blob = new Blob([JSON.stringify(currentAssetDrawer.asset, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${currentAssetDrawer.asset.name || 'asset'}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  document.getElementById('asset-drawer-archive-btn')?.addEventListener('click', async () => {
+    if (!currentAssetDrawer) return;
+    if (!confirm(`Archive asset "${currentAssetDrawer.asset.name}"?`)) return;
+    await fetch(`/api/assets/${encodeURIComponent(currentAssetDrawer.asset.id)}`, { method: 'DELETE' }).catch(() => null);
+    closeAssetDrawer();
+    if (window.ScopePage && typeof window.ScopePage.loadAll === 'function') window.ScopePage.loadAll();
+  });
+}
+
+// Local helpers (prefixed to avoid name collisions with ScopePage methods)
+function assetDrawerEscape(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function assetDrawerTimeAgo(iso) {
+  if (!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (isNaN(ms)) return '';
+  const d = ms / 60000;
+  return d < 60 ? `${Math.round(d)}m ago` : d < 1440 ? `${Math.round(d/60)}h ago` : `${Math.round(d/1440)}d ago`;
+}
+function assetDrawerSevClass(s) { return ({ critical: 'crit', high: 'high', medium: 'med', low: 'low', info: 'info' })[s] || 'info'; }

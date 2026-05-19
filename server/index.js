@@ -5,6 +5,7 @@ import cors from 'cors';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
+import { networkInterfaces } from 'os';
 
 import config, { loadPersistedSettings } from './config.js';
 import {
@@ -393,39 +394,69 @@ wss.on('connection', (ws) => {
   });
 });
 
+// ─── Boot panel ──────────────────────────────────────────────────────────────
+// Kit-aligned startup output: hairline rule, cyan brand, labelled rows for
+// workspace · model · api key · local / network / websocket URLs. Auto-fits to
+// process.stdout.columns (clamped 60..96) and auto-detects LAN IPv4 interfaces
+// via os.networkInterfaces() so no `<YOUR-LAN-IP>` placeholders ship anymore.
+// ANSI is disabled when stdout is not a TTY (piped logs stay plain text).
+function printBootPanel() {
+  const useAnsi = process.stdout.isTTY === true;
+  const c = useAnsi
+    ? { dim: (s) => `\x1b[90m${s}\x1b[0m`, cy: (s) => `\x1b[36m${s}\x1b[0m`, b: (s) => `\x1b[1m${s}\x1b[0m` }
+    : { dim: (s) => s, cy: (s) => s, b: (s) => s };
+
+  const cols = Math.min(96, Math.max(60, process.stdout.columns || 80));
+  const rule = '─'.repeat(cols - 4);
+  const label = (k) => c.dim(k.padEnd(12));
+
+  const port = config.port;
+  const lan = Object.values(networkInterfaces())
+    .flat()
+    .filter((i) => i && i.family === 'IPv4' && !i.internal)
+    .map((i) => i.address);
+
+  const maskedKey = config.api.apiKey
+    ? `${c.dim('••••')}${config.api.apiKey.slice(-4)}`
+    : c.dim('not set');
+
+  const providerId = config.api.provider || 'custom';
+  const providerLabel = providerId === 'custom'
+    ? `custom · ${config.api.baseUrl}`
+    : `${providerId} · ${config.api.baseUrl}`;
+
+  const lines = [];
+  lines.push('');
+  lines.push('  ' + c.b(c.cy('PHANTOM SEC')) + c.dim('  Governed AI · Security-Ops Cockpit'));
+  lines.push('  ' + c.dim(rule));
+  lines.push('');
+  lines.push('  ' + label('workspace') + config.workspace);
+  lines.push('  ' + label('provider')  + providerLabel);
+  lines.push('  ' + label('model')     + (config.api.model || c.dim('unset')));
+  lines.push('  ' + label('api key')   + maskedKey);
+  lines.push('');
+  lines.push('  ' + label('local')     + c.cy(`http://localhost:${port}`));
+  if (lan.length) {
+    lines.push('  ' + label('network') + c.cy(`http://${lan[0]}:${port}`));
+    for (let i = 1; i < lan.length; i++) {
+      lines.push('  ' + ' '.repeat(12) + c.cy(`http://${lan[i]}:${port}`));
+    }
+  }
+  lines.push('  ' + label('websocket') + c.cy(`ws://localhost:${port}/ws`));
+  lines.push('  ' + c.dim(rule));
+  lines.push('');
+
+  console.log(lines.join('\n'));
+}
+
 // Start server
 server.listen(config.port, '0.0.0.0', () => {
-  
-  console.log(`
-╔══════════════════════════════════════════════╗
-║                                              ║
-║     ██████╗ ██╗  ██╗ █████╗ ███╗   ██╗      ║
-║     ██╔══██╗██║  ██║██╔══██╗████╗  ██║      ║
-║     ██████╔╝███████║███████║██╔██╗ ██║      ║
-║     ██╔═══╝ ██╔══██║██╔══██║██║╚██╗██║      ║
-║     ██║     ██║  ██║██║  ██║██║ ╚████║      ║
-║     ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝      ║
-║            ████████╗ ██████╗ ███╗   ███╗     ║
-║            ╚══██╔══╝██╔═══██╗████╗ ████║     ║
-║               ██║   ██║   ██║██╔████╔██║     ║
-║               ██║   ██║   ██║██║╚██╔╝██║     ║
-║               ██║   ╚██████╔╝██║ ╚═╝ ██║     ║
-║               ╚═╝    ╚═════╝ ╚═╝     ╚═╝     ║
-║                                              ║
-║   AI-Powered Pentesting Command Center       ║
-║   🌐 Local:   http://localhost:${String(config.port)}          ║
-║   📡 LAN:     http://<YOUR-LAN-IP>:${String(config.port)}     ║
-║   ⚡ WebSocket: ws://<YOUR-LAN-IP>:${String(config.port)}/ws  ║
-║   🔓 Unlimited Tool Iterations               ║
-║                                              ║
-╚══════════════════════════════════════════════╝
-  `);
-
+  printBootPanel();
 });
 
 // Graceful shutdown
 process.on('SIGINT', () => {
-  console.log('\n⚡ Shutting down PHANTOM...');
+  console.log('\n  shutting down PHANTOM...');
   closeDB();
   server.close();
   process.exit(0);

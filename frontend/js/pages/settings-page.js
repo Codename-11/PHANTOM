@@ -56,10 +56,13 @@ window.SettingsPage = {
   renderStaticPanels() {
     const presenter = window.SettingsPagePresenter;
     if (!presenter) return;
+    const providerId = document.getElementById('setting-provider-id')?.value;
+    const providerName = window.Settings?.providersById?.[providerId]?.name;
     const settings = {
       baseUrl: document.getElementById('setting-base-url')?.value,
       model: document.getElementById('setting-model')?.value,
       workspace: document.getElementById('setting-workspace')?.value,
+      providerName,
     };
     const general = document.getElementById('settings-general-overview');
     const behavior = document.getElementById('settings-behavior-overview');

@@ -15,6 +15,7 @@ window.GraphPage = {
   shouldFitNext: true,
   isPanning: false,
   panStart: null,
+  showBlocked: true,
 
   init() {
     document.getElementById('refresh-graph-btn')?.addEventListener('click', () => this.loadRuns(this.selectedRunId));
@@ -27,6 +28,16 @@ window.GraphPage = {
     document.getElementById('graph-replay-prev-btn')?.addEventListener('click', () => this.stepReplay(-1));
     document.getElementById('graph-replay-next-btn')?.addEventListener('click', () => this.stepReplay(1));
     document.getElementById('graph-replay-play-btn')?.addEventListener('click', () => this.toggleReplayPlayback());
+    document.getElementById('graph-blocked-chip')?.addEventListener('click', () => this.toggleBlockedFilter());
+    document.querySelectorAll('.graph-view-seg [data-graph-view]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const mode = button.dataset.graphView;
+        if (!mode) return;
+        const group = button.closest('.graph-view-seg');
+        if (group) group.querySelectorAll('[data-graph-view]').forEach(sibling => sibling.classList.toggle('pressed', sibling === button));
+        window.dispatchEvent(new CustomEvent('phantom:graph-view', { detail: { mode } }));
+      });
+    });
     window.addEventListener('resize', () => {
       if (window.Router?.current === 'graph' && this.graph) this.fitToView({ preserveSelection: true });
     });
@@ -39,6 +50,14 @@ window.GraphPage = {
     this.updateLiveIndicator();
     this.renderReplayControls();
     if (window.Router?.current === 'graph') setTimeout(() => this.loadRuns(this.selectedRunId), 0);
+  },
+
+  toggleBlockedFilter() {
+    this.showBlocked = !this.showBlocked;
+    const chip = document.getElementById('graph-blocked-chip');
+    const canvas = document.getElementById('graph-canvas');
+    if (chip) chip.classList.toggle('active', this.showBlocked);
+    if (canvas) canvas.classList.toggle('hide-blocked', !this.showBlocked);
   },
 
   presenter() {
@@ -102,10 +121,16 @@ window.GraphPage = {
     const current = this.runs.find(run => run.id === this.selectedRunId);
     const isLive = current && !['completed', 'failed', 'stopped'].includes(current.status);
     indicator.className = `graph-live-indicator ${isLive ? 'live' : this.followLive ? 'watching' : 'idle'}`;
-    if (isLive && this.followLive) indicator.textContent = '● Live · following';
-    else if (isLive) indicator.textContent = '● Live · paused';
-    else if (this.followLive) indicator.textContent = this.liveRunId ? 'Watching next event' : 'Watching live';
-    else indicator.textContent = 'Historical';
+    let label = 'Historical';
+    if (isLive && this.followLive) label = '● Live · following';
+    else if (isLive) label = '● Live · paused';
+    else if (this.followLive) label = this.liveRunId ? 'Watching next event' : 'Watching live';
+    if (isLive) {
+      const scanIcon = window.StateIcons?.scanning?.(16) || '';
+      indicator.innerHTML = `<span class="live-scan-anim">${scanIcon}</span>${label}`;
+    } else {
+      indicator.textContent = label;
+    }
   },
 
   async loadRuns(selectRunId = this.selectedRunId) {
@@ -318,12 +343,17 @@ window.GraphPage = {
       stats.textContent = `${this.graph.stats?.nodes || this.graph.nodes.length} nodes · ${this.graph.stats?.edges || this.graph.edges.length} edges · ${this.graph.stats?.events || 0} events · ${this.graph.stats?.artifacts || 0} artifacts${blocked ? ` · ${blocked} blocked` : ''}${replayText}${liveText}`;
     }
 
+    const targetTypeById = new Map(layout.nodes.map(node => [node.id, node.type]));
     const edgeMarkup = layout.edges.map((edge) => {
       if (!edge.path) return '';
       const id = edge.id || `${edge.type}:${edge.source}->${edge.target}`;
       const related = !this.selectedNodeId || edge.source === this.selectedNodeId || edge.target === this.selectedNodeId;
       const replayActive = replayEdgeIds.has(id) || edge.eventId === step?.eventId;
-      return `<path class="graph-edge ${this.escapeAttribute(edge.type)} ${edge.type === 'blocked_by_policy' ? 'blocked' : ''} ${replayActive ? 'replay-active' : ''} ${related || replayActive ? 'related' : 'dimmed'}" d="${this.escapeAttribute(edge.path)}" marker-end="url(#graph-arrow)"><title>${this.escapeHtml(this.presenter().edgeExplanation(edge))}</title></path>`;
+      const targetType = targetTypeById.get(edge.target);
+      const isBlocked = edge.type === 'blocked_by_policy' || edge.type === 'blocked_by';
+      const isCrit = edge.severity === 'crit' || edge.type === 'crit' || targetType === 'finding';
+      const markerId = isBlocked ? 'graph-arrow-blocked' : isCrit ? 'graph-arrow-crit' : 'graph-arrow';
+      return `<path class="graph-edge ${this.escapeAttribute(edge.type)} ${isBlocked ? 'blocked blocked-by-policy' : ''} ${isCrit ? 'crit' : ''} ${replayActive ? 'replay-active' : ''} ${related || replayActive ? 'related' : 'dimmed'}" d="${this.escapeAttribute(edge.path)}" marker-end="url(#${markerId})"><title>${this.escapeHtml(this.presenter().edgeExplanation(edge))}</title></path>`;
     }).join('');
 
     const edgeLabels = layout.edges.map((edge) => {
@@ -344,7 +374,7 @@ window.GraphPage = {
       const label = this.presenter().wrapNodeLabel(node.label || node.id, { maxLineLength: 28, maxLines: 2 });
       return `
       <g class="graph-node ${this.escapeAttribute(node.type)} ${this.escapeAttribute(node.status || '')} ${node.id === this.selectedNodeId ? 'selected' : ''} ${replayActive ? 'replay-active' : ''} ${related ? 'related' : 'dimmed'}" data-node-id="${this.escapeAttribute(node.id)}" transform="translate(${node.x}, ${node.y})" tabindex="0" role="button" aria-label="${this.escapeAttribute(label.title)}">
-        <rect rx="12" width="${layout.nodeWidth}" height="${layout.nodeHeight}"></rect>
+        <rect rx="4" ry="4" width="${layout.nodeWidth}" height="${layout.nodeHeight}"></rect>
         <circle cx="18" cy="29" r="7"></circle>
         <text x="34" y="20" class="graph-node-type">${this.escapeHtml(this.nodeTypeLabel(node))}</text>
         <text x="34" y="38" class="graph-node-label">${label.lines.map((line, index) => `<tspan x="34" dy="${index === 0 ? 0 : 15}">${this.escapeHtml(line)}</tspan>`).join('')}</text>
@@ -355,10 +385,20 @@ window.GraphPage = {
     canvas.innerHTML = `
       <svg class="graph-svg" aria-label="Execution graph" data-scale="${this.transform.scale.toFixed(2)}">
         <defs>
-          <marker id="graph-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z"></path>
+          <pattern id="phantom-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(255,255,255,0.025)" stroke-width="1"></path>
+          </pattern>
+          <marker id="graph-arrow" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L6,4 L0,8 z" fill="var(--cy-2)"></path>
+          </marker>
+          <marker id="graph-arrow-blocked" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L6,4 L0,8 z" fill="var(--policy)"></path>
+          </marker>
+          <marker id="graph-arrow-crit" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L6,4 L0,8 z" fill="var(--sev-crit)"></path>
           </marker>
         </defs>
+        <rect class="graph-grid-bg" x="0" y="0" width="100%" height="100%" fill="url(#phantom-grid)"></rect>
         <rect class="graph-pan-surface" x="0" y="0" width="100%" height="100%"></rect>
         <g class="graph-stage" transform="${this.transformString()}">
           <rect class="graph-bounds" x="0" y="0" width="${layout.bounds.width}" height="${layout.bounds.height}" rx="18"></rect>

@@ -1,10 +1,22 @@
 /**
  * Settings panel logic
- * Added: AI Doctor — temporary AI to diagnose & fix system issues
+ *
+ * Provider model: the server exposes a registry of OpenAI-compatible
+ * endpoints via GET /api/providers. When the user picks one from the
+ * dropdown, the base URL + key hint + model suggestions all snap to the
+ * registry's defaults — but the Advanced section still lets them override
+ * the base URL / bearer token for self-hosted or proxy endpoints.
+ *
+ * Hermes Proxy is the default (Nous Research 0.14.0 — local OAuth proxy
+ * at http://127.0.0.1:8645/v1). Constants kept as fallbacks for code
+ * paths that haven't fetched /api/providers yet.
  */
 window.Settings = {
-  HERMES_PROXY_URL: 'http://127.0.0.1:8648/v1',
+  HERMES_PROXY_URL: 'http://127.0.0.1:8645/v1',
   HERMES_PROXY_TOKEN: 'hermes-proxy',
+  providers: [],
+  providersById: {},
+  defaultProviderId: 'hermes',
   panel: null,
   isOpen: false,
 
@@ -29,7 +41,12 @@ window.Settings = {
       tempValue.textContent = tempSlider.value;
     });
 
-    // Hermes proxy model route selector
+    // Provider dropdown — populated from /api/providers in loadProviders()
+    document.getElementById('setting-provider-id')?.addEventListener('change', (e) => {
+      this.applyProvider(e.target.value);
+    });
+
+    // Model dropdown — chooses a specific model under the selected provider
     document.getElementById('setting-provider-preset')?.addEventListener('change', (e) => {
       this.applyModelPreset(e.target.value);
     });
@@ -48,6 +65,9 @@ window.Settings = {
 
     // Test connection
     document.getElementById('test-connection').addEventListener('click', () => this.testConnection());
+
+    // Refresh model list from /v1/models (dynamic discovery)
+    document.getElementById('refresh-models')?.addEventListener('click', () => this.refreshModels());
 
     // Save settings
     document.getElementById('save-settings').addEventListener('click', () => this.save());
@@ -77,32 +97,225 @@ window.Settings = {
     this.isOpen = false;
   },
 
+  async loadProviders() {
+    try {
+      const res = await fetch('/api/providers');
+      const data = await res.json();
+      this.providers = data.providers || [];
+      this.providersById = Object.fromEntries(this.providers.map(p => [p.id, p]));
+      this.defaultProviderId = data.default || 'hermes';
+      this.populateProviderDropdown();
+    } catch (err) {
+      console.error('Failed to load providers:', err);
+    }
+  },
+
+  populateProviderDropdown() {
+    const select = document.getElementById('setting-provider-id');
+    if (!select || !this.providers.length) return;
+    select.innerHTML = this.providers
+      .map((p) => {
+        const label = p.unavailable ? `${p.name}` : p.name;
+        const disabled = p.unavailable ? ' disabled' : '';
+        return `<option value="${p.id}"${disabled}>${label}</option>`;
+      })
+      .join('');
+  },
+
+  populateModelSuggestions(providerId, liveModels = null) {
+    const provider = this.providersById[providerId];
+    const preset = document.getElementById('setting-provider-preset');
+    const datalist = document.getElementById('model-suggestions');
+    if (!provider) return;
+    // Prefer live model list when caller supplies one — it reflects what
+    // the endpoint actually serves, including models added after this
+    // build. Fall back to the static suggestedModels in the registry.
+    const models = (Array.isArray(liveModels) && liveModels.length)
+      ? liveModels.map(m => (typeof m === 'string' ? m : m?.id)).filter(Boolean)
+      : (provider.suggestedModels || []);
+    if (preset) {
+      preset.innerHTML = models.map(m => `<option value="${m}">${m}</option>`).join('')
+        + '<option value="custom">Custom model slug…</option>';
+    }
+    if (datalist) {
+      datalist.innerHTML = models.map(m => `<option value="${m}">`).join('');
+    }
+  },
+
+  /**
+   * Hit /api/models to pull the live model list from the active provider's
+   * /v1/models endpoint. Updates the dropdown + hint text in place. Safe
+   * to call repeatedly; the server falls back to suggestedModels when the
+   * endpoint is unreachable (local Ollama not running, missing API key,
+   * etc.) so this never empties the dropdown.
+   */
+  async refreshModels() {
+    const providerId = document.getElementById('setting-provider-id')?.value || this.defaultProviderId;
+    const hint = document.getElementById('model-source-hint');
+    const dot = document.querySelector('.proxy-card .proxy-dot');
+    if (hint) hint.textContent = 'Probing endpoint for available models…';
+    if (dot) { dot.classList.remove('reachable', 'unreachable'); dot.classList.add('probing'); }
+
+    try {
+      const res = await fetch('/api/models', { cache: 'no-store' });
+      const data = await res.json();
+      const models = (data.models || []).map(m => (typeof m === 'string' ? m : m.id)).filter(Boolean);
+      this.populateModelSuggestions(providerId, models);
+
+      // Preserve current model selection if it's in the live list, else
+      // snap to the first live model.
+      const modelInput = document.getElementById('setting-model');
+      const preset = document.getElementById('setting-provider-preset');
+      if (modelInput && models.length) {
+        if (!models.includes(modelInput.value)) {
+          modelInput.value = models[0];
+          if (preset) preset.value = models[0];
+        }
+      }
+
+      if (hint) {
+        if (data.ok) {
+          hint.textContent = `Live · ${models.length} models discovered from the active endpoint.`;
+          hint.className = 'model-source-hint live';
+        } else {
+          hint.textContent = `Static · ${models.length} suggestions (endpoint unreachable: ${data.error || 'unknown'}).`;
+          hint.className = 'model-source-hint fallback';
+        }
+      }
+      if (dot) {
+        dot.classList.remove('probing', 'reachable', 'unreachable');
+        dot.classList.add(data.ok ? 'reachable' : 'unreachable');
+      }
+    } catch (err) {
+      if (hint) {
+        hint.textContent = `Static · could not contact server (${err.message}).`;
+        hint.className = 'model-source-hint fallback';
+      }
+      if (dot) { dot.classList.remove('probing', 'reachable'); dot.classList.add('unreachable'); }
+    }
+  },
+
   async load() {
     try {
+      await this.loadProviders();
       const res = await fetch('/api/settings');
       const data = await res.json();
 
-      document.getElementById('setting-base-url').value = data.baseUrl || this.HERMES_PROXY_URL;
-      document.getElementById('setting-api-key').value = data.apiKeySet ? '••••••••' : this.HERMES_PROXY_TOKEN;
-      document.getElementById('setting-model').value = data.model || 'grok-4.3';
+      const providerId = data.provider || this.defaultProviderId;
+      const provider = this.providersById[providerId] || {};
+      const providerBaseUrl = provider.baseUrl || this.HERMES_PROXY_URL;
+
+      const providerSelect = document.getElementById('setting-provider-id');
+      if (providerSelect) providerSelect.value = providerId;
+      this.populateModelSuggestions(providerId);
+
+      document.getElementById('setting-base-url').value = data.baseUrl || providerBaseUrl;
+      document.getElementById('setting-api-key').value = data.apiKeySet ? '••••••••' : (provider.keyOptional ? this.HERMES_PROXY_TOKEN : '');
+      document.getElementById('setting-model').value = data.model || (provider.suggestedModels?.[0] || 'grok-4.3');
       document.getElementById('setting-temperature').value = data.temperature || 0.7;
       document.getElementById('temperature-value').textContent = data.temperature || 0.7;
       document.getElementById('setting-max-tokens').value = data.maxTokens || 8192;
       document.getElementById('setting-workspace').value = data.workspace || '';
-      this.syncPresetFromModel(data.model || 'grok-4.3');
-      document.getElementById('proxy-endpoint-label').textContent = data.baseUrl || this.HERMES_PROXY_URL;
-      document.getElementById('quick-endpoint-label').textContent = data.baseUrl || this.HERMES_PROXY_URL;
+      this.syncPresetFromModel(data.model || (provider.suggestedModels?.[0] || 'grok-4.3'));
+      this.updateProviderChrome(providerId, data.baseUrl || providerBaseUrl);
       document.getElementById('quick-model-label').textContent = data.model || 'No Model';
 
       // Update model badge
       document.getElementById('current-model').textContent = data.model || 'No Model';
+
+      // Kick off dynamic model discovery — non-blocking so the settings
+      // panel renders immediately even if /v1/models is slow.
+      this.refreshModels();
     } catch (err) {
       console.error('Failed to load settings:', err);
     }
   },
 
+  /**
+   * Surface the selected provider in the proxy card chrome + the quick
+   * drawer. Called on initial load and on provider changes so the small
+   * chrome labels (provider name, endpoint URL) stay consistent.
+   */
+  updateProviderChrome(providerId, baseUrl) {
+    const provider = this.providersById[providerId];
+    const url = baseUrl || provider?.baseUrl || this.HERMES_PROXY_URL;
+    const name = provider?.name || 'Custom OpenAI-compatible';
+
+    document.getElementById('proxy-endpoint-label').textContent = url;
+    document.getElementById('quick-endpoint-label').textContent = url;
+    const nameEl = document.getElementById('proxy-provider-name');
+    if (nameEl) nameEl.textContent = name;
+    const descEl = document.getElementById('setting-provider-desc');
+    if (descEl && provider?.description) descEl.textContent = provider.description;
+    const keyHintEl = document.getElementById('setting-api-key-hint');
+    if (keyHintEl && provider) {
+      keyHintEl.textContent = provider.keyOptional
+        ? 'Any value works — this provider doesn\'t check the bearer token.'
+        : `Required. Get a key from ${provider.docsUrl || 'the provider\'s API console'}.`;
+    }
+    const baseHintEl = document.getElementById('setting-base-url-hint');
+    if (baseHintEl && provider) {
+      baseHintEl.textContent = provider.baseUrl
+        ? `Auto-filled from ${provider.name}. Override here for self-hosted endpoints.`
+        : 'Enter the OpenAI-compatible base URL (e.g. https://api.example.com/v1).';
+    }
+    const apiKeyInput = document.getElementById('setting-api-key');
+    if (apiKeyInput && provider) {
+      apiKeyInput.placeholder = provider.keyHint || 'sk-…';
+    }
+  },
+
+  /**
+   * React to a provider dropdown change. Snaps the base URL + key hint +
+   * model suggestions to the new provider's defaults. Preserves whatever
+   * the user typed into the API key field if it's a real value (not the
+   * masked ••• placeholder).
+   */
+  applyProvider(providerId) {
+    const provider = this.providersById[providerId];
+    if (!provider) return;
+    if (provider.unavailable) {
+      // Native-schema providers aren't wired yet; revert + hint.
+      const select = document.getElementById('setting-provider-id');
+      const currentBase = document.getElementById('setting-base-url').value;
+      const fallback = this.providers.find(p => p.baseUrl === currentBase)?.id || this.defaultProviderId;
+      if (select) select.value = fallback;
+      const descEl = document.getElementById('setting-provider-desc');
+      if (descEl) descEl.textContent = `${provider.name} requires a native-schema adapter that isn't wired yet — pick Hermes or OpenRouter to reach this model.`;
+      return;
+    }
+    if (provider.baseUrl) {
+      document.getElementById('setting-base-url').value = provider.baseUrl;
+    }
+    const apiKeyInput = document.getElementById('setting-api-key');
+    if (apiKeyInput) {
+      const current = apiKeyInput.value;
+      const isPlaceholder = !current || current.startsWith('••') || current === 'hermes-proxy' || current === 'ollama' || current === 'lm-studio';
+      if (isPlaceholder) {
+        apiKeyInput.value = provider.keyOptional ? this.HERMES_PROXY_TOKEN : '';
+      }
+    }
+    this.populateModelSuggestions(providerId);
+    const firstModel = provider.suggestedModels?.[0];
+    if (firstModel) {
+      const modelInput = document.getElementById('setting-model');
+      if (modelInput) modelInput.value = firstModel;
+      const preset = document.getElementById('setting-provider-preset');
+      if (preset) preset.value = firstModel;
+    }
+    this.updateProviderChrome(providerId, provider.baseUrl);
+
+    // Persist the new provider so /api/models hits the right endpoint,
+    // then refresh the live model list. We save first because /api/models
+    // reads from config (which only updates on save) — saving here is
+    // intentional UX: changing providers is a meaningful action.
+    this.save().then(() => this.refreshModels());
+  },
+
   async save() {
+    const providerId = document.getElementById('setting-provider-id')?.value || this.defaultProviderId;
     const settings = {
+      provider: providerId,
       baseUrl: document.getElementById('setting-base-url').value || this.HERMES_PROXY_URL,
       model: document.getElementById('setting-model').value || 'grok-4.3',
       temperature: parseFloat(document.getElementById('setting-temperature').value),
@@ -129,8 +342,7 @@ window.Settings = {
 
       if (res.ok) {
         document.getElementById('current-model').textContent = settings.model || 'No Model';
-        document.getElementById('proxy-endpoint-label').textContent = settings.baseUrl;
-        document.getElementById('quick-endpoint-label').textContent = settings.baseUrl;
+        this.updateProviderChrome(providerId, settings.baseUrl);
         document.getElementById('quick-model-label').textContent = settings.model || 'No Model';
 
         const btn = document.getElementById('save-settings');

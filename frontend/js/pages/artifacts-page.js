@@ -5,10 +5,23 @@ window.ArtifactsPage = {
 
   init() {
     document.getElementById('refresh-artifacts-btn')?.addEventListener('click', () => this.loadArtifacts());
+    // Legacy <select id="artifact-type-filter"> support — kept for backward compatibility if any embed still uses it.
     document.getElementById('artifact-type-filter')?.addEventListener('change', (event) => {
       this.activeType = event.target.value;
       this.loadArtifacts(null);
     });
+    // Filter-chip row (kit alignment pass 6).
+    const chipRow = document.getElementById('artifacts-filter-chips');
+    if (chipRow) {
+      chipRow.addEventListener('click', (event) => {
+        const chip = event.target.closest('[data-artifact-filter]');
+        if (!chip) return;
+        const value = chip.dataset.artifactFilter;
+        this.activeType = value === 'all' ? '' : value;
+        chipRow.querySelectorAll('[data-artifact-filter]').forEach((c) => c.classList.toggle('active', c === chip));
+        this.loadArtifacts(null);
+      });
+    }
 
     window.addEventListener('phantom:route', (event) => {
       if (event.detail?.route === 'artifacts') this.loadArtifacts();
@@ -42,6 +55,8 @@ window.ArtifactsPage = {
 
   renderArtifactsList() {
     const list = document.getElementById('artifacts-list');
+    const countEl = document.getElementById('art-ct-all');
+    if (countEl) countEl.textContent = String(this.artifacts.length);
     if (!this.artifacts.length) {
       list.innerHTML = '<div class="empty-msg">No artifacts yet. Run outputs and previews will appear here.</div>';
       return;

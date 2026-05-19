@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import config, { updateConfig } from '../config.js';
 import { resetClient, testConnection, processMessage } from '../ai/llm-client.js';
+import { listProvidersPublic, getProvider, DEFAULT_PROVIDER_ID } from '../ai/providers.js';
 import {
   createConversation, getConversations, getConversation, deleteConversation,
   updateConversationTitle, getMessages,
@@ -49,10 +50,23 @@ const router = Router();
 // Multer for file uploads (skills .zip)
 const upload = multer({ dest: '/tmp/phantom-uploads/', limits: { fileSize: 50 * 1024 * 1024 } });
 
+// ─── Providers ───
+// Returns the registry of OpenAI-compatible providers PHANTOM can route to.
+// Used by the Settings UI to populate the provider dropdown. No secrets are
+// returned — only public metadata (baseUrl is a default suggestion, not a key).
+router.get('/providers', (req, res) => {
+  res.json({
+    default: DEFAULT_PROVIDER_ID,
+    providers: listProvidersPublic(),
+  });
+});
+
 // ─── Settings ───
 router.get('/settings', (req, res) => {
   const settings = getAllSettings();
+  const providerId = settings.api_provider || config.api.provider || DEFAULT_PROVIDER_ID;
   res.json({
+    provider: providerId,
     baseUrl: settings.api_base_url || config.api.baseUrl,
     apiKey: settings.api_key ? '••••••••' + settings.api_key.slice(-4) : '',
     apiKeySet: !!settings.api_key || !!config.api.apiKey,
@@ -65,8 +79,19 @@ router.get('/settings', (req, res) => {
 });
 
 router.put('/settings', (req, res) => {
-  const { baseUrl, apiKey, model, temperature, maxTokens, sudoPassword, workspace } = req.body;
+  const { provider, baseUrl, apiKey, model, temperature, maxTokens, sudoPassword, workspace } = req.body;
 
+  // Provider must be handled before baseUrl so explicit baseUrl wins, but
+  // the auto-derived URL from the provider registry takes effect when the
+  // client only sends a provider change.
+  if (provider) {
+    const known = getProvider(provider);
+    setSetting('api_provider', known.id);
+    // If the caller didn't override baseUrl, persist the registry's URL too
+    // so subsequent GETs reflect the routed endpoint.
+    if (!baseUrl && known.baseUrl) setSetting('api_base_url', known.baseUrl);
+    updateConfig({ provider: known.id, ...(baseUrl ? {} : {}) });
+  }
   if (baseUrl) { setSetting('api_base_url', baseUrl); updateConfig({ baseUrl }); }
   if (apiKey && apiKey !== '••••••••') { setSetting('api_key', apiKey); updateConfig({ apiKey }); }
   if (model) { setSetting('api_model', model); updateConfig({ model }); }
@@ -82,6 +107,60 @@ router.put('/settings', (req, res) => {
 router.post('/settings/test', async (req, res) => {
   const result = await testConnection();
   res.json(result);
+});
+
+// ─── Dynamic model discovery ───
+// Fetches the configured provider's OpenAI-compatible /v1/models endpoint.
+// Used by Settings to populate the model dropdown from a live list rather
+// than the static `suggestedModels` baked into the registry.
+//
+// Falls back to the registry's suggestedModels if the endpoint is
+// unreachable, the key is missing, or the response shape doesn't match
+// the OpenAI spec. Failure is *expected* for local-only endpoints
+// (Ollama / LM Studio when the daemon isn't running) and for endpoints
+// that don't implement /v1/models (some self-hosted shims).
+router.get('/models', async (req, res) => {
+  const baseUrl = (config.api.baseUrl || '').replace(/\/+$/, '');
+  const apiKey = config.api.apiKey || '';
+  if (!baseUrl) {
+    return res.json({ ok: false, error: 'No base URL configured', models: [] });
+  }
+
+  // Resolve fallback suggestions from the registry for the active provider.
+  const providerId = config.api.provider;
+  const provider = providerId ? getProvider(providerId) : null;
+  const fallback = (provider?.suggestedModels || []).map((id) => ({ id, source: 'suggested' }));
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const headers = { 'Content-Type': 'application/json' };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+    const r = await fetch(`${baseUrl}/models`, { headers, signal: controller.signal });
+    clearTimeout(timer);
+    if (!r.ok) {
+      return res.json({
+        ok: false,
+        error: `HTTP ${r.status}`,
+        models: fallback,
+        source: 'fallback',
+      });
+    }
+    const data = await r.json();
+    // OpenAI spec: { object: 'list', data: [{ id, object: 'model', ... }] }
+    // Some shims return a bare array instead of {data: [...]}.
+    const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
+    const models = list
+      .map((m) => (typeof m === 'string' ? { id: m } : { id: m?.id, owned_by: m?.owned_by, created: m?.created }))
+      .filter((m) => m.id);
+    if (!models.length) {
+      return res.json({ ok: false, error: 'No models in response', models: fallback, source: 'fallback' });
+    }
+    res.json({ ok: true, models, source: 'live', baseUrl, provider: providerId });
+  } catch (err) {
+    const reason = err?.name === 'AbortError' ? 'timeout' : (err?.message || 'unreachable');
+    res.json({ ok: false, error: reason, models: fallback, source: 'fallback' });
+  }
 });
 
 // ─── Prompt Preview + Profiles ───

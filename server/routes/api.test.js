@@ -41,6 +41,23 @@ describe('API Routes Integration', () => {
     assert.ok(data[0].name, 'Tool should have a name');
   });
 
+  test('GET /api/providers returns the OpenAI-compatible registry with Hermes as default', async () => {
+    const res = await fetch(`${baseUrl}/providers`);
+    assert.strictEqual(res.status, 200);
+    const data = await res.json();
+    assert.strictEqual(data.default, 'hermes', 'default provider should be hermes');
+    assert.ok(Array.isArray(data.providers), 'providers should be an array');
+    const hermes = data.providers.find(p => p.id === 'hermes');
+    assert.ok(hermes, 'hermes provider must exist in the registry');
+    assert.strictEqual(hermes.baseUrl, 'http://127.0.0.1:8645/v1', 'hermes baseUrl must match the 0.14.0 canonical port');
+    assert.strictEqual(hermes.keyOptional, true, 'hermes bearer token is optional (proxy attaches real creds)');
+    // Every wired provider claims OpenAI-compatible OR is flagged unavailable
+    for (const p of data.providers) {
+      assert.ok(p.openaiCompatible || p.unavailable,
+        `provider ${p.id} must be openaiCompatible or marked unavailable`);
+    }
+  });
+
   test('Conversation CRUD operations', async () => {
     // Create
     let res = await fetch(`${baseUrl}/conversations`, {

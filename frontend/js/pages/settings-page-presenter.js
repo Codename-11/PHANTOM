@@ -9,13 +9,19 @@
   }
 
   function renderGeneralOverview(settings = {}) {
-    const baseUrl = settings.baseUrl || 'http://127.0.0.1:8648/v1';
+    const baseUrl = settings.baseUrl || 'http://127.0.0.1:8645/v1';
     const model = settings.model || 'grok-4.3';
     const workspace = settings.workspace || 'workspace/';
+    // Provider name comes from /api/providers when available; otherwise infer
+    // from the URL (Hermes proxy at 8645 vs. custom OpenAI-compatible).
+    const providerName = settings.providerName
+      || (baseUrl.includes('127.0.0.1:8645') || baseUrl.includes('localhost:8645')
+        ? 'Hermes Proxy'
+        : 'Custom OpenAI-compatible endpoint');
     return `
       <div class="settings-card-grid">
         <article class="settings-info-card"><p class="eyebrow">Runtime</p><h3>${escapeHtml(model)}</h3><p>Active model used for new PHANTOM runs. Change it from the Models tab.</p></article>
-        <article class="settings-info-card"><p class="eyebrow">Provider route</p><h3>${escapeHtml(baseUrl.includes('8648') ? 'Hermes routed proxy' : 'Custom OpenAI-compatible endpoint')}</h3><p><code>${escapeHtml(baseUrl)}</code></p></article>
+        <article class="settings-info-card"><p class="eyebrow">Provider route</p><h3>${escapeHtml(providerName)}</h3><p><code>${escapeHtml(baseUrl)}</code></p></article>
         <article class="settings-info-card"><p class="eyebrow">Workspace</p><h3>Run artifacts</h3><p><code>${escapeHtml(workspace)}</code></p></article>
         <article class="settings-info-card"><p class="eyebrow">Safety</p><h3>Secrets redacted</h3><p>API keys, credential references, and prompt snapshots are shown as <code>[REDACTED]</code> or masked values.</p></article>
       </div>`;

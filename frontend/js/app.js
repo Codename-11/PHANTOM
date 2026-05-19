@@ -7,6 +7,37 @@
 (function() {
   'use strict';
 
+  // ─── Platform-aware modifier key chip ─────────────────────────────────────
+  // Mac shows "Cmd", Windows / Linux show "Ctrl". Never the ⌘ glyph.
+  (function applyModKeyLabel() {
+    const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
+    const label = isMac ? 'Cmd' : 'Ctrl';
+    document.querySelectorAll('.modkey').forEach(el => { el.textContent = label; });
+    // Also update title attributes on elements that mention the shortcut
+    document.querySelectorAll('[title*="Ctrl+K"], [title*="Cmd+K"], [title*="Ctrl/⌘"]').forEach(el => {
+      el.title = el.title.replace(/(Ctrl|Cmd|⌘|Ctrl\/⌘)\+?K/gi, `${label}+K`);
+    });
+  })();
+
+  // ─── Boot splash · packet-train inspection counter + fade on phantom:ready ───
+  (function bootSplash() {
+    const overlay = document.getElementById('splash-overlay');
+    if (!overlay) return;
+    const counter = document.getElementById('splash-counter')?.querySelector('b');
+    let n = 42;
+    const tick = counter
+      ? setInterval(() => { n += 1; counter.textContent = String(n).padStart(4, '0'); }, 1200)
+      : null;
+    const hide = () => {
+      if (overlay.classList.contains('is-hidden')) return;
+      overlay.classList.add('is-hidden');
+      if (tick) clearInterval(tick);
+      setTimeout(() => { overlay.remove(); }, 600);
+    };
+    window.addEventListener('phantom:ready', hide, { once: true });
+    setTimeout(hide, 2400); // hard fallback so splash never sticks
+  })();
+
   // ─── State ───
   let ws = null;
   let currentConversationId = null;
@@ -34,6 +65,7 @@
 
   // ─── Initialize ───
   Chat.init();
+  window.Dash?.init?.();
   window.Router?.init?.();
   Settings.init();
   window.SettingsPage?.init?.();
@@ -43,6 +75,8 @@
   window.ScopePage?.init?.();
   Management.init();
   initCommandPalette();
+  initRunConfigPopover();
+  initScopeStripUpdater();
   connectWebSocket();
   loadConversations();
   checkSudoStatus();
@@ -113,6 +147,7 @@
     ws.onopen = () => {
       setStatus(true);
       reconnectAttempts = 0;
+      window.dispatchEvent(new CustomEvent('phantom:ready'));
     };
 
     ws.onmessage = (event) => {
@@ -141,14 +176,15 @@
     if (online) {
       statusDot.className = 'status-dot online';
       statusText.textContent = 'Connected';
-      connectionBadge.className = 'connection-badge online';
-      connectionBadge.textContent = '● Online';
+      connectionBadge.className = 'status-chip-dot connection-badge online';
+      connectionBadge.textContent = '●';
     } else {
       statusDot.className = 'status-dot';
       statusText.textContent = 'Disconnected';
-      connectionBadge.className = 'connection-badge offline';
-      connectionBadge.textContent = '● Offline';
+      connectionBadge.className = 'status-chip-dot connection-badge offline';
+      connectionBadge.textContent = '●';
     }
+    document.getElementById('topbar-status-chip')?.setAttribute('data-state', online ? 'online' : 'offline');
   }
 
   // ─── Message Handler ───
@@ -262,7 +298,7 @@
 
 Start the investigation immediately!`;
 
-      Chat.addUserMessage(finalContent || '🖼️ Image provided for OSINT analysis', pendingImage);
+      Chat.addUserMessage(finalContent || '[image attached] OSINT analysis requested', pendingImage);
 
       // Send with image context embedded in message
       const imageMsg = `${osintPrompt}\n\n[IMAGE ATTACHED: ${pendingImageName || 'image.png'} — base64 encoded image of person to investigate]\nImage data: ${pendingImage}`;
@@ -365,11 +401,19 @@ Start the investigation immediately!`;
     previewEl.className = 'image-preview-bar hidden';
     previewEl.innerHTML = `
       <div class="image-preview-inner">
-        <span class="image-preview-icon">🖼️</span>
+        <span class="image-preview-icon" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+            <circle cx="8.5" cy="8.5" r="1.5"/>
+            <polyline points="21 15 16 10 5 21"/>
+          </svg>
+        </span>
         <img id="image-preview-thumb" src="" alt="preview" class="image-preview-thumb"/>
         <span id="image-preview-name" class="image-preview-name"></span>
-        <span class="image-preview-badge">OSINT Ready</span>
-        <button id="image-preview-remove" class="image-preview-remove" title="Remove image">✕</button>
+        <span class="image-preview-badge">OSINT</span>
+        <button id="image-preview-remove" class="image-preview-remove" title="Remove image" aria-label="Remove image">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
       </div>
     `;
     inputArea.insertBefore(previewEl, inputArea.firstChild);
@@ -389,12 +433,18 @@ Start the investigation immediately!`;
       fileInput.value = '';
     });
 
-    // ── Image button in input bar ──
+    // ── Attach button in input bar (OSINT image) ──
     const imageBtn = document.createElement('button');
     imageBtn.id = 'image-osint-btn';
     imageBtn.className = 'image-osint-btn';
-    imageBtn.title = 'Drop image for OSINT analysis';
-    imageBtn.innerHTML = '🖼️';
+    imageBtn.title = 'Attach image for OSINT analysis';
+    imageBtn.setAttribute('aria-label', 'Attach image for OSINT analysis');
+    imageBtn.type = 'button';
+    imageBtn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+      </svg>
+    `;
     imageBtn.addEventListener('click', () => fileInput.click());
     inputContainer.insertBefore(imageBtn, inputContainer.querySelector('textarea'));
 
@@ -519,6 +569,7 @@ Start the investigation immediately!`;
     }
 
     sidebar.classList.remove('open');
+    document.querySelector('.sidebar-scrim')?.classList.remove('is-active');
   }
 
   async function deleteConversation(id) {
@@ -648,8 +699,28 @@ Start the investigation immediately!`;
     renderConversationList(searchInput.value);
   });
 
+  // ─── Mobile sidebar scrim (Pass 16) ───
+  // Append a single scrim node to <body>; mirror .sidebar.open → .is-active.
+  // Click on scrim closes the drawer. Idempotent — only created once.
+  let sidebarScrim = document.querySelector('.sidebar-scrim');
+  if (!sidebarScrim) {
+    sidebarScrim = document.createElement('div');
+    sidebarScrim.className = 'sidebar-scrim';
+    sidebarScrim.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(sidebarScrim);
+  }
+  const syncScrim = () => {
+    if (!sidebar) return;
+    sidebarScrim.classList.toggle('is-active', sidebar.classList.contains('open'));
+  };
+  sidebarScrim.addEventListener('click', () => {
+    sidebar?.classList.remove('open');
+    syncScrim();
+  });
+
   sidebarToggle?.addEventListener('click', () => {
     sidebar.classList.toggle('open');
+    syncScrim();
   });
 
   function autoResize() {
@@ -666,6 +737,7 @@ Start the investigation immediately!`;
     if (!palette || !input || !results) return;
 
     const commands = [
+      { id: 'dash', label: 'Open Dash', detail: 'Live operational overview · KPIs · runs · alerts', route: 'dash', code: 'route:dash' },
       { id: 'chat', label: 'Open Chat', detail: 'Start or continue a governed operation', route: 'chat', code: 'route:chat' },
       { id: 'runs', label: 'Open Runs', detail: 'Review trace history, snapshots, policy decisions', route: 'runs', code: 'route:runs' },
       { id: 'graph', label: 'Open Graph', detail: 'Replay operational graph and blocked paths', route: 'graph', code: 'route:graph' },
@@ -673,7 +745,7 @@ Start the investigation immediately!`;
       { id: 'scope', label: 'Open Assets / Scope', detail: 'Scope builder, assets, policy dry-run', route: 'scope', code: 'route:scope' },
       { id: 'settings', label: 'Open Settings', detail: 'Models, prompts, toolpacks, governance settings', route: 'settings', code: 'route:settings' },
       { id: 'new-chat', label: 'New chat', detail: 'Create a fresh operation context', action: () => newChatBtn?.click(), code: 'action:new' },
-      { id: 'manage', label: 'Open Management', detail: 'MCP servers and skills', action: () => document.getElementById('manage-btn')?.click(), code: 'panel:manage' },
+      { id: 'manage', label: 'Open Management', detail: 'MCP servers and skills', action: () => window.Management?.open?.(), code: 'panel:manage' },
     ];
     let activeIndex = 0;
     let rendered = commands;
@@ -734,6 +806,137 @@ Start the investigation immediately!`;
         runCommand(rendered[activeIndex]);
       }
     });
+  }
+
+  // ─── Topbar run-config popover ────────────────────────────────────────────
+  function initRunConfigPopover() {
+    const strip = document.getElementById('active-scope-strip');
+    const pop   = document.getElementById('run-config-popover');
+    if (!strip || !pop) return;
+
+    function setOpen(open) {
+      pop.classList.toggle('hidden', !open);
+      strip.setAttribute('aria-expanded', String(open));
+    }
+    strip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setOpen(pop.classList.contains('hidden'));
+    });
+    pop.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => setOpen(false));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !pop.classList.contains('hidden')) setOpen(false);
+    });
+    pop.querySelectorAll('[data-run-config-close]').forEach((el) => el.addEventListener('click', () => setOpen(false)));
+  }
+
+  // ─── Dynamic breadcrumb ───────────────────────────────────────────────────
+  (function initBreadcrumb() {
+    const el = document.getElementById('top-bar-crumbs');
+    if (!el) return;
+    const labels = {
+      dash: 'Dash', chat: 'Chat', runs: 'Runs', graph: 'Graph',
+      alerts: 'Alerts', artifacts: 'Artifacts', scope: 'Assets / Scope', settings: 'Settings',
+    };
+    let ctx = null;
+    function paint() {
+      const route = window.Router?.current || 'dash';
+      const here = labels[route] || route;
+      el.innerHTML = '';
+      const home = document.createElement('span'); home.className = 'here'; home.textContent = here;
+      el.appendChild(home);
+      if (ctx && ctx.label) {
+        const sep = document.createElement('span'); sep.className = 'sep'; sep.textContent = '›';
+        const tail = document.createElement('span'); tail.className = 'ctx'; tail.textContent = ctx.label;
+        el.appendChild(sep); el.appendChild(tail);
+      }
+    }
+    window.addEventListener('phantom:route', () => { ctx = null; paint(); });
+    window.addEventListener('phantom:context', (e) => { ctx = e.detail || null; paint(); });
+    paint();
+  })();
+
+  // ─── Alerts bell · critical+high open count, polled every 60s ─────────────
+  (function initAlertsBell() {
+    const bell = document.getElementById('alerts-bell');
+    const badge = document.getElementById('alerts-bell-count');
+    if (!bell || !badge) return;
+
+    async function refresh() {
+      try {
+        const res = await fetch('/api/findings?status=open&limit=200');
+        if (!res.ok) return;
+        const data = await res.json();
+        const rows = Array.isArray(data) ? data : (data.findings || []);
+        const crit = rows.filter(f => f.severity === 'critical').length;
+        const high = rows.filter(f => f.severity === 'high').length;
+        const total = crit + high;
+        if (total > 0) {
+          badge.hidden = false;
+          badge.textContent = total > 99 ? '99+' : String(total);
+          bell.classList.toggle('has-crit', crit > 0);
+          bell.classList.toggle('has-alerts', high > 0 && crit === 0);
+        } else {
+          badge.hidden = true;
+          bell.classList.remove('has-crit', 'has-alerts');
+        }
+      } catch (_err) {
+        // Silently skip — bell stays at last known state
+      }
+    }
+    refresh();
+    setInterval(refresh, 60000);
+    window.addEventListener('phantom:findings-changed', refresh);
+  })();
+
+  // ─── Collapsible sidebar · 220 px expanded ↔ 56 px rail · persisted ──────
+  (function initSidebarCollapse() {
+    const sb  = document.getElementById('sidebar');
+    const btn = document.getElementById('sidebar-collapse-btn');
+    if (!sb || !btn) return;
+    const KEY = 'phantom:sidebar-collapsed';
+    const apply = (collapsed) => {
+      sb.classList.toggle('collapsed', collapsed);
+      btn.setAttribute('aria-pressed', String(collapsed));
+      btn.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+      btn.setAttribute('aria-label', btn.title);
+    };
+    // Restore persisted state (default: expanded)
+    apply(localStorage.getItem(KEY) === '1');
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const next = !sb.classList.contains('collapsed');
+      apply(next);
+      try { localStorage.setItem(KEY, next ? '1' : '0'); } catch (_e) { /* no-op */ }
+    });
+  })();
+
+  // ─── Keep topbar scope-strip text in sync with #active-scope-select ───────
+  function initScopeStripUpdater() {
+    const select = document.getElementById('active-scope-select');
+    const strip  = document.getElementById('active-scope-strip');
+    if (!select || !strip) return;
+    const nameEl = strip.querySelector('.name');
+    const metaEl = strip.querySelector('.meta');
+    const sync = () => {
+      const opt = select.options[select.selectedIndex];
+      const val = select.value || '';
+      const label = opt ? opt.textContent : '';
+      if (val) {
+        if (nameEl) nameEl.textContent = label || 'Scope selected';
+        if (metaEl) metaEl.textContent = '';
+        strip.setAttribute('data-empty', 'false');
+      } else {
+        if (nameEl) nameEl.textContent = 'No scope selected';
+        if (metaEl) metaEl.textContent = '';
+        strip.setAttribute('data-empty', 'true');
+      }
+    };
+    select.addEventListener('change', sync);
+    // Re-sync on initial population by scope-page.js (it rebuilds <option>s).
+    const observer = new MutationObserver(sync);
+    observer.observe(select, { childList: true, subtree: true });
+    sync();
   }
 
   // ─── Legacy decorative background hook intentionally disabled by the SEC UI kit ───
