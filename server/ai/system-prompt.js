@@ -4,6 +4,7 @@ import config from '../config.js';
 import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { resolvePrompt } from '../prompts/prompt-store.js';
+import { hasCommand } from '../utils/has-command.js';
 
 function getSystemInfo() {
   try {
@@ -30,13 +31,11 @@ function getSystemInfo() {
     const tools = ['nmap', 'python3', 'pip', 'git', 'curl', 'wget', 'nikto', 'sqlmap', 'hydra', 'john',
       'hashcat', 'masscan', 'gobuster', 'ffuf', 'nuclei', 'subfinder', 'httpx',
       'msfconsole', 'searchsploit', 'wireshark', 'aircrack-ng', 'netcat', 'socat', 'tcpdump'];
-    info.installed_tools = [];
-    for (const tool of tools) {
-      try {
-        execSync(`which ${tool} 2>/dev/null`, { encoding: 'utf8' });
-        info.installed_tools.push(tool);
-      } catch {}
-    }
+    // Pure-Node PATH walk — see server/utils/has-command.js for the
+    // rationale. Avoids spawning `which` on every prompt build, which on
+    // Windows emits "The system cannot find the path specified." to
+    // stderr for each missing tool.
+    info.installed_tools = tools.filter((tool) => hasCommand(tool));
 
     return info;
   } catch {

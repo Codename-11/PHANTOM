@@ -1,4 +1,5 @@
 import { spawn, execSync } from 'child_process';
+import { hasCommand } from '../utils/has-command.js';
 import { existsSync } from 'fs';
 import { readFile, writeFile, mkdir, readdir, stat } from 'fs/promises';
 import { dirname, resolve } from 'path';
@@ -347,22 +348,13 @@ async function installTool({ name, method = 'auto', source }) {
 }
 
 function detectPackageManager() {
-  try {
-    execSync('which apt-get 2>/dev/null');
-    return 'apt';
-  } catch {}
-  try {
-    execSync('which pacman 2>/dev/null');
-    return 'pacman';
-  } catch {}
-  try {
-    execSync('which yum 2>/dev/null');
-    return 'yum';
-  } catch {}
-  try {
-    execSync('which dnf 2>/dev/null');
-    return 'yum';
-  } catch {}
+  // Pure-Node PATH walk — see server/utils/has-command.js. Avoids the
+  // four `which …` spawns that emit Windows stderr noise on every tool
+  // install attempt.
+  if (hasCommand('apt-get')) return 'apt';
+  if (hasCommand('pacman'))  return 'pacman';
+  if (hasCommand('yum'))     return 'yum';
+  if (hasCommand('dnf'))     return 'yum';
   return 'apt'; // default
 }
 

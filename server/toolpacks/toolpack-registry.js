@@ -1,6 +1,4 @@
-import { existsSync, statSync } from 'fs';
-import { join, delimiter } from 'path';
-import { platform } from 'os';
+import { hasCommand, _resetHasCommandCache } from '../utils/has-command.js';
 
 const TOOLPACKS = [
   {
@@ -158,54 +156,14 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-/**
- * Pure-Node PATH walk to detect whether a command is invocable.
- *
- * The previous implementation spawned `bash -lc 'command -v <tool>'` for
- * each toolpack tool. On Windows, when bash.exe isn't on PATH, libuv's
- * CreateProcess failure prints "The system cannot find the path
- * specified." to the parent's stderr *before* the thrown JS error
- * reaches our try/catch — so `stdio:'ignore'` plus a swallowed throw
- * still left dozens of noise lines in `npm run dev` output.
- *
- * Walking PATH directly:
- *   • avoids the subprocess entirely (no noise, ~50× faster)
- *   • respects platform-specific executable extensions on Windows
- *   • caches lookups so repeated /api/toolpacks calls are O(1) per tool
- */
-const IS_WIN = platform() === 'win32';
-const PATH_EXTS = IS_WIN
-  ? (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').map(e => e.toLowerCase())
-  : [''];
-const _commandCache = new Map();
+// `defaultCommandExists` delegates to the shared pure-Node PATH lookup so
+// every spawn-free callsite (system prompt, package-manager detection,
+// toolpack probes) gets one consistent implementation + one shared cache.
+const defaultCommandExists = hasCommand;
 
-function defaultCommandExists(command) {
-  const safe = String(command).replace(/[^a-zA-Z0-9._-]/g, '');
-  if (!safe) return false;
-  if (_commandCache.has(safe)) return _commandCache.get(safe);
-
-  const dirs = (process.env.PATH || '').split(delimiter).filter(Boolean);
-  for (const dir of dirs) {
-    for (const ext of PATH_EXTS) {
-      const candidate = join(dir, safe + ext);
-      try {
-        if (existsSync(candidate) && statSync(candidate).isFile()) {
-          _commandCache.set(safe, true);
-          return true;
-        }
-      } catch { /* permission errors / symlink loops — skip */ }
-    }
-  }
-  _commandCache.set(safe, false);
-  return false;
-}
-
-/**
- * Test-only — clears the executable lookup cache so unit tests can
- * exercise different PATH states without stale memoized results.
- */
+/** Test-only — clears the shared executable lookup cache. */
 export function _resetCommandCache() {
-  _commandCache.clear();
+  _resetHasCommandCache();
 }
 
 export function getToolpacks() {
