@@ -1,5 +1,41 @@
 # PHANTOM DEVLOG
 
+## 2026-05-19 — Cohesive Flow + Sec-Ops Installer + Agent Loop + Test Suite
+
+Large session covering five gap-closing rounds, in two arcs:
+
+**Arc 1 — Cohesive flow (Phases A–D) + sec-ops installer.**
+
+- **Phase A · End-of-run synthesis card** — designed a canonical v1 data shape (`server/runs/synthesis.js`): runId, title, status, scope, objective met/partial/unmet, activity (events/tool calls/artifacts/errors), risk distribution + highest, findings by severity, posture (score 0–100 composed of weighted coverage 40 / risk 40 / hygiene 20 components + rating), highlights, next steps, policy/approvals. Shape is load-bearing — reused by phases B/C without modification. Rendered on the Runs page via a new Synthesis tab that defaults to the headline view, with clickable next-step buttons routing to Rerun / Summary / Approvals / Alerts / Scope.
+- **Phase B · First-run onboarding wizard** — 4-step modal (welcome → provider/key → first scope via ROE templates → preview synthesis card with sample data). Sticky completion flag in `settings` table; reset entry-point in Settings → Advanced. Backend signals via `server/onboarding/onboarding.js`.
+- **Phase C · Posture trending** — `server/runs/trending.js` aggregates synthesis scores across recent terminal runs (chained `previousScore` so each entry carries a delta), exposed via `/api/trending/posture`. Dash panel: large current-score headline, inline SVG sparkline (dots color-coded by rating), by-scope mini-list, recent-runs list rendered via `SynthesisCard.renderCompactRow` so trend reads by recognition.
+- **Phase D · Friction polish** — Dash as default landing route with localStorage persistence (Settings is a `noRestore` route so reloads always re-land on Dash). `phantom:run-complete` re-dispatched from the WS pipe; Synthesis tab flashes when a watched run terminates; Runs sidebar empty state now offers chat + onboarding paths.
+- **Sec-Ops installer** — auto-detect host package manager (winget/choco/scoop/apt/dnf/pacman/brew/wsl-apt) plus a 23-tool catalog across base/offensive/blue tiers. Settings → Tools panel renders per-tier cards with installed/total counts and an "Install missing" button. Each install is an approval-gated request persisted to a new `install_requests` table; resolved plan + result captured for audit. Pure-Node detection (no shell-out for the host probe). Approve from Settings *or* from the Approvals page — single governance queue.
+
+**Arc 2 — Five-task gap closure on top of the cohesive flow.**
+
+- **Task 1 · Executor stop condition.** Root cause: `server/ai/llm-client.js` returned immediately on `finish_reason: 'stop'` even when `delta.tool_calls` had been streamed in the same response. Grok (and several OpenAI-compatible shims) emit `'stop'` alongside tool_calls instead of the spec's `'tool_calls'`. Restructured the streaming loop to defer the stop decision until *after* the stream drains; tool_calls take precedence. Added `MAX_AGENT_ITERATIONS = 40`, stuck-state guard (empty content + empty tool_calls → graceful exit), and a `finish_reason: 'length'` truncation hint.
+- **Task 2 · System-prompt host context.** `server/ai/system-prompt.js` now imports `getInstallerStatus()` and renders an `## INSTALLED SEC-OPS TOOLS ON HOST` block grouped by tier (base/offensive/blue), placed after the UI-context block and before `ASK-GATED ACTIONS`. The agent reaches for binaries that actually exist rather than guessing tool names.
+- **Task 3 · LLM-generated synthesis (flagged).** `llmCompleteJson` helper in `server/ai/llm-client.js` (non-streaming, forces `response_format: json_object`). `enrichSynthesisWithLLM` in `synthesis.js` rewrites `highlights[]` and `nextSteps[]` from the real trace; v1 shape preserved; any failure falls back silently. Toggle in Settings → Advanced (`synthesis_llm_enabled`). `?enrich=1` for ad-hoc testing.
+- **Task 4 · Unified Approvals queue.** Pending `install_requests` surface above the KPI strip on the Approvals page as their own card kind — package list, command preview, approve/cancel inline. Status propagates to both Approvals and Settings → Tools on next refresh.
+- **Task 5 · Sudo/admin handling.** `classifyResult` in the installer route inspects stderr/stdout against a conservative pattern set ("must be root", "Access is denied", "sudo: a password is required", "Operation not permitted") plus numeric exit codes (winget `0x80073D06`, choco `1603`). Steps classify into `ok | timeout | admin | failed | skipped`. On Linux, cached sudo password (from `/api/sudo/validate`) is piped to `sudo -S` stdin so non-TTY installs work. On Windows, admin failures carry an `elevatedCommand` PowerShell `Start-Process -Verb RunAs …` string; UI surfaces a "Copy elevated cmd" button.
+
+**Arc 3 — Test suite improvements (this round).**
+
+- Fixed the pre-existing scope-builder render test that had been asserting against a removed "visibility" label. Suite now honest.
+- Added `server/e2e/full-run.test.js` — end-to-end smoke driving processMessage against a scripted fake provider, asserting trace event accumulation, run completion, and synthesis v1 shape. Catches the one-and-done regression class directly.
+- Replaced glob-based `npm test` with `scripts/run-tests.js` — walks `server/` and `frontend/js/` for `*.test.js`, supports `--unit | --e2e | --watch` modes. Works on PowerShell and bash.
+- `frontend/js/test-dom-stub.js` — 50-line minimal DOM stub (no jsdom dep); two new test files cover `SynthesisCard.render` / `renderCompactRow` and `InstallerPanel.renderStepStatus` / `renderRequest` / `renderToolRow` / `resultBlurb`.
+
+Validation:
+- `npm test` — **155/155 passing** across 30 files (was 134 with 1 pre-existing failure at the start of the session).
+- `npm run test:unit` — 152/152 passing (~3s).
+- `npm run test:e2e` — 3/3 passing (~1s).
+- `npm run build` — passing with existing Vite non-module warnings.
+- `node --check` — passing across all changed files.
+
+Append-only CSS passes 25 → 30. No new runtime deps. No commits yet — awaiting operator instruction.
+
 ## 2026-05-17 22:29 EDT — PHANTOM SEC UI Kit Implementation
 
 - Fetched and unpacked the Claude Design handoff bundle for `PHANTOM SEC UI kit.html`, read its README, chat transcript, token/component CSS, and primary implementation direction.
