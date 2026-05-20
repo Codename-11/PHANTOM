@@ -72,6 +72,14 @@ COPY . .
 RUN npm run build
 
 # ─── Runtime ──────────────────────────────────────────────────────────────────
+# Persist SQLite + WAL/SHM on the phantom-db named volume mounted at /app/data
+# (see docker-compose.yml). server/config.js honors PHANTOM_DB_PATH when set,
+# so the running server writes to the volume instead of the per-container
+# /app/phantom.db that disappears on `docker compose down`. The mkdir runs
+# at image-build time so SQLite never races the mount on first boot.
+RUN mkdir -p /app/data
+ENV PHANTOM_DB_PATH=/app/data/phantom.db
+
 EXPOSE 1337
 
 CMD ["node", "server/index.js"]

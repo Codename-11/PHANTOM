@@ -55,7 +55,13 @@ const config = {
   },
   workspace: join(ROOT, 'workspace'),
   db: {
-    path: join(ROOT, 'phantom.db'),
+    // PHANTOM_DB_PATH lets the container point the SQLite file at a mounted
+    // named volume (see docker-compose.yml → phantom-db at /app/data).
+    // Unset on dev (Windows/macOS) → falls through to repo-root phantom.db so
+    // local `npm run dev` keeps its existing behavior. When set, the override
+    // wins outright — no fallback, no merge — so a misconfigured path fails
+    // loudly at SQLite open rather than silently writing to the repo root.
+    path: process.env.PHANTOM_DB_PATH || join(ROOT, 'phantom.db'),
   },
   root: ROOT,
 };

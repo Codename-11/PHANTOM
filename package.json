@@ -14,6 +14,7 @@
     "test:unit": "node scripts/run-tests.js --unit",
     "test:e2e": "node scripts/run-tests.js --e2e",
     "test:watch": "node scripts/run-tests.js --unit --watch",
+    "smoke:docker": "node scripts/smoke-docker.js",
     "seed": "node scripts/seed.js",
     "seed:reset": "node scripts/seed.js --reset"
   },

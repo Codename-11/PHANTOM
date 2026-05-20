@@ -19,12 +19,10 @@ services:
     volumes:
       # Operator artifacts, run outputs, scratch.
       - phantom-workspace:/app/workspace
-      # SQLite DB + WAL/SHM. Mounted at /app/data; see "Phase 2 hazard" note
-      # in the Phase 1 report — config.db.path currently resolves to
-      # /app/phantom.db, so a follow-up will introduce an env override
-      # (e.g. PHANTOM_DB_PATH) so the running server actually writes here.
-      # Until that lands, the volume is declared and persisted but the DB
-      # file still lives inside the container at /app/phantom.db.
+      # SQLite DB + WAL/SHM. The Dockerfile sets PHANTOM_DB_PATH to
+      # /app/data/phantom.db, and server/config.js threads that through to
+      # better-sqlite3, so the file actually lives on this named volume and
+      # survives `docker compose down`. WAL/SHM siblings land next to it.
       - phantom-db:/app/data
     restart: unless-stopped
 
