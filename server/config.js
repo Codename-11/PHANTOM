@@ -143,8 +143,13 @@ export function loadPersistedSettings(getSetting) {
     if (canonical && trimmed !== canonical && knownUrls.has(trimmed)) {
       config.api.baseUrl = canonical;
     }
-    // First-run bootstrap: if no baseUrl persisted, take the canonical one.
-    if (canonical && !baseUrl) {
+    // First-run bootstrap: if no baseUrl persisted AND env didn't set one,
+    // take the canonical one. An explicit API_BASE_URL is the operator
+    // saying "I know what I'm doing" (e.g. pointing at a self-hosted
+    // OpenAI-compatible router) and must win over the registry default —
+    // otherwise containerized deploys with env-driven config get snapped
+    // back to 127.0.0.1 on first boot.
+    if (canonical && !baseUrl && !process.env.API_BASE_URL) {
       config.api.baseUrl = canonical;
     }
   }
