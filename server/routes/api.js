@@ -62,8 +62,9 @@ import { buildRunEvidence, renderEvidenceMarkdown } from '../evidence/evidence-b
 import { loadLocalManifests, getLocalManifest, getLocalManifestSummary } from '../registry/local-manifest-loader.js';
 import {
   createRegistrySource, getRegistrySource, listRegistrySources,
-  updateRegistrySource, deleteRegistrySource,
+  updateRegistrySource, deleteRegistrySource, recordFetchOutcome,
 } from '../registry/registry-source-store.js';
+import { fetchIndex, fetchRevocations } from '../registry/remote-fetch.js';
 import { evaluateToolAction, normalizeOperatorOverride, ACTION_CLASSES } from '../scope/policy.js';
 import { explain as explainApproval, requiresDenialReason } from '../approvals/explain.js';
 import { parseTargetInput, targetsToScopeFields } from '../scope/target-parser.js';
@@ -1781,6 +1782,49 @@ router.delete('/registry/sources/:id', (req, res) => {
   const ok = deleteRegistrySource(req.params.id);
   if (!ok) return res.status(404).json({ error: 'source not found' });
   res.status(204).end();
+});
+
+// On-demand fetch of a source's index + signature verify. Operator
+// hits this from the Registry UI to test connectivity + signature
+// trust. The store records the outcome (last_fetched_at, last_status,
+// last_error) for the diagnostic surface.
+router.post('/registry/sources/:id/fetch', async (req, res) => {
+  const source = getRegistrySource(req.params.id);
+  if (!source) return res.status(404).json({ error: 'source not found' });
+  const result = await fetchIndex(source);
+  if (result.ok) {
+    recordFetchOutcome(source.id, { status: 'ok' });
+    return res.json({ ok: true, signatureStatus: result.signatureStatus, packageCount: result.parsed?.packages?.length ?? 0 });
+  }
+  const errStr = result.errors?.map((e) => e.message).join('; ') || 'unknown error';
+  const status = result.signatureStatus?.status === 'invalid' ? 'invalid_signature'
+    : errStr.includes('HTTP') ? 'unreachable'
+    : 'error';
+  recordFetchOutcome(source.id, { status, error: errStr });
+  res.status(502).json({ ok: false, error: errStr, signatureStatus: result.signatureStatus });
+});
+
+// Revocation feed fetch — B4-full surface. 404 from the source is
+// treated as "no revocations published yet" (still ok=true with an
+// empty feed). Signature verification mirrors fetchIndex when a
+// signing key is pinned.
+router.post('/registry/sources/:id/revocations', async (req, res) => {
+  const source = getRegistrySource(req.params.id);
+  if (!source) return res.status(404).json({ error: 'source not found' });
+  const result = await fetchRevocations(source);
+  if (result.ok) {
+    return res.json({
+      ok: true,
+      signatureStatus: result.signatureStatus,
+      entries: result.parsed?.entries || [],
+      generatedAt: result.parsed?.generatedAt || null,
+    });
+  }
+  res.status(502).json({
+    ok: false,
+    errors: result.errors,
+    signatureStatus: result.signatureStatus,
+  });
 });
 
 // Preview install — returns the declarative plan that would run if
