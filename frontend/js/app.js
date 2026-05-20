@@ -115,6 +115,7 @@
   window.CampaignsPage?.init?.();
   window.DiagnosticsCard?.init?.();
   window.OnboardingChecklist?.init?.();
+  window.DashHero?.init?.();
   window.DemoWatermark?.init?.();
   // Paint the Dash diagnostics card immediately so first paint shows readiness.
   window.DiagnosticsCard?.show?.('dash');

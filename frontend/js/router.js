@@ -61,6 +61,7 @@ window.Router = {
       window.Dash?.show?.();
       window.DiagnosticsCard?.show?.('dash');
       window.OnboardingChecklist?.show?.();
+      window.DashHero?.show?.();
     }
     if (route === 'approvals') window.ApprovalsPage?.show?.();
     if (route === 'campaigns') window.CampaignsPage?.show?.();
