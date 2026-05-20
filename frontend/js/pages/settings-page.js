@@ -153,7 +153,13 @@ window.SettingsPage = {
         // the list fresh without polling.
         if (target === 'tools') window.ProfilesPanel?.load?.();
         if (target === 'general' || target === 'behavior' || target === 'advanced') this.renderStaticPanels();
+        // A6 — Diagnostics tab paints the same full card used by Dash.
+        if (target === 'diagnostics') window.DiagnosticsCard?.show?.('settings');
       });
+    });
+    // A6 — Wire the Diagnostics tab's refresh button.
+    document.getElementById('diag-refresh-tab-btn')?.addEventListener('click', () => {
+      window.DiagnosticsCard?.show?.('settings');
     });
   },
 

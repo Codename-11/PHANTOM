@@ -1093,6 +1093,7 @@
               <button class="settings-page-tab" data-settings-tab="prompts">Prompts</button>
               <button class="settings-page-tab" data-settings-tab="security">Security / Scope</button>
               <button class="settings-page-tab" data-settings-tab="tools">Tools / MCP / Skills</button>
+              <button class="settings-page-tab" data-settings-tab="diagnostics">Diagnostics</button>
               <button class="settings-page-tab" data-settings-tab="advanced">Advanced</button>
             </nav>
             <div class="settings-page-panels">
@@ -1170,6 +1171,21 @@
                 <div id="profiles-form" class="profiles-form-host"></div>
                 <div id="profiles-list" class="profiles-list"></div>
                 <p id="profiles-caption" class="profiles-caption empty-msg"></p>
+              </section>
+              <section class="settings-tab-panel" data-settings-panel="diagnostics">
+                <!-- A6 — Diagnostics tab. Mounts the same full diagnostics
+                     card used by Dash so operators have a permanent home
+                     for system-readiness probes. The card includes Copy
+                     as JSON + Refresh affordances. -->
+                <div class="prompt-preview-header">
+                  <div>
+                    <h3>System diagnostics</h3>
+                    <p>Per-check readiness with redacted detail. Each probe has a 500ms budget; the route returns in &le;1500ms total.</p>
+                  </div>
+                  <button id="diag-refresh-tab-btn" class="btn btn-secondary btn-sm" type="button">Refresh</button>
+                </div>
+                <div id="settings-diagnostics-card" class="settings-diagnostics-card"></div>
+                <p class="cf-hint" style="margin-top:12px;">Tip: <code>GET /api/diagnostics</code> returns the same payload for scripting / observability pipelines.</p>
               </section>
               <section class="settings-tab-panel" data-settings-panel="advanced">
                 <div id="settings-advanced-overview" class="settings-overview-panel">Loading advanced settings…</div>
@@ -1431,13 +1447,9 @@
             <small id="model-source-hint" class="model-source-hint"></small>
           </section>
 
-          <!-- A0 — Full diagnostics panel on Settings. Shows every check
-               with elapsed timing + copy-as-JSON affordance. -->
-          <section class="settings-section" id="settings-diagnostics-section">
-            <h3>Diagnostics</h3>
-            <small class="goals-card-help">System readiness probes — DB, workspace, provider, docs, toolpacks, campaigns. Each check has a 500ms budget; the route returns within 1500ms total even if every check fails.</small>
-            <div id="settings-diagnostics-card" class="settings-diagnostics-card"></div>
-          </section>
+          <!-- A6 — Diagnostics moved to its own Settings tab (above);
+               the duplicate section here has been removed so the
+               #settings-diagnostics-card id is unique. -->
 
           <!-- System Access — hidden when the server reports a non-'sudo'
                elevation mode (containerized root, Windows, etc.). The
