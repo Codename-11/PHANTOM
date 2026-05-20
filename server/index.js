@@ -28,12 +28,20 @@ import apiRouter from './routes/api.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 
-// ─── React migration gate (Phase A8.0) ──────────────────────────────────
+// ─── React migration gate (Phase A8.0 → cutover in A8.5) ────────────────
 // Each entry is a route prefix that should be served by the React bundle
 // in dist/react/index.html INSTEAD of the legacy vanilla bundle.
-// Empty default = the React bundle is built but never served, so behavior
-// is identical to pre-A8.0. Phase A8.1+ adds entries one route at a time.
-const REACT_PAGES = new Set([]);
+// A8.5 — every migrated bare path now flips to React. The /react/*
+// preview paths still work for explicit access; the legacy modules in
+// frontend/js/ are NOT deleted in this commit so a git revert restores
+// the vanilla bundle cleanly if a regression surfaces. The CSS deletion
+// step lands in a follow-up A8.5b once parity-close commits land.
+const REACT_PAGES = new Set([
+  '/dash', '/onboarding',
+  '/campaigns', '/settings', '/scope',
+  '/runs', '/graph', '/artifacts',
+  '/approvals', '/alerts',
+]);
 const reactDistPath = join(ROOT, 'dist', 'react');
 const reactIndexPath = join(reactDistPath, 'index.html');
 const reactBundleAvailable = existsSync(reactIndexPath);

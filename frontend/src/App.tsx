@@ -55,6 +55,45 @@ export function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* A8.5 cutover — every migrated surface now mounts at BOTH the
+            bare path (the operator default) AND the legacy /react/* path
+            (still available for explicit preview / debugging). server
+            /index.js REACT_PAGES is populated so the bare paths hand
+            this bundle the SPA shell. */}
+        {[
+          ['/dash', <DashPage />],
+          ['/onboarding', <OnboardingPage />],
+          ['/settings', <SettingsPage />],
+          ['/graph', <GraphPage />],
+          ['/artifacts', <ArtifactsPage />],
+        ].map(([path, el]) => (
+          <Route key={path as string} path={path as string} element={el as JSX.Element} />
+        ))}
+
+        <Route path="/" element={<Navigate to="/dash" replace />} />
+
+        <Route path="/campaigns" element={<CampaignsPage />}>
+          <Route path="new" element={<CampaignCreateRoute />} />
+          <Route path=":id" element={<CampaignDetailRoute />} />
+        </Route>
+        <Route path="/scope" element={<ScopesPage />}>
+          <Route path="new" element={<ScopeCreateRoute />} />
+          <Route path=":id" element={<ScopeDetailRoute />} />
+        </Route>
+        <Route path="/runs" element={<RunsPage />}>
+          <Route path=":id" element={<RunDetailRoute />} />
+        </Route>
+        <Route path="/approvals" element={<ApprovalsPage />}>
+          <Route path=":id" element={<ApprovalDetailRoute />} />
+        </Route>
+        <Route path="/alerts" element={<AlertsPage />}>
+          <Route path=":id" element={<AlertDetailRoute />} />
+        </Route>
+        <Route path="/graph/:runId" element={<GraphPage />} />
+
+        {/* Legacy /react/* preview paths — kept alive so operators can
+            compare visual + behavior side-by-side during the parity-close
+            follow-up commits. */}
         <Route path="/react/health" element={<HealthCard />} />
         <Route path="/react/dash" element={<DashPage />} />
         <Route path="/react/onboarding" element={<OnboardingPage />} />
@@ -79,7 +118,8 @@ export function App() {
         <Route path="/react/graph" element={<GraphPage />} />
         <Route path="/react/graph/:runId" element={<GraphPage />} />
         <Route path="/react/artifacts" element={<ArtifactsPage />} />
-        <Route path="/react" element={<Navigate to="/react/dash" replace />} />
+        <Route path="/react" element={<Navigate to="/dash" replace />} />
+
         <Route path="*" element={<HealthCard />} />
       </Routes>
     </BrowserRouter>
