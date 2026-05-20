@@ -18,6 +18,11 @@ export default defineConfig({
   title: 'PHANTOM',
   description: 'PHANTOM — Governed AI Security-Ops Cockpit. Trace-first runs, policy-gated tools, durable evidence, graph replay.',
 
+  // The install docs reference http://localhost:1337 as the post-`docker
+  // compose up` landing URL. VitePress' dead-link check can't resolve it
+  // at build time; skip any localhost reference.
+  ignoreDeadLinks: [/^https?:\/\/localhost/],
+
   head: [
     // Favicon — base path is NOT auto-applied to head entries in VitePress,
     // so hard-prefix with BASE to match whichever deploy target we built for.
