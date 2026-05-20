@@ -34,12 +34,38 @@ Twelve phases of `docs/plans/2026-05-20-phantom-mega-plan.md` landed in one sess
 
 **Tests.** Started the session at **250 passing** (the campaign-engine baseline). Sprint end: **416 / 416 passing** across 47 suites — net +166 new tests. The diagnostics timing-budget assertion has been bumped to 4500ms of slack to absorb `node --test` parallelism — the production route still returns in 60–500ms on docker-server.
 
-**Live state.** Image `phantom:full @ 376fe09d` deployed to docker-server; all new endpoints respond; Authelia gate preserved at `phantom.axiom-labs.dev`.
+**Live state.** Image `phantom:full @ 7c4e644a` deployed to docker-server; all new endpoints respond; Authelia gate preserved at `phantom.axiom-labs.dev`.
 
-**Open follow-ups (in mega-plan order).**
-- **B1 resolver integration** — `toolpack-registry.js` consults manifest loader with JS-registry fallback; installer plan rewrite; profile cross-wiring.
-- **A8.0 — A8.5 React migration phases** — infrastructure dispatched at sprint end via background agent; the five migration phases (Campaigns first, then Settings + Scope, Runs + Graph chrome + Artifacts, Dash + Onboarding + Approvals + Alerts, cleanup) will land subsequently.
-- **B3 / B4 / B5** — Private signed hosted registry MVP → governance hardening → public read path. These need real infra (control plane, signing service) — outside the single-session scope.
+**Sprint continuation — A8 React migration + hosted-registry preps.** The /goal session went well past the initial polish-pass scope; here's the rest that landed in the same sitting.
+
+**A8.0 — React + Vite + Tailwind + shadcn/ui infrastructure (background agent).** Added React 18 / Vite 5 / Tailwind 3.4 / shadcn/ui + React Query + Zustand + Vitest + Testing Library. `tailwind.config.ts` consumes the existing CSS variables (`--cy-1` etc.) so the palette is identical to the legacy. `vite.config.react.ts` outputs to `dist/react/`. `server/index.js` gained `const REACT_PAGES = new Set([])` + a `/react/*` static mount — empty default = nothing flipped over, so the legacy site is unchanged. `frontend/src/lib/api.ts` is the TypeScript port of fetch-helper.js.
+
+**A8.1 — Campaigns → React + shadcn/ui (background agent).** Side-by-side at `/react/campaigns`. shadcn primitives scaffolded under `frontend/src/components/ui/`: button / badge / card / checkbox / dialog / input / label / select / sheet / skeleton / tabs / textarea / toggle-group. New pages: `Campaigns.tsx` (list) / `CampaignDetail.tsx` (Sheet drawer w/ Overview-Goals-Runs-Evidence tabs) / `CampaignCreate.tsx` (Dialog form). Bespoke `RiskGrid`, `ToolpackPicker`, `CampaignPill`. React Query owns campaign + replay queries; mutations invalidate on success. tailwind-merge dropped from cn() and `@radix-ui/react-select` replaced with a styled native `<select>` to keep the bundle lean.
+
+**A8.2 — Settings + Scope → React (background agent).** Side-by-side at `/react/settings` + `/react/scope`. Re-used every existing shadcn primitive (no new Radix packs). The Settings page mirrors the legacy 7-tab IA (Models / General / Agent Behavior / Prompts / Security/Scope / Tools/MCP/Skills / Diagnostics / Advanced) — full IA reorganization defers to A8.5 cleanup. The Scope page ships list + Sheet detail + Dialog create; the full builder (intent tiles, ROE templates, action-class matrix, target chips, asset picker) stays on the legacy `/scope` page until A8.5.
+
+**A8.3 — Runs + Graph chrome + Artifacts → React (background agent).** Side-by-side at `/react/runs` + `/react/graph` + `/react/artifacts`. `RunPill` + `TraceTimeline` components. The graph canvas painter is INTENTIONALLY deferred to A8.5 per the mega-plan — the React `/react/graph` surface shows a coming-soon Card with a deep-link to the legacy renderer. Artifacts page is list + 5 filter chips (All / Reports / Evidence / Trace / Other) over /api/artifacts; the inline iframe preview stays on legacy `/artifacts` until A8.5.
+
+**A8.4 — Dash + Onboarding + Approvals + Alerts → React (background agent).** Side-by-side at `/react/dash` + `/react/onboarding` + `/react/approvals` + `/react/alerts`. `Dash.tsx` is the Operations Command Center: hero card (5-priority cascade ported verbatim from dash-hero.js to TS) + KPI strip + 3-card cockpit row (Live runs / Untriaged alerts / Policy decisions 24h). Approvals page surfaces the A3 EXPLAINED shape with Approve / Deny actions; high|crit denials require the dismissal_note via a Dialog. Alerts page has severity + triage_status + scope filter chips + the same triage rail from A7. New: `DashHero`, `ApprovalCard`, `SeverityBadge`, `TriageRail` components.
+
+**B3 prep — ed25519 manifest signature verifier.** `server/registry/manifest-signer.js` — pure node:crypto, no new deps. Minisign-style detached ed25519. `computeManifestDigest(bytes)` + `verifyManifestSignature({manifestBytes, manifest, trustRootBase64, expectedSigner?})`. Trust root is a base64-encoded raw 32-byte public key (PHANTOM wraps it in the SPKI prefix internally). Decision resolves mega-plan "Open decision" #6 in favor of minisign-style over Sigstore for v1; migration path to Sigstore/cosign stays open with the same verify shape. 11 tests cover happy path, digest mismatch, tampered signature, wrong trust root, signed_by mismatch when pinned, missing fields, base64-decode error. Wired into local-manifest-loader: every manifest now carries `signatureStatus ∈ {unsigned, unknown_signer, verified, invalid}`. Configured via `setTrustRoots([{keyId, base64Key}, ...])`.
+
+**B4 prep — revocation feed client.** `server/registry/revocation-feed.js` — parses + verifies + indexes `phantom.revocations/v1` feeds. Reuses the B3-prep ed25519 verifier with a feed-body-minus-trust-block hash. `parseRevocationFeed(feed, {trustRootBase64?, expectedSigner?})` returns `{ok, errors, feed, signatureStatus}`. `checkRevocation(parsedFeed, packageId, version)` returns `{status: 'ok' | 'warn' | 'block', entry?, replacement?, reason?}`. 13 tests cover schema validation, entry field validation, malformed JSON, signature happy path + tampered body, unsigned fallback when no trust root configured, and three checkRevocation cases. Like B3-prep — contract in place, hosted infra deferred.
+
+**Final sprint totals.**
+
+- **18 phases shipped** (A0, A1, A1b, A2, A3, A4, A5, A6, A7, A10, B0, B1, B2, A8.0, A8.1, A8.2, A8.3, A8.4) + **B3-prep + B4-prep**.
+- **6 background agents** ran successfully (B0, A1b, A3, A8.0, A8.1, A8.2, A8.3, A8.4).
+- **Tests: 250 (sprint start) → 447 server + 117 Vitest = 564 passing** (+314 net new across 27 commits).
+- **Live state.** Image `phantom:full @ 7c4e644a` on docker-server. 10 React surfaces respond at `/react/{dash,onboarding,campaigns,settings,scope,runs,graph,artifacts,approvals,alerts}` plus their detail/create variants. 9 legacy surfaces still respond at `/{dash,campaigns,settings,scope,runs,graph,artifacts,approvals,alerts}` — operator can compare side-by-side. Authelia gate preserved at `phantom.axiom-labs.dev`.
+
+**Remaining mega-plan phases (NOT shipped this session, intentionally).**
+- **A8.5 cleanup** — deletes the legacy bundle + ~3000 lines of CSS (`cf-*`, `campaign-*`, `goals-*`, `scan-*`, `onb-*`, `diag-*`, etc.), deletes migrated `frontend/js/` modules, rewrites `sec-ui-kit.test.js` against the React bundle. Risky to dispatch via agent — operator review of "what gets deleted" is the load-bearing step. Schedule as a deliberate next session.
+- **B3-full hosted signed registry MVP** — Postgres + signing service + object storage + admin/review/release plane. PHANTOM-side code WON'T change (the B3-prep contract is the client; only the trust-root config needs to be added). The infrastructure project is days-to-weeks of separate work.
+- **B4-full governance hardening** — RBAC + audit export + monitoring + backup/restore + incident drills. Depends on B3-full.
+- **B5 public read path** — Static signed CDN mirror + transparency page + channel controls. Depends on B3+B4.
+
+The two contract-only preps (B3 + B4) mean PHANTOM is READY for the hosted registry the moment infrastructure exists — no client-side code changes needed, only operator configuration of registry sources + trust roots.
 
 ## 2026-05-20 — Campaign Engine v1 (Tasks 1, 2, 3, 6, 7, 8, 4) + Goal Context v0
 
