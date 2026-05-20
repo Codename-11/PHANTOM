@@ -95,6 +95,15 @@ if (existsSync(distPath)) {
     if (req.path.startsWith('/api') || req.path.startsWith('/ws') || req.path.startsWith('/docs')) {
       return;
     }
+    // Phase A8.1 — Any /react/* SPA route that isn't a static asset
+    // (assets/* land via the express.static mount above) hands back the
+    // React shell directly. This is the side-by-side preview surface so
+    // operators can hit /react/campaigns without REACT_PAGES being
+    // populated yet. Once a follow-up adds 'campaigns' to REACT_PAGES,
+    // the bare /campaigns path also flips over to the React bundle.
+    if (reactBundleAvailable && req.path.startsWith('/react/')) {
+      return res.sendFile(reactIndexPath);
+    }
     // React routing: if the requested page lives in REACT_PAGES AND the
     // React bundle has been built, hand the SPA shell to it. Otherwise
     // fall through to the legacy vanilla bundle exactly as before.

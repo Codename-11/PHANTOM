@@ -97,7 +97,9 @@ describe('apiFetch', () => {
   it('attaches Content-Type: application/json when a body is provided', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true }));
     await apiFetch('/api/x', { method: 'POST', body: JSON.stringify({ a: 1 }) });
-    const [, init] = fetchMock.mock.calls[0];
+    const call = fetchMock.mock.calls[0];
+    if (!call) throw new Error('expected one fetch call');
+    const init = call[1] as { headers?: Record<string, string> };
     expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
   });
 });

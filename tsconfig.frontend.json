@@ -19,7 +19,11 @@
     "verbatimModuleSyntax": false,
     "useDefineForClassFields": true,
     "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"],
-    "noEmit": true
+    "noEmit": true,
+    "baseUrl": "./frontend/src",
+    "paths": {
+      "@/*": ["./*"]
+    }
   },
   "include": ["frontend/src/**/*.ts", "frontend/src/**/*.tsx"],
   "exclude": ["node_modules", "dist", "frontend/dist"]

@@ -18,6 +18,11 @@ export default defineConfig({
   plugins: [react()],
   root: resolve(__dirname, 'frontend/src'),
   base: '/react/',
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, 'frontend/src'),
+    },
+  },
   // PostCSS plugins are inlined here so they pick up the repo-root
   // tailwind.config.ts explicitly. We avoid relying on postcss.config.js
   // autodiscovery because the legacy Vite build (root: frontend/) and
@@ -38,10 +43,12 @@ export default defineConfig({
   },
   // Vitest config inherits from this file. Tests run in jsdom so the
   // wrapper's AbortController/fetch interop behaves like the browser.
+  // setupFiles wires jest-dom matchers + Radix's required DOM shims.
   test: {
     environment: 'jsdom',
     globals: false,
     include: ['**/*.test.ts', '**/*.test.tsx'],
+    setupFiles: ['./test/setup.ts'],
     css: false,
   },
 });
