@@ -119,9 +119,162 @@ export interface CampaignReplay {
 
 // ── Reference data (for the create form) ──────────────────────────────
 
+// The /api/scopes response includes a lot more than {id, name} — but the
+// campaign create form only needs those two fields, so the rich shape lives
+// on a separate ScopeRecord (below) and Scope stays the minimal projection.
 export interface Scope {
   id: string;
   name: string;
+}
+
+// ── Scope (full record from /api/scopes/:id) ──────────────────────────
+//
+// Mirrors `normalizeScope` in server/scope/scope-store.js. The fields
+// are deliberately permissive (most policy fields can be null on a
+// brand-new scope) so the React surface can render partial drafts.
+
+export interface ScopeTargets {
+  hosts?: string[];
+  domains?: string[];
+  cidrs?: string[];
+  urls?: string[];
+  hostPorts?: string[];
+  assetIds?: string[];
+  toolpackIds?: string[];
+}
+
+export type ScopeActionMode = 'auto' | 'ask' | 'deny';
+export type ScopeActionModes = Record<string, ScopeActionMode>;
+
+export interface ScopeRecord {
+  id: string;
+  name: string;
+  targets: ScopeTargets;
+  raw_targets?: ScopeTargets;
+  allowed_actions: string[];
+  blocked_actions: string[];
+  action_modes: ScopeActionModes | null;
+  active_hours: unknown | null;
+  blackout_windows: unknown | null;
+  rate_caps: unknown | null;
+  rules_of_engagement: string;
+  credential_refs: string[];
+  notes: string;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string | null;
+  archived_at: string | null;
+}
+
+export interface ScopeTemplate {
+  id: string;
+  name: string;
+  summary?: string;
+  allowedActions?: string[];
+  blockedActions?: string[];
+  nameSuffix?: string;
+  notes?: string;
+  toolpackIds?: string[];
+}
+
+// Status surface for the scope-list pill. Derived client-side from
+// `expires_at` + `archived_at` since the server doesn't store one.
+export type ScopeStatus = 'active' | 'expired' | 'archived';
+
+// Allowed/blocked action class identifiers used by the create form.
+// Mirrors the canonical safe set in server/scope/templates.js — exploit
+// + destructive + credentialed + online-bruteforce stay pinned to the
+// blocked list.
+export const SCOPE_ALLOWED_ACTIONS = [
+  'recon',
+  'network-scan',
+  'web-vuln',
+  'offline-password-audit',
+] as const;
+export const SCOPE_BLOCKED_ACTIONS = [
+  'exploit',
+  'destructive',
+  'credentialed',
+  'online-bruteforce',
+] as const;
+
+// Target rows returned from /api/scopes/parse-targets.
+export interface ParsedTarget {
+  id: string;
+  type: 'host' | 'domain' | 'cidr' | 'url' | 'host_port';
+  value: string;
+}
+export interface ParseTargetsResponse {
+  targets: ParsedTarget[];
+  errors: Array<{ input: string; reason: string }>;
+  scopeFields: ScopeTargets;
+}
+
+// ── Settings (from /api/settings) ─────────────────────────────────────
+
+export interface AppSettings {
+  provider: string;
+  baseUrl: string;
+  apiKey: string;
+  apiKeySet: boolean;
+  model: string;
+  temperature: number;
+  maxTokens: number;
+  workspace: string;
+  elevationMode?: 'root' | 'sudo' | 'admin' | 'user';
+  sudoConfigured?: boolean;
+  synthesisLlmEnabled?: boolean;
+  docsEnabled?: boolean;
+}
+
+// Partial — only fields the React surface actually writes.
+export interface SettingsPatch {
+  provider?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  workspace?: string;
+  synthesisLlmEnabled?: boolean;
+  docsEnabled?: boolean;
+}
+
+// Provider state — surfaced by the Provider state pill near the top of
+// every Settings tab. The five values map to the mega-plan A6 spec.
+export type ProviderState =
+  | 'configured'
+  | 'reachable'
+  | 'missing'
+  | 'proxy-backed'
+  | 'failed';
+
+// ── Diagnostics (from /api/diagnostics) ───────────────────────────────
+
+export type DiagnosticsOverall = 'ok' | 'needs_setup' | 'degraded' | 'blocked';
+
+export interface DiagnosticsCheck {
+  id: string;
+  status: DiagnosticsOverall;
+  detail?: string;
+  elapsedMs: number;
+}
+
+export interface DiagnosticsResult {
+  overall: DiagnosticsOverall;
+  checks: DiagnosticsCheck[];
+  elapsedMs: number;
+  generatedAt: string;
+  // Per-check `.data` blobs — opaque to the surface; not used directly.
+  runtime?: Record<string, unknown> | null;
+  db?: Record<string, unknown> | null;
+  workspace?: Record<string, unknown> | null;
+  provider?: Record<string, unknown> | null;
+  docs?: Record<string, unknown> | null;
+  toolpacks?: Record<string, unknown> | null;
+  campaigns?: Record<string, unknown> | null;
+  registry?: Record<string, unknown> | null;
+  parity?: Record<string, unknown> | null;
 }
 
 export interface PromptProfile {
@@ -129,10 +282,31 @@ export interface PromptProfile {
   name: string;
 }
 
+export interface ToolpackTool {
+  name: string;
+  command: string;
+  risk: string;
+  installHint?: string;
+  scopeRequired?: boolean;
+  available?: boolean;
+}
+
 export interface Toolpack {
   id: string;
   name?: string;
+  summary?: string;
+  category?: string;
   risks?: string[];
+  allowedActions?: string[];
+  blockedByDefault?: string[];
+  tools?: ToolpackTool[];
+  policy?: {
+    scopeRequired?: boolean;
+    passiveOnly?: boolean;
+    allowNetworkScan?: boolean;
+    allowCredentialUse?: boolean;
+    allowExploit?: boolean;
+  };
 }
 
 export interface BackendDescriptor {

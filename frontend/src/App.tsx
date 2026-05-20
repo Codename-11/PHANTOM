@@ -1,15 +1,19 @@
 // Root React component for the A8.x migration bundle.
 //
-// A8.0 shipped the /react/health placeholder; A8.1 adds the Campaigns
-// surface as a side-by-side preview at /react/campaigns. The legacy
-// `/campaigns` route still serves the vanilla bundle until a follow-up
-// commit flips it over by adding 'campaigns' to REACT_PAGES in
-// server/index.js.
+// A8.0 shipped the /react/health placeholder; A8.1 added the Campaigns
+// surface as a side-by-side preview at /react/campaigns. A8.2 adds the
+// Settings and Scope surfaces at /react/settings and /react/scope. The
+// legacy `/settings` and `/scope` routes still serve the vanilla bundle
+// until a follow-up commit flips them over by adding entries to
+// REACT_PAGES in server/index.js.
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
 import CampaignsPage from './pages/Campaigns';
 import CampaignDetailRoute from './pages/CampaignDetail';
 import CampaignCreateRoute from './pages/CampaignCreate';
+import SettingsPage from './pages/Settings';
+import ScopesPage, { ScopeDetailRoute } from './pages/Scope';
+import ScopeCreateRoute from './pages/ScopeCreate';
 
 function HealthCard() {
   return (
@@ -48,6 +52,11 @@ export function App() {
         <Route path="/react/campaigns" element={<CampaignsPage />}>
           <Route path="new" element={<CampaignCreateRoute />} />
           <Route path=":id" element={<CampaignDetailRoute />} />
+        </Route>
+        <Route path="/react/settings" element={<SettingsPage />} />
+        <Route path="/react/scope" element={<ScopesPage />}>
+          <Route path="new" element={<ScopeCreateRoute />} />
+          <Route path=":id" element={<ScopeDetailRoute />} />
         </Route>
         <Route path="/react" element={<Navigate to="/react/health" replace />} />
         <Route path="*" element={<HealthCard />} />
