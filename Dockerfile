@@ -14,7 +14,6 @@
 FROM debian:stable-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    NODE_ENV=production \
     PATH=/root/.local/bin:/usr/local/go/bin:$PATH
 
 # ─── System deps (rarely change) ──────────────────────────────────────────────
@@ -107,7 +106,8 @@ RUN npm run build
 # /app/phantom.db that disappears on `docker compose down`. The mkdir runs
 # at image-build time so SQLite never races the mount on first boot.
 RUN mkdir -p /app/data
-ENV PHANTOM_DB_PATH=/app/data/phantom.db
+ENV PHANTOM_DB_PATH=/app/data/phantom.db \
+    NODE_ENV=production
 
 EXPOSE 1337
 
