@@ -15,26 +15,29 @@ set -eu
 
 PROFILE="${1:-base}"
 
-# Per-profile tool lists. Keep apt-only for now — every tool below is
-# available in debian:stable-slim's repos, so we get one cache-friendly
-# install layer per profile. pipx/go pipelines are wired up but stay
-# empty until Phase 4's profile table starts driving the script.
+# Per-profile tool lists. Most tools are in debian:stable-slim's repos;
+# the few exceptions (nikto) are installed from source after the apt layer.
+# pipx/go pipelines are wired up but stay empty until Phase 4's profile
+# table starts driving the script.
 APT_TOOLS=""
 PIPX_TOOLS=""
 GO_TOOLS=""
+NEEDS_NIKTO=0
 
 case "$PROFILE" in
   base)
     APT_TOOLS="curl git nmap jq dnsutils"
     ;;
   offensive)
-    APT_TOOLS="curl git nmap jq dnsutils nikto whatweb gobuster hydra"
+    APT_TOOLS="curl git nmap jq dnsutils whatweb gobuster hydra"
+    NEEDS_NIKTO=1
     ;;
   blue)
     APT_TOOLS="curl git nmap jq dnsutils tshark tcpdump chkrootkit rkhunter"
     ;;
   full)
-    APT_TOOLS="curl git nmap jq dnsutils nikto whatweb gobuster hydra tshark tcpdump chkrootkit rkhunter"
+    APT_TOOLS="curl git nmap jq dnsutils whatweb gobuster hydra tshark tcpdump chkrootkit rkhunter"
+    NEEDS_NIKTO=1
     ;;
   *)
     echo "install-profile.sh: unknown profile '$PROFILE' (expected base | offensive | blue | full)" >&2
@@ -55,6 +58,18 @@ if [ -n "$APT_TOOLS" ]; then
   fi
   # shellcheck disable=SC2086
   apt-get install -y --no-install-recommends $APT_TOOLS
+  rm -rf /var/lib/apt/lists/*
+fi
+
+# ── nikto from source ────────────────────────────────────────────────────
+# nikto isn't packaged in debian-stable. Clone the official repo and
+# symlink the perl entrypoint. Deps (perl, libnet-ssleay-perl) are tiny.
+if [ "$NEEDS_NIKTO" = "1" ]; then
+  apt-get update
+  apt-get install -y --no-install-recommends perl libnet-ssleay-perl
+  git clone --depth=1 https://github.com/sullo/nikto.git /opt/nikto
+  ln -sf /opt/nikto/program/nikto.pl /usr/local/bin/nikto
+  chmod +x /opt/nikto/program/nikto.pl
   rm -rf /var/lib/apt/lists/*
 fi
 
