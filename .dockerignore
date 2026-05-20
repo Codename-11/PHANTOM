@@ -1,0 +1,33 @@
+# Keep the build context small and avoid copying state that should never end
+# up in the image. Matches the list in ai_sync/containerization.md plus a few
+# obvious extras (.git, logs, env, build outputs).
+
+# Node / build outputs
+node_modules/
+dist/
+frontend/dist/
+user-docs/.vitepress/dist/
+user-docs/node_modules/
+
+# Operator state — these live on the named volumes at runtime, not in the image
+workspace/
+*.db
+*.db-shm
+*.db-wal
+
+# Local-only scratch / capture dirs
+.design-fetch/
+.design-fetch-v2/
+.design-fetch-v3/
+.verify-shots/
+.claude/
+
+# Test caches
+tests/__pycache__/
+
+# Misc
+.git/
+.gitignore
+*.log
+.env
+.env.local

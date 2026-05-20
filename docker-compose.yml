@@ -1,0 +1,33 @@
+# PHANTOM — Phase 1 container substrate.
+#
+# Single `phantom` service. Named volumes only — no bind mounts, per the
+# locked decisions in ai_sync/containerization.md. Env passthrough lets the
+# host inject API_BASE_URL / API_KEY / MODEL_ID without baking secrets into
+# the image. Build args for toolpack profiles arrive in Phase 3.
+
+services:
+  phantom:
+    build: .
+    image: phantom:base
+    ports:
+      - "1337:1337"
+    environment:
+      # Honored by server/config.js — falls through to provider defaults if unset.
+      API_BASE_URL: ${API_BASE_URL:-}
+      API_KEY: ${API_KEY:-}
+      MODEL_ID: ${MODEL_ID:-}
+    volumes:
+      # Operator artifacts, run outputs, scratch.
+      - phantom-workspace:/app/workspace
+      # SQLite DB + WAL/SHM. Mounted at /app/data; see "Phase 2 hazard" note
+      # in the Phase 1 report — config.db.path currently resolves to
+      # /app/phantom.db, so a follow-up will introduce an env override
+      # (e.g. PHANTOM_DB_PATH) so the running server actually writes here.
+      # Until that lands, the volume is declared and persisted but the DB
+      # file still lives inside the container at /app/phantom.db.
+      - phantom-db:/app/data
+    restart: unless-stopped
+
+volumes:
+  phantom-workspace:
+  phantom-db:
