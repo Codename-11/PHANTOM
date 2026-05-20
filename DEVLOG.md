@@ -1,5 +1,15 @@
 # PHANTOM DEVLOG
 
+## 2026-05-20 09:23 EDT — Goal Engine Planning Docs
+
+- Added `docs/plans/2026-05-20-phantom-goal-engine-plan.md` with the PHANTOM-native Goal Engine / campaign worker implementation plan: data model, APIs, worker backends, safety governance, evaluator schema, tasks, verification, and acceptance criteria.
+- Added `docs/plans/2026-05-20-phantom-goal-prompt.md` with paste-ready campaign, child-worker, temporary Codex `exec`, future `/goal`, and evaluator prompts.
+- Kept Codex `/goal` framed as an optional worker backend while PHANTOM remains the canonical supervisor for scope, traces, artifacts, findings, approvals, and replay.
+
+Validation:
+- Documentation copied from the reviewed Obsidian planning packet with Obsidian frontmatter stripped for repo use.
+- `git diff --check` — passing.
+
 ## 2026-05-19 — Containerization Rollout (Phases 1–6)
 
 Six-phase rollout converting PHANTOM into a Docker-on-Linux primary, Windows-dev-only project with build-time and runtime toolpack profiles. Plan in `ai_sync/containerization.md`; phase ordering preserved across six commits (`e78db3c`, `352b4c0`, `93920dc`, `c5168ce`, `05a78d3`, this commit) so each phase is independently revertible.
