@@ -225,6 +225,8 @@ function normalizeFinding(row) {
     last_seen_at: row.last_seen_at,
     fixed_at: row.fixed_at,
     metadata: parseJSON(row.metadata_json, {}),
+    triage_status: row.triage_status || 'new',
+    dismissal_note: row.dismissal_note || null,
   };
 }
 
@@ -273,6 +275,32 @@ export function updateFinding(id, updates = {}) {
     `UPDATE findings SET title = ?, severity = ?, status = ?, description = ?, evidence = ?, recommendation = ?, fixed_at = ?, metadata_json = ?, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?`
   ).run(next.title, next.severity, next.status, next.description || null, next.evidence || null, next.recommendation || null, next.fixedAt || null, json(next.metadata, {}), id);
   return getFinding(id);
+}
+
+// A7 — Triage workflow. Distinct from the existing `status` field so
+// operator workflow state is independent of the agent's "open/closed"
+// signal. High|crit dismissals MUST carry a dismissal_note; the route
+// layer enforces this and surfaces 400 + `denial_required` when missing.
+const TRIAGE_STATUSES = new Set(['new', 'acknowledged', 'in_progress', 'dismissed', 'closed']);
+export function setFindingTriage(id, { triageStatus, dismissalNote = null }) {
+  if (!TRIAGE_STATUSES.has(triageStatus)) {
+    throw new Error(`unknown triage_status: ${triageStatus}`);
+  }
+  const current = getFinding(id);
+  if (!current) return null;
+  const note = triageStatus === 'dismissed' ? (dismissalNote || null) : null;
+  getDB().prepare(
+    `UPDATE findings
+       SET triage_status = ?,
+           dismissal_note = ?,
+           last_seen_at = CURRENT_TIMESTAMP
+     WHERE id = ?`
+  ).run(triageStatus, note, id);
+  return getFinding(id);
+}
+
+export function isHighSeverity(severity) {
+  return severity === 'high' || severity === 'critical';
 }
 
 function normalizeSnapshot(row) {

@@ -472,6 +472,14 @@ export function initDB(dbPath = config.db.path) {
   // their record stores land.
   ensureColumn('install_requests', 'denial_reason', 'TEXT');
 
+  // A7 — Findings triage workflow. triage_status moves through
+  // new → acknowledged → in_progress → dismissed → closed. Distinct
+  // from `status` (which keeps its open/closed lifecycle); triage is
+  // the operator's queue position. dismissal_note is required for
+  // dismissing high|crit severities (enforced at the route layer).
+  ensureColumn('findings', 'triage_status', 'TEXT');
+  ensureColumn('findings', 'dismissal_note', 'TEXT');
+
   return db;
 }
 

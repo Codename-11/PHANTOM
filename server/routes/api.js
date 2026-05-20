@@ -79,7 +79,7 @@ import { getPostureTrend } from '../runs/trending.js';
 import { getOnboardingStatus, markOnboardingComplete, resetOnboarding } from '../onboarding/onboarding.js';
 import {
   createAsset, getAsset, getAssets, updateAsset, archiveAsset,
-  createFinding, getFindings, updateFinding,
+  createFinding, getFindings, updateFinding, setFindingTriage, isHighSeverity,
   createAssetSnapshot, getAssetSnapshots,
   createRunTemplateFromRun, getRunTemplates, materializeRunFromTemplate,
   compareAssetSnapshots, getRunComparisons,
@@ -1285,6 +1285,29 @@ router.put('/findings/:id', (req, res) => {
     if (!finding) return res.status(404).json({ error: 'Finding not found' });
     res.json(finding);
   } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// A7 — Triage workflow. Distinct from /findings/:id PUT (which lets
+// you edit severity/status/title) so the frontend can issue a
+// triage-only update without rewriting unrelated fields.
+//
+// High|crit dismissals require a dismissal_note. Without one the
+// route returns 400 { error: 'dismissal_note_required' } so the
+// frontend can prompt for + retry.
+router.patch('/findings/:id/triage', (req, res) => {
+  const current = getFindings({ limit: 500 }).find((f) => f.id === req.params.id);
+  if (!current) return res.status(404).json({ error: 'Finding not found' });
+  const triageStatus = req.body?.triageStatus || req.body?.triage_status;
+  const dismissalNote = req.body?.dismissalNote ?? req.body?.dismissal_note ?? null;
+  if (triageStatus === 'dismissed' && isHighSeverity(current.severity) && (!dismissalNote || !String(dismissalNote).trim())) {
+    return res.status(400).json({ error: 'dismissal_note_required' });
+  }
+  try {
+    const finding = setFindingTriage(req.params.id, { triageStatus, dismissalNote });
+    res.json(finding);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 router.get('/run-templates', (req, res) => {

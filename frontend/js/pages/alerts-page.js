@@ -130,7 +130,16 @@
       }
 
       // Drawer footer buttons
-      $('alerts-ack-btn')?.addEventListener('click', () => this.acknowledgeSelected());
+      // A7 — Triage workflow. The drawer-ft now exposes a 4-button
+      // triage rail. Dismissing high|crit prompts for a note via a
+      // simple window.prompt — keeps the flow inline without a new
+      // modal.
+      $('alerts-triage-actions')?.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-triage-status]');
+        if (!btn || !this.selectedId) return;
+        const triageStatus = btn.dataset.triageStatus;
+        await this.triageSelected(triageStatus);
+      });
       $('alerts-openrun-btn')?.addEventListener('click', () => this.openRunForSelected());
       $('alerts-report-btn')?.addEventListener('click', () => {
         // placeholder — out of scope this pass
@@ -502,6 +511,44 @@
           ${events.map(e => `<li><span class="mono">${escapeHtml(fmtTs(e.ts))}</span> — ${escapeHtml(e.label || e.type || 'event')}</li>`).join('')}
         </ul>
       `;
+    },
+
+    async triageSelected(triageStatus) {
+      if (!this.selectedId) return;
+      const id = this.selectedId;
+      const f = this.findings.find((x) => x.id === id);
+      const isHighCrit = f && (sevClass(f.severity) === 'crit' || sevClass(f.severity) === 'high');
+      let dismissalNote = null;
+      if (triageStatus === 'dismissed' && isHighCrit) {
+        dismissalNote = window.prompt(
+          `Dismissing a ${f.severity} finding. Please provide a reason — this is recorded as the dismissal note.`,
+          '',
+        );
+        if (dismissalNote == null || !dismissalNote.trim()) {
+          // Operator cancelled or left blank
+          return;
+        }
+        dismissalNote = dismissalNote.trim();
+      }
+      try {
+        const updated = await window.apiFetch(
+          `/api/findings/${encodeURIComponent(id)}/triage`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify({ triageStatus, dismissalNote }),
+            timeoutMs: 5000,
+          },
+        );
+        const idx = this.findings.findIndex((x) => x.id === id);
+        if (idx >= 0) this.findings[idx] = { ...this.findings[idx], ...updated };
+        this.applyFiltersAndRender();
+        window.dispatchEvent(new CustomEvent('phantom:findings-changed'));
+      } catch (err) {
+        const reason = err.code === 'dismissal_note_required' || /dismissal_note_required/.test(err.message)
+          ? 'A dismissal note is required for high/critical findings.'
+          : err.message;
+        alert(`Triage failed: ${reason}`);
+      }
     },
 
     async acknowledgeSelected() {

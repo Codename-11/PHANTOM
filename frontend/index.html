@@ -641,10 +641,18 @@
                 <!-- tab panels injected -->
               </div>
               <div class="drawer-ft" id="alerts-drawer-ft">
-                <button class="btn primary sm" id="alerts-ack-btn">Acknowledge</button>
+                <!-- A7 — Triage workflow buttons. The triage status is
+                     distinct from the finding's open/closed status.
+                     Dismissing high|crit prompts for a note. -->
+                <div class="triage-actions" id="alerts-triage-actions" role="group" aria-label="Triage actions">
+                  <button class="btn ghost sm" data-triage-status="acknowledged" title="Mark as acknowledged">Ack</button>
+                  <button class="btn ghost sm" data-triage-status="in_progress" title="Mark as in progress">In progress</button>
+                  <button class="btn ghost sm" data-triage-status="dismissed" title="Dismiss (high/crit require a note)">Dismiss</button>
+                  <button class="btn ghost sm" data-triage-status="closed" title="Mark as closed">Close</button>
+                </div>
+                <span class="grow"></span>
                 <button class="btn ghost sm" id="alerts-openrun-btn">Open run</button>
                 <button class="btn ghost sm" id="alerts-report-btn">Draft report</button>
-                <button class="btn ghost sm" id="alerts-more-btn" aria-label="More">⋯</button>
               </div>
             </aside>
           </div>
