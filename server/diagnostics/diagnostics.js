@@ -18,6 +18,7 @@ import { existsSync, statSync, accessSync, constants as fsConstants } from 'fs';
 import { getDB, getSetting } from '../memory/store.js';
 import { getToolpacks, checkToolpackAvailability } from '../toolpacks/toolpack-registry.js';
 import { listCampaigns } from '../campaigns/campaign-store.js';
+import { getLocalManifestSummary } from '../registry/local-manifest-loader.js';
 import config from '../config.js';
 
 const PER_CHECK_TIMEOUT_MS = 500;
@@ -195,6 +196,24 @@ function checkCampaigns() {
   }
 }
 
+function checkRegistry() {
+  try {
+    const s = getLocalManifestSummary();
+    const status = s.total === 0 ? 'needs_setup'
+      : s.invalid > 0 ? 'degraded'
+      : 'ok';
+    return {
+      status,
+      detail: s.invalid
+        ? `${s.invalid} of ${s.total} local manifests failed validation: ${s.invalidIds.join(', ')}`
+        : `${s.valid} local manifests loaded + validated`,
+      data: s,
+    };
+  } catch (err) {
+    return { status: 'degraded', detail: `manifest loader unreachable: ${err.message}` };
+  }
+}
+
 // ── Composite ────────────────────────────────────────────────────────────
 
 export async function getDiagnostics() {
@@ -209,6 +228,7 @@ export async function getDiagnostics() {
       runCheck('docs',      checkDocs),
       runCheck('toolpacks', checkToolpacks),
       runCheck('campaigns', checkCampaigns),
+      runCheck('registry',  checkRegistry),
     ]),
     new Promise((resolve) => setTimeout(() => resolve([
       { id: '__budget__', status: 'degraded', detail: `total budget ${TOTAL_BUDGET_MS}ms exceeded`, elapsedMs: TOTAL_BUDGET_MS },
@@ -227,6 +247,7 @@ export async function getDiagnostics() {
     docs:      byId.docs?.data || null,
     toolpacks: byId.toolpacks?.data || null,
     campaigns: byId.campaigns?.data || null,
+    registry:  byId.registry?.data || null,
     checks: checks.map(({ id, status, elapsedMs, detail }) => ({ id, status, elapsedMs, detail })),
     elapsedMs: Date.now() - started,
     generatedAt: new Date().toISOString(),
