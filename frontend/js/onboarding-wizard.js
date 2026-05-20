@@ -12,7 +12,7 @@
 // "what does the output look like" question every new operator asks.
 
 (function () {
-  const STEPS = ['welcome', 'provider', 'scope', 'preview'];
+  const STEPS = ['welcome', 'provider', 'scope', 'preview', 'get-started'];
 
   const state = {
     open: false,
@@ -167,6 +167,37 @@
     `;
   }
 
+  function renderGetStarted() {
+    return `
+      <div class="onb-get-started">
+        <p class="onb-lede">You're set up. Pick how to populate PHANTOM with something to look at:</p>
+        <ul class="onb-cta-grid">
+          <li>
+            <button class="onb-cta-tile" type="button" data-onb-next="load-demo">
+              <span class="onb-cta-icon">DEMO</span>
+              <span class="onb-cta-title">Load demo scenario</span>
+              <span class="onb-cta-help">Realistic synthetic scopes / assets / runs / findings. Watermarked as <code>[demo]</code>.</span>
+            </button>
+          </li>
+          <li>
+            <button class="onb-cta-tile" type="button" data-onb-next="scan-network">
+              <span class="onb-cta-icon">SCAN</span>
+              <span class="onb-cta-title">Scan my network for assets</span>
+              <span class="onb-cta-help">Passive ARP/neighbor read proposes hosts on this machine's LAN. <em>Opens Assets.</em></span>
+            </button>
+          </li>
+          <li>
+            <button class="onb-cta-tile" type="button" data-onb-next="manual">
+              <span class="onb-cta-icon">MAN</span>
+              <span class="onb-cta-title">Set it up manually</span>
+              <span class="onb-cta-help">Close the wizard and explore from Dash. The checklist will guide you.</span>
+            </button>
+          </li>
+        </ul>
+      </div>
+    `;
+  }
+
   async function renderPreview() {
     if (!state.cache.synthesisStub) {
       try {
@@ -194,6 +225,7 @@
     if (state.step === 'provider') html = await renderProvider();
     if (state.step === 'scope')    html = await renderScope();
     if (state.step === 'preview')  html = await renderPreview();
+    if (state.step === 'get-started') html = renderGetStarted();
     body.innerHTML = html;
     body.classList.remove('is-busy');
     bindStepHandlers();
@@ -286,6 +318,42 @@
       const targets = document.getElementById('onb-scope-targets');
       if (name) name.oninput = () => { state.scopeName = name.value; };
       if (targets) targets.oninput = () => { state.scopeTargets = targets.value; };
+    }
+
+    if (state.step === 'get-started') {
+      document.querySelectorAll('[data-onb-next]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const choice = btn.getAttribute('data-onb-next');
+          btn.disabled = true;
+          try {
+            if (choice === 'load-demo') {
+              try {
+                await fetchJson('/api/onboarding/load-demo', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({}),
+                });
+              } catch (err) {
+                // 409 → demo already loaded; treat as success
+                if (!/already present/i.test(String(err.message))) throw err;
+              }
+            }
+            close();
+            if (choice === 'scan-network') {
+              window.Router?.navigate?.('scope'); // Assets/Scope page
+            } else {
+              window.Router?.navigate?.('dash');
+            }
+            // Repaint the Dash checklist + diagnostics so the new state shows
+            window.OnboardingChecklist?.refresh?.();
+            window.DiagnosticsCard?.show?.('dash');
+          } catch (err) {
+            alert(`Failed: ${err.message}`);
+          } finally {
+            btn.disabled = false;
+          }
+        });
+      });
     }
   }
 

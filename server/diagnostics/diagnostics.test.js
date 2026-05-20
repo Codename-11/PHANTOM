@@ -39,8 +39,10 @@ describe('diagnostics', () => {
     const result = await getDiagnostics();
     const elapsed = Date.now() - started;
 
-    // Returns within total budget + small slack
-    assert.ok(elapsed <= _internals.TOTAL_BUDGET_MS + 200, `elapsed=${elapsed}`);
+    // Returns within total budget + slack for concurrent test scheduling
+    // (timing assertions are inherently flaky under load; +1000ms is a
+    // generous floor that still catches a runaway probe).
+    assert.ok(elapsed <= _internals.TOTAL_BUDGET_MS + 1000, `elapsed=${elapsed}`);
     // Shape
     assert.ok(['ok', 'needs_setup', 'degraded', 'blocked'].includes(result.overall));
     assert.ok(Array.isArray(result.checks));

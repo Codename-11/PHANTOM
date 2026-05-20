@@ -56,6 +56,8 @@ import {
   buildCampaignReplay, generateCampaignReport, generateCampaignEvidenceBundle,
 } from '../campaigns/campaign-replay.js';
 import { getDiagnostics } from '../diagnostics/diagnostics.js';
+import { getOnboardingChecklist } from '../onboarding/onboarding-status.js';
+import { runSeed, clearDemo } from '../../scripts/seed.js';
 import { evaluateToolAction, normalizeOperatorOverride, ACTION_CLASSES } from '../scope/policy.js';
 import { parseTargetInput, targetsToScopeFields } from '../scope/target-parser.js';
 import { getScopeTemplates } from '../scope/templates.js';
@@ -1585,6 +1587,50 @@ router.get('/diagnostics', async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ overall: 'blocked', error: err.message, generatedAt: new Date().toISOString() });
+  }
+});
+
+// ─── Onboarding (A1) ───
+// 5-item checklist + load/clear demo data. Seed runs in-process via
+// dynamic import so Docker installs work without `node` on the spawn
+// PATH inside the container.
+//
+// Mounted as /api/onboarding/checklist (NOT /status) because the
+// existing /api/onboarding/status route already serves the wizard's
+// first-run handshake (returns { completed, firstRun, signals }).
+// Both routes coexist.
+router.get('/onboarding/checklist', (req, res) => {
+  try { res.json(getOnboardingChecklist()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/onboarding/load-demo', (req, res) => {
+  try {
+    const reset = req.body?.reset === true;
+    const result = runSeed({ reset, log: () => {} });
+    res.status(201).json({
+      ok: true,
+      scopeCount: result.scopes.length,
+      assetCount: result.assets.length,
+      findingCount: result.findingCount,
+      promptProfileCount: result.promptProfiles.length,
+      cleared: result.cleared || null,
+    });
+  } catch (err) {
+    // 409 when demo is already present and reset=false — operator can
+    // retry with reset:true via the same endpoint.
+    const status = /already present/i.test(err.message) ? 409 : 400;
+    res.status(status).json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/onboarding/clear-demo', (req, res) => {
+  try {
+    const cleared = clearDemo();
+    const total = Object.values(cleared).reduce((a, b) => a + b, 0);
+    res.json({ ok: true, cleared, totalDeleted: total });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 

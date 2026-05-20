@@ -114,6 +114,7 @@
   window.Goals?.init?.();
   window.CampaignsPage?.init?.();
   window.DiagnosticsCard?.init?.();
+  window.OnboardingChecklist?.init?.();
   // Paint the Dash diagnostics card immediately so first paint shows readiness.
   window.DiagnosticsCard?.show?.('dash');
   // initOperatorOverrideControl() is called later, after OverrideController

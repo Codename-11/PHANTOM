@@ -60,6 +60,7 @@ window.Router = {
     if (route === 'dash') {
       window.Dash?.show?.();
       window.DiagnosticsCard?.show?.('dash');
+      window.OnboardingChecklist?.show?.();
     }
     if (route === 'approvals') window.ApprovalsPage?.show?.();
     if (route === 'campaigns') window.CampaignsPage?.show?.();

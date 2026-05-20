@@ -301,6 +301,9 @@
                so the operator sees system state before scrolling. -->
           <section id="dash-diagnostics-card" class="dash-diagnostics-card" aria-label="System readiness"></section>
 
+          <!-- A1 — Onboarding checklist. Auto-hides when status.complete=true. -->
+          <section id="onboarding-checklist" class="onboarding-checklist" aria-label="Setup checklist" hidden></section>
+
           <!-- Cockpit summary (kit-aligned). Hidden until data arrives;
                when empty it falls back to .welcome-features (existing). -->
           <section id="cockpit" class="cockpit hidden" aria-label="Operations overview">
@@ -1714,6 +1717,7 @@
   <script src="js/management.js"></script>
   <script src="js/lib/fetch-helper.js"></script>
   <script src="js/pages/diagnostics-card.js"></script>
+  <script src="js/pages/onboarding-checklist.js"></script>
   <script src="js/goals.js"></script>
   <script src="js/campaigns/campaign-presenter.js"></script>
   <script src="js/campaigns/campaign-form.js"></script>
