@@ -1,11 +1,11 @@
 import { describe, test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  loadLocalManifests, getLocalManifest, getLocalManifestSummary, _resetCache,
+  loadLocalManifests, getLocalManifest, getLocalManifestSummary, _resetCache, setTrustRoots,
 } from './local-manifest-loader.js';
 
 describe('local-manifest-loader', () => {
-  beforeEach(() => _resetCache());
+  beforeEach(() => { setTrustRoots([]); _resetCache(); });
 
   test('loadLocalManifests: returns every fixture under server/registry/fixtures', () => {
     const all = loadLocalManifests();
@@ -57,5 +57,35 @@ describe('local-manifest-loader', () => {
     _resetCache();
     const b = loadLocalManifests();
     assert.notStrictEqual(a, b, 'after reset, expect a fresh array');
+  });
+
+  // B3 prep — signature status assessment per manifest.
+  test('signatureStatus: fixtures with placeholder digests report "unsigned"', () => {
+    const all = loadLocalManifests();
+    for (const m of all) {
+      assert.ok(m.signatureStatus, `${m.id} missing signatureStatus`);
+      assert.ok(
+        ['unsigned', 'unknown_signer', 'verified', 'invalid'].includes(m.signatureStatus.status),
+        `${m.id} bad signatureStatus.status: ${m.signatureStatus.status}`,
+      );
+    }
+  });
+
+  test('getLocalManifestSummary: surfaces signature counts', () => {
+    const s = getLocalManifestSummary();
+    assert.ok(s.signatures, 'summary should expose .signatures');
+    assert.strictEqual(typeof s.signatures.unsigned, 'number');
+    assert.strictEqual(typeof s.signatures.verified, 'number');
+    // Default fixtures use placeholder digests, so they're unsigned.
+    assert.ok(s.signatures.unsigned >= 1);
+  });
+
+  test('setTrustRoots: configurable; empty roots → fixtures report unsigned', () => {
+    setTrustRoots([]);
+    _resetCache();
+    const all = loadLocalManifests();
+    // All fixtures have placeholder digests → unsigned regardless of roots.
+    const sigStates = new Set(all.map((m) => m.signatureStatus.status));
+    assert.ok(sigStates.has('unsigned'));
   });
 });
