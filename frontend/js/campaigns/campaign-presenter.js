@@ -102,7 +102,7 @@
 
   function renderGoalsPane(replay) {
     if (!replay.goals.length) {
-      return `<div class="campaign-empty-pane">No goals queued yet. Add one with <code>POST /api/campaigns/${escapeHtml(replay.campaign.id)}/goals</code>.</div>`;
+      return `<div class="campaign-empty-pane">No goals queued yet. Add one using the campaign's <strong>Add goal</strong> form (creation form lands as part of the same campaign drawer).</div>`;
     }
     return `
       <ol class="campaign-timeline">
@@ -133,7 +133,7 @@
 
   function renderRunsPane(replay) {
     if (!replay.runs.length) {
-      return `<div class="campaign-empty-pane">No child runs yet. Activate the campaign and use <code>POST /api/campaigns/${escapeHtml(replay.campaign.id)}/run-next</code>.</div>`;
+      return `<div class="campaign-empty-pane">No child runs yet. Start the campaign and click <strong>Run next goal</strong> to spawn the first child run.</div>`;
     }
     return `
       <ul class="campaign-runs">

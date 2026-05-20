@@ -7318,3 +7318,36 @@ svg.ico [stroke] {
 @media (max-width: 900px) {
   .onb-cta-grid { grid-template-columns: 1fr; }
 }
+
+/* ═══ A10 — Demo data watermark ═══
+   Any row tagged data-demo="true" or whose name starts with [demo]
+   picks up a small "DEMO" badge so synthetic data is never mistaken
+   for the real thing. Added via a JS helper at render time
+   (frontend/js/lib/demo-watermark.js). */
+[data-demo="true"], .demo-row {
+  position: relative;
+}
+[data-demo="true"]::after, .demo-row::after {
+  content: 'DEMO';
+  position: absolute;
+  top: 6px; right: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  letter-spacing: 0.12em;
+  color: var(--warn, #d8b15a);
+  background: rgba(216,177,90,0.08);
+  border: 1px solid rgba(216,177,90,0.32);
+  padding: 0 6px;
+  border-radius: var(--r-pill, 999px);
+  pointer-events: none;
+}
+.demo-watermark-banner {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(216,177,90,0.10);
+  border: 1px solid rgba(216,177,90,0.32);
+  color: var(--warn, #d8b15a);
+  border-radius: var(--r-pill, 999px);
+  padding: 2px 10px;
+  font-family: var(--font-mono); font-size: var(--fs-10);
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
