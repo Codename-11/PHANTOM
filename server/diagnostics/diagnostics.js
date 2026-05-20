@@ -224,6 +224,25 @@ function checkCampaigns() {
   }
 }
 
+async function checkRevocations() {
+  try {
+    const mod = await import('../registry/revocation-poller.js');
+    const s = mod.getRevocationSummary();
+    if (s.sources === 0) {
+      return { status: 'ok', detail: 'no registry sources configured', data: s };
+    }
+    if (s.block > 0) {
+      return { status: 'degraded', detail: `${s.block} package version(s) BLOCKED by revocation feeds`, data: s };
+    }
+    if (s.warn > 0) {
+      return { status: 'needs_setup', detail: `${s.warn} package version(s) carry warn revocations`, data: s };
+    }
+    return { status: 'ok', detail: `${s.sources} feed(s) clean`, data: s };
+  } catch (err) {
+    return { status: 'degraded', detail: `revocation poll: ${err.message}` };
+  }
+}
+
 function checkRegistry() {
   try {
     const s = getLocalManifestSummary();
@@ -258,6 +277,7 @@ export async function getDiagnostics() {
       runCheck('campaigns', checkCampaigns),
       runCheck('registry',  checkRegistry),
       runCheck('parity',    checkToolpackParity),
+      runCheck('revocations', checkRevocations),
     ]),
     new Promise((resolve) => setTimeout(() => resolve([
       { id: '__budget__', status: 'degraded', detail: `total budget ${TOTAL_BUDGET_MS}ms exceeded`, elapsedMs: TOTAL_BUDGET_MS },
@@ -278,6 +298,7 @@ export async function getDiagnostics() {
     campaigns: byId.campaigns?.data || null,
     registry:  byId.registry?.data || null,
     parity:    byId.parity?.data || null,
+    revocations: byId.revocations?.data || null,
     checks: checks.map(({ id, status, elapsedMs, detail }) => ({ id, status, elapsedMs, detail })),
     elapsedMs: Date.now() - started,
     generatedAt: new Date().toISOString(),

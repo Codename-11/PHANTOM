@@ -52,6 +52,18 @@ initDB();
 // Load persisted settings from DB (API keys, workspace, etc.)
 loadPersistedSettings(getSetting);
 
+// B4-full — start the revocation poller AFTER DB init. The poller is
+// fail-safe: an unreachable source / signature failure does NOT crash
+// the process; outcomes are recorded via registry-source-store.
+// Skipped under NODE_ENV=test so unit suites don't start background
+// timers that hold the event loop.
+if (process.env.NODE_ENV !== 'test') {
+  // Lazy import so the file doesn't pull node:undici on every cold boot.
+  import('./registry/revocation-poller.js').then(({ startRevocationPoller }) => {
+    startRevocationPoller();
+  }).catch(() => { /* fail-safe — manifest world stays read-only on poller failure */ });
+}
+
 // Create Express app
 const app = express();
 app.use(cors());

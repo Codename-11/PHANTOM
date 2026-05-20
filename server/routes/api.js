@@ -65,6 +65,9 @@ import {
   updateRegistrySource, deleteRegistrySource, recordFetchOutcome,
 } from '../registry/registry-source-store.js';
 import { fetchIndex, fetchRevocations } from '../registry/remote-fetch.js';
+import {
+  listCachedRevocations, getRevocationSummary, checkRevoked, pollOnce,
+} from '../registry/revocation-poller.js';
 import { evaluateToolAction, normalizeOperatorOverride, ACTION_CLASSES } from '../scope/policy.js';
 import { explain as explainApproval, requiresDenialReason } from '../approvals/explain.js';
 import { parseTargetInput, targetsToScopeFields } from '../scope/target-parser.js';
@@ -1802,6 +1805,42 @@ router.post('/registry/sources/:id/fetch', async (req, res) => {
     : 'error';
   recordFetchOutcome(source.id, { status, error: errStr });
   res.status(502).json({ ok: false, error: errStr, signatureStatus: result.signatureStatus });
+});
+
+// ─── B4-full — Revocation feed roll-up + on-demand poll ───
+// /api/registry/revocations returns the cached + indexed revocations
+// across every enabled source. The poller (server/registry/
+// revocation-poller.js) runs every 30 minutes in production; this
+// route exposes its in-memory state for the UI + automation.
+router.get('/registry/revocations', (req, res) => {
+  res.json({
+    summary: getRevocationSummary(),
+    entries: listCachedRevocations(),
+  });
+});
+
+router.post('/registry/revocations/poll', async (req, res) => {
+  // Operator-driven immediate poll across all enabled sources. Useful
+  // when verifying a freshly-published revocation lands without
+  // waiting for the next scheduled tick.
+  try {
+    const results = await pollOnce();
+    res.json({ ok: true, results, summary: getRevocationSummary() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/registry/revocations/check', (req, res) => {
+  // Quick "is X@Y revoked?" check across every cached feed. Used by
+  // the install-preview path so operators see the warn/block before
+  // confirming.
+  const packageId = req.query.package;
+  const version = req.query.version;
+  if (!packageId || !version) {
+    return res.status(400).json({ error: 'package + version required' });
+  }
+  res.json(checkRevoked(packageId, version));
 });
 
 // Revocation feed fetch — B4-full surface. 404 from the source is
