@@ -238,14 +238,47 @@ describe('API Routes Integration', () => {
     const list = await res.json();
     assert.ok(list.some(r => r.id === request.id));
 
+    // A3 — installs are credentialed (high-risk); cancelling without a
+    // denial reason is rejected with 400.
     res = await fetch(`${baseUrl}/installer/requests/${request.id}/cancel`, { method: 'POST' });
+    assert.strictEqual(res.status, 400);
+    const denyErr = await res.json();
+    assert.strictEqual(denyErr.error, 'denial_reason_required');
+
+    res = await fetch(`${baseUrl}/installer/requests/${request.id}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ denialReason: 'not approved for production hosts' }),
+    });
     assert.strictEqual(res.status, 200);
     const cancelled = await res.json();
     assert.strictEqual(cancelled.status, 'cancelled');
+    assert.strictEqual(cancelled.denial_reason, 'not approved for production hosts');
 
-    // Double-cancel must fail with 409.
-    res = await fetch(`${baseUrl}/installer/requests/${request.id}/cancel`, { method: 'POST' });
+    // Double-cancel must fail with 409 even when a reason is supplied.
+    res = await fetch(`${baseUrl}/installer/requests/${request.id}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ denialReason: 'attempting again' }),
+    });
     assert.strictEqual(res.status, 409);
+
+    // A3 — /installer/requests?explained=1 returns the structured shape
+    // alongside the raw request so the Approvals UI doesn't have to
+    // recompute risk/sideEffects on the client.
+    res = await fetch(`${baseUrl}/installer/requests?explained=1`);
+    assert.strictEqual(res.status, 200);
+    const explainedList = await res.json();
+    assert.ok(Array.isArray(explainedList.requests));
+    assert.ok(Array.isArray(explainedList.explained));
+    const explainedRow = explainedList.explained.find(r => r && r.id === request.id);
+    assert.ok(explainedRow, 'explained list should contain the cancelled request');
+    assert.strictEqual(explainedRow.type, 'install');
+    assert.strictEqual(explainedRow.riskClass, 'credentialed');
+    assert.strictEqual(explainedRow.status, 'denied');
+    assert.strictEqual(explainedRow.denialReason, 'not approved for production hosts');
+    assert.ok(Array.isArray(explainedRow.sideEffects) && explainedRow.sideEffects.length > 0);
+    assert.ok(explainedRow.rawDetails, 'rawDetails must be preserved');
   });
 
   test('Toolpack profile CRUD: list/get/create/update/delete with validation', async () => {
@@ -857,5 +890,136 @@ describe('API Routes Integration', () => {
     assert.strictEqual(res.status, 204);
     res = await fetch(`${baseUrl}/campaigns/${campaign.id}`);
     assert.strictEqual(res.status, 404);
+  });
+});
+
+// ─── Local-network discovery (A1b) ─────────────────────────────────────────
+//
+// The discover endpoint shells out to arp/ip-neigh on the host; in test we
+// route through the global module so any host environment works. We assert
+// the policy-gate refusal (no scope, no ack) and the promote endpoint's
+// idempotence semantics — both are the load-bearing contracts for the
+// Assets scan modal.
+
+describe('Local-network discovery routes', () => {
+  let serverB;
+  let baseUrlB;
+
+  before(async () => {
+    // Re-init under a fresh in-memory DB so existing test state from the
+    // outer suite doesn't pollute the asset count.
+    initDB(':memory:');
+    const app = express();
+    app.use(express.json());
+    app.use('/api', apiRouter);
+    await new Promise((resolve) => {
+      serverB = app.listen(0, () => {
+        baseUrlB = `http://localhost:${serverB.address().port}/api`;
+        resolve();
+      });
+    });
+  });
+
+  after(() => {
+    if (serverB) serverB.close();
+    closeDB();
+  });
+
+  test('POST /api/discover/local-network without scope or ack returns 403', async () => {
+    const res = await fetch(`${baseUrlB}/discover/local-network`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.strictEqual(res.status, 403);
+    const body = await res.json();
+    assert.strictEqual(body.risk, 'recon');
+    assert.match(body.error, /scope|recon/i);
+  });
+
+  test('POST /api/discover/local-network with acknowledgedNoScope returns structured payload', async () => {
+    const res = await fetch(`${baseUrlB}/discover/local-network`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ acknowledgedNoScope: true }),
+    });
+    // 200 on any host — the underlying tool may return zero neighbors if
+    // arp / ip aren't on PATH; what we care about is the contract.
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.ok(typeof body.count === 'number');
+    assert.ok(Array.isArray(body.neighbors));
+    assert.strictEqual(body.acknowledgedNoScope, true);
+  });
+
+  test('POST /api/discover/local-network/promote creates new assets and skips duplicates', async () => {
+    // First promote — both items are new, both get created.
+    let res = await fetch(`${baseUrlB}/discover/local-network/promote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: [
+          { ip: '10.99.0.1', mac: 'aa:bb:cc:dd:ee:01', hostname: 'router' },
+          { ip: '10.99.0.2', mac: 'aa:bb:cc:dd:ee:02' },
+        ],
+      }),
+    });
+    assert.strictEqual(res.status, 200);
+    let body = await res.json();
+    assert.strictEqual(body.createdCount, 2);
+    assert.strictEqual(body.skippedCount, 0);
+    // Created assets carry the discovery tag.
+    for (const asset of body.created) {
+      assert.ok((asset.tags || []).includes('local-network-scan'),
+        `created asset should be tagged local-network-scan, got ${(asset.tags || []).join(',')}`);
+      assert.strictEqual(asset.metadata?.discoveredFrom, 'local-network-scan');
+      // The new asset has its IP recorded as an address.
+      assert.ok((asset.addresses || []).some((a) => a.kind === 'ip'));
+    }
+
+    // Second promote — the same IPs come back. Both should be skipped
+    // (idempotence guarantee for repeated scans).
+    res = await fetch(`${baseUrlB}/discover/local-network/promote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: [
+          { ip: '10.99.0.1', mac: 'aa:bb:cc:dd:ee:01' },
+          { ip: '10.99.0.2' },
+          { ip: '10.99.0.3' }, // new — should be created
+        ],
+      }),
+    });
+    assert.strictEqual(res.status, 200);
+    body = await res.json();
+    assert.strictEqual(body.createdCount, 1, 'only the new IP is created');
+    assert.strictEqual(body.skippedCount, 2, 'duplicate IPs are skipped');
+    assert.ok(body.skipped.every((s) => /already exists/.test(s.reason)));
+  });
+
+  test('POST /api/discover/local-network/promote rejects empty items', async () => {
+    const res = await fetch(`${baseUrlB}/discover/local-network/promote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [] }),
+    });
+    assert.strictEqual(res.status, 400);
+  });
+
+  test('POST /api/discover/local-network/promote dedupes within a single payload', async () => {
+    const res = await fetch(`${baseUrlB}/discover/local-network/promote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: [
+          { ip: '10.99.0.51' },
+          { ip: '10.99.0.51' }, // duplicate of the first in the same call
+        ],
+      }),
+    });
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.strictEqual(body.createdCount, 1);
+    assert.strictEqual(body.skippedCount, 1);
   });
 });

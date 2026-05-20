@@ -59,6 +59,7 @@ import { getDiagnostics } from '../diagnostics/diagnostics.js';
 import { getOnboardingChecklist } from '../onboarding/onboarding-status.js';
 import { runSeed, clearDemo } from '../../scripts/seed.js';
 import { evaluateToolAction, normalizeOperatorOverride, ACTION_CLASSES } from '../scope/policy.js';
+import { explain as explainApproval, requiresDenialReason } from '../approvals/explain.js';
 import { parseTargetInput, targetsToScopeFields } from '../scope/target-parser.js';
 import { getScopeTemplates } from '../scope/templates.js';
 import { getRoeTemplates, getRoeTemplate } from '../scope/roe-templates.js';
@@ -68,6 +69,7 @@ import {
   resolvePrompt,
 } from '../prompts/prompt-store.js';
 import { getToolDefinitions } from '../tools/registry.js';
+import { executePhantomTool } from '../tools/phantom-tools.js';
 import { getToolpacks, getToolpack, checkToolpackAvailability } from '../toolpacks/toolpack-registry.js';
 import { buildRunReplay } from '../runs/replay.js';
 import { buildRunSynthesis, buildStubSynthesis, enrichSynthesisWithLLM } from '../runs/synthesis.js';
@@ -155,12 +157,25 @@ router.post('/installer/request', (req, res) => {
 });
 
 router.get('/installer/requests', (req, res) => {
-  res.json(getInstallRequests({ status: req.query.status || null, limit: req.query.limit || 50 }));
+  const requests = getInstallRequests({ status: req.query.status || null, limit: req.query.limit || 50 });
+  // A3 — attach the explained shape inline so the approvals UI can render
+  // structured fields without recomputing them on every refresh. The raw
+  // request keeps its original shape for downstream consumers.
+  const explained = requests.map((r) => {
+    try { return explainApproval({ ...r, type: 'install' }); }
+    catch { return null; }
+  });
+  if (req.query.explained === '1') return res.json({ requests, explained });
+  res.json(requests);
 });
 
 router.get('/installer/requests/:id', (req, res) => {
   const request = getInstallRequest(req.params.id);
   if (!request) return res.status(404).json({ error: 'Install request not found' });
+  if (req.query.explained === '1') {
+    try { return res.json({ request, explained: explainApproval({ ...request, type: 'install' }) }); }
+    catch { return res.json(request); }
+  }
   res.json(request);
 });
 
@@ -168,10 +183,31 @@ router.post('/installer/requests/:id/cancel', (req, res) => {
   const request = getInstallRequest(req.params.id);
   if (!request) return res.status(404).json({ error: 'Install request not found' });
   if (request.status !== 'pending') return res.status(409).json({ error: `cannot cancel a ${request.status} request` });
+
+  // A3 — high|crit denials require an operator-supplied reason. Installs
+  // are always classified `credentialed` (a high-risk class), so the
+  // denial_reason becomes mandatory here.
+  const denialReason = typeof req.body?.denialReason === 'string'
+    ? req.body.denialReason.trim()
+    : '';
+  const explained = (() => {
+    try { return explainApproval({ ...request, type: 'install' }); }
+    catch { return null; }
+  })();
+  const needsReason = explained ? requiresDenialReason(explained) : true; // installs always need a reason
+  if (needsReason && !denialReason) {
+    return res.status(400).json({
+      error: 'denial_reason_required',
+      message: 'High/crit denials require an operator-supplied note.',
+      riskClass: explained?.riskClass || 'credentialed',
+    });
+  }
+
   const updated = updateInstallRequest(req.params.id, {
     status: 'cancelled',
     decidedAt: new Date().toISOString(),
     completedAt: new Date().toISOString(),
+    denialReason: denialReason || null,
   });
   res.json(updated);
 });
@@ -1281,7 +1317,17 @@ router.get('/approvals', (req, res) => {
     toolName: req.query.toolName || null,
     since: req.query.since || null,
   });
-  res.json({ count: events.length, events });
+  // A3 — every event gets the explained shape attached. The original
+  // event is preserved verbatim under `explained.rawDetails`, so existing
+  // consumers keep working while the UI renders the structured fields.
+  const explained = events.map((event) => {
+    try {
+      return explainApproval({ ...event, type: 'scope' });
+    } catch {
+      return null;
+    }
+  }).filter(Boolean);
+  res.json({ count: events.length, events, explained });
 });
 router.get('/approvals/stats', (req, res) => {
   res.json(getApprovalStats({ since: req.query.since || null }));
@@ -1631,6 +1677,98 @@ router.post('/onboarding/clear-demo', (req, res) => {
     res.json({ ok: true, cleared, totalDeleted: total });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── Local-network discovery (A1b) ───────────────────────────────────────
+// Wraps the phantom_discover_local_network tool for the Assets "scan this
+// machine's network" modal. The tool itself enforces the policy gate
+// (risk class = recon), writes the structured artifact, and traces COUNT
+// only. Promote endpoint converts a confirmed subset into DRAFT assets.
+router.post('/discover/local-network', async (req, res) => {
+  try {
+    const scopeId = req.body?.scopeId || null;
+    const acknowledgedNoScope = req.body?.acknowledgedNoScope === true;
+    const scope = scopeId ? getScope(scopeId) : null;
+    const result = await executePhantomTool(
+      'phantom_discover_local_network',
+      { acknowledgedNoScope },
+      { scope, runId: req.body?.runId || null, conversationId: req.body?.conversationId || null }
+    );
+    let parsed;
+    try { parsed = JSON.parse(result); }
+    catch { return res.status(500).json({ error: 'Discovery tool returned non-JSON', raw: result }); }
+    if (parsed.allowed === false) {
+      return res.status(403).json({
+        error: parsed.reason || 'Blocked by PHANTOM scope policy',
+        risk: parsed.risk,
+        gate: parsed.gate,
+        policyMode: parsed.policyMode,
+      });
+    }
+    res.json({
+      neighbors: parsed.neighbors || [],
+      count: parsed.count || 0,
+      platform: parsed.platform,
+      probe: parsed.probe,
+      cached: parsed.cached || false,
+      artifactId: parsed.artifactId || null,
+      policyMode: parsed.policyMode,
+      acknowledgedNoScope: parsed.acknowledgedNoScope || false,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Idempotent promote: existing assets matching ip are skipped. Created
+// assets carry metadata.discoveredFrom='local-network-scan' so the UI can
+// tag them and the operator can later prune the whole set in one shot.
+router.post('/discover/local-network/promote', (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length) return res.status(400).json({ error: 'items[] is required' });
+
+    // Build an index of existing IPs once so we don't re-scan per item.
+    const existing = getAssets({ limit: 500, includeArchived: false });
+    const existingIps = new Set();
+    for (const asset of existing) {
+      for (const addr of (asset.addresses || [])) {
+        if (addr.kind === 'ip' && addr.value) existingIps.add(String(addr.value).trim());
+      }
+    }
+
+    const created = [];
+    const skipped = [];
+    for (const item of items) {
+      const ip = item?.ip ? String(item.ip).trim() : null;
+      if (!ip) { skipped.push({ ip: null, reason: 'missing ip' }); continue; }
+      if (existingIps.has(ip)) { skipped.push({ ip, reason: 'asset with this ip already exists' }); continue; }
+      const addresses = [{ kind: 'ip', value: ip }];
+      if (item.mac) addresses.push({ kind: 'mac', value: String(item.mac).trim() });
+      if (item.hostname) addresses.push({ kind: 'host', value: String(item.hostname).trim() });
+      const asset = createAsset({
+        name: item.hostname || ip,
+        type: 'device',
+        description: 'Discovered via local network scan',
+        criticality: 'medium',
+        environment: 'lan',
+        addresses,
+        tags: ['discovered', 'local-network-scan'],
+        metadata: {
+          discoveredFrom: 'local-network-scan',
+          discoveredAt: new Date().toISOString(),
+          mac: item.mac || null,
+          interface: item.interface || null,
+        },
+      });
+      // Cache the new IP so a duplicate in the same payload skips cleanly.
+      existingIps.add(ip);
+      created.push(asset);
+    }
+    res.json({ created, skipped, createdCount: created.length, skippedCount: skipped.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

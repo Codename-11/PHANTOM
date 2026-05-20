@@ -1,18 +1,29 @@
 // Approvals page — audit dashboard for every gate decision.
 //
-// Reads /api/approvals + /api/approvals/stats. Surfaces a KPI strip with
-// counts by decision (granted/denied/timeout/override/allow-once), a
-// 14-day sparkline, and a filterable list of events. Each event row
-// expands to show the args, operator note, and a "Open run" link.
+// Reads /api/approvals + /api/approvals/stats + /api/installer/requests.
+// Surfaces a KPI strip with counts by decision (granted/denied/timeout/
+// override/allow-once), a 14-day sparkline, and a filterable list of
+// events.
 //
-// No new tables: events are reconstructed from trace_events by the
-// backend, so this view is automatically populated as soon as approval
-// flow runs in production.
+// A3 — Approval explainability:
+//   - Each pending install / scope event renders the structured fields
+//     produced by server/approvals/explain.js (target, riskClass,
+//     actionClass, policyReason, expectedEffect, sideEffects).
+//   - The raw JSON disclosure moves into a collapsed <details> block.
+//   - High|crit denials require an operator note before submission.
+//   - Stale / resolved approvals have disabled controls + a visible
+//     status badge.
+
+const HIGH_RISK_CLASSES = new Set([
+  'exploit', 'destructive', 'online-bruteforce', 'offline-password-audit', 'credentialed',
+]);
 
 window.ApprovalsPage = {
   events: [],
   stats: null,
   installRequests: [],
+  installExplained: [],
+  approvalsExplained: [],
   filter: { decision: '', risk: '', since: null },
   _wired: false,
 
@@ -56,11 +67,19 @@ window.ApprovalsPage = {
       const [eventsRes, statsRes, installsRes] = await Promise.all([
         fetch(`/api/approvals?${params.toString()}`).then((r) => r.json()),
         fetch(`/api/approvals/stats${sinceIso ? `?since=${encodeURIComponent(sinceIso)}` : ''}`).then((r) => r.json()),
-        fetch('/api/installer/requests?status=pending&limit=20').then((r) => r.json()).catch(() => []),
+        fetch('/api/installer/requests?status=pending&limit=20&explained=1').then((r) => r.json()).catch(() => ({ requests: [], explained: [] })),
       ]);
       this.events = Array.isArray(eventsRes?.events) ? eventsRes.events : [];
+      this.approvalsExplained = Array.isArray(eventsRes?.explained) ? eventsRes.explained : [];
       this.stats = statsRes;
-      this.installRequests = Array.isArray(installsRes) ? installsRes : [];
+      if (Array.isArray(installsRes)) {
+        // Old-shape fallback when the /api change hasn't rolled out yet.
+        this.installRequests = installsRes;
+        this.installExplained = [];
+      } else {
+        this.installRequests = Array.isArray(installsRes?.requests) ? installsRes.requests : [];
+        this.installExplained = Array.isArray(installsRes?.explained) ? installsRes.explained : [];
+      }
       this.renderKpis();
       this.renderSparkline();
       this.renderRiskBreakdown();
@@ -100,9 +119,9 @@ window.ApprovalsPage = {
     host.innerHTML = `<span class="spark-label">Last 14 days</span><div class="spark-row">${bars}</div>`;
   },
 
-  // Pending install requests — render as their own card kind, not faked
-  // as tool calls. Same persistence as the Settings → Tools installer
-  // panel so approve/cancel reflects in both surfaces on next refresh.
+  // Pending install requests — render using the A3 explained shape so the
+  // operator sees plain-language target / policy reason / side effects
+  // before approving anything.
   renderInstallRequests() {
     const section = document.getElementById('approvals-installs-section');
     const sub = document.getElementById('approvals-installs-sub');
@@ -114,7 +133,10 @@ window.ApprovalsPage = {
     }
     section.removeAttribute('hidden');
     if (sub) sub.textContent = `${this.installRequests.length} AWAITING APPROVAL`;
-    host.innerHTML = this.installRequests.map((r) => this.renderInstallCard(r)).join('');
+    host.innerHTML = this.installRequests.map((r) => {
+      const explained = this.installExplained.find((e) => e && e.id === r.id) || this.fallbackInstallExplain(r);
+      return this.renderApprovalCard(explained, r, 'install');
+    }).join('');
     host.querySelectorAll('[data-install-approve]').forEach((el) => {
       el.addEventListener('click', () => this.approveInstall(el.dataset.installApprove, el));
     });
@@ -123,32 +145,108 @@ window.ApprovalsPage = {
     });
   },
 
-  renderInstallCard(r) {
-    const installable = r.plan.filter((p) => p.backend).length;
-    const skipped = r.plan.length - installable;
-    const backends = [...new Set(r.plan.filter(p => p.backend).map(p => p.backend))];
-    const cmdPreview = r.plan
-      .filter(p => p.backend)
-      .slice(0, 3)
-      .map(p => `${p.command} ${(p.args || []).slice(0, 2).join(' ')}…`)
-      .join(' · ');
+  // Fallback explainer when the server didn't return /explained=1 yet —
+  // keeps the UI alive while the backend rolls out.
+  fallbackInstallExplain(r) {
+    const installable = (r.plan || []).filter((p) => p?.backend).length;
+    const backends = [...new Set((r.plan || []).filter(p => p?.backend).map(p => p.backend))];
+    return {
+      id: r.id,
+      type: 'install',
+      target: `packages:${(r.toolIds || []).slice(0, 3).join(',')}`,
+      riskClass: 'credentialed',
+      actionClass: backends.length === 1 ? `install.${backends[0]}` : 'install.unknown',
+      policyReason: `Installing ${installable} security tool${installable === 1 ? '' : 's'} via ${backends.join(' / ') || 'a system package manager'} requires elevated privileges and explicit operator approval.`,
+      expectedEffect: `Installs ${installable} security tool${installable === 1 ? '' : 's'}${backends.length ? ` via ${backends.join(' / ')}` : ''}.`,
+      sideEffects: [
+        'Invokes a system package manager.',
+        'Requires elevated privileges (sudo / admin).',
+        'Downloads packages from upstream repositories.',
+      ],
+      rawDetails: r,
+      createdAt: r.requested_at,
+      status: r.status === 'pending' ? 'pending' : (r.status === 'cancelled' || r.status === 'failed' ? 'denied' : 'approved'),
+      denialReason: r.denial_reason || null,
+    };
+  },
+
+  // ─── A3 — Approval card ────────────────────────────────────────────────
+  //
+  // Unified renderer for install + scope cards. Shows the structured
+  // fields up front and tucks raw JSON inside a collapsed <details>.
+  // For high|crit denials a note input is rendered; submission is blocked
+  // until the operator types a reason.
+  renderApprovalCard(explained, raw, kind) {
+    const isResolved = explained.status !== 'pending';
+    const needsNote = HIGH_RISK_CLASSES.has(String(explained.riskClass || '').toLowerCase());
+    const riskClass = String(explained.riskClass || 'unknown').toLowerCase();
+    const idAttr = this.escapeAttribute(explained.id || '');
+    const statusBadge = this.renderStatusBadge(explained);
+    const targetText = this.escapeHtml(explained.target || 'unspecified');
+    const denialReasonRow = explained.denialReason
+      ? `<div class="a3-row"><span class="lbl">DENIED</span><span class="a3-row-text">${this.escapeHtml(explained.denialReason)}</span></div>`
+      : '';
+    const sideFx = (explained.sideEffects || []).map((s) => `<li>${this.escapeHtml(s)}</li>`).join('');
+    const noteInput = !isResolved && needsNote
+      ? `
+        <div class="a3-note-row">
+          <label class="a3-note-label">
+            <span class="lbl">DENIAL NOTE</span>
+            <small>Required for ${this.escapeHtml(riskClass.toUpperCase())} denials</small>
+          </label>
+          <textarea class="a3-note-input" data-approval-note="${idAttr}" rows="2"
+            placeholder="Why is this being denied? (required)"></textarea>
+        </div>`
+      : '';
+    const actionsHtml = isResolved
+      ? `<div class="a3-actions"><span class="approval-card-status">${this.escapeHtml((explained.status || '').toUpperCase())}</span></div>`
+      : (kind === 'install'
+        ? `<div class="a3-actions">
+            <button class="btn btn-secondary btn-sm a3-deny" data-install-cancel="${idAttr}">Deny</button>
+            <button class="btn btn-primary btn-sm" data-install-approve="${idAttr}">Approve &amp; install</button>
+          </div>`
+        : `<div class="a3-actions"><span class="approval-card-status">${this.escapeHtml((explained.status || '').toUpperCase())}</span></div>`);
+
+    const rawJson = this.escapeHtml(JSON.stringify(raw ?? explained.rawDetails ?? explained, null, 2));
+    const createdAgo = explained.createdAt ? this.timeAgo(explained.createdAt) : '';
+    const typeLabel = this.escapeHtml(String(explained.type || kind || 'approval').toUpperCase());
+
     return `
-      <div class="approval-install-card">
-        <div class="approval-install-hd">
-          <span class="approval-install-kind">INSTALL · ${this.escapeHtml(backends.join(' / ') || 'no backend')}</span>
-          <strong>${r.toolIds.length} tools${skipped ? ` (${installable} resolvable)` : ''}</strong>
-          <span class="approval-install-id">${this.escapeHtml(r.id.slice(0, 8))}</span>
-          <span class="approval-install-grow"></span>
-          <small class="approval-install-when">${this.escapeHtml(this.timeAgo(r.requested_at))}</small>
+      <article class="a3-approval-card approval-${this.escapeAttribute(explained.status)} ${isResolved ? 'is-resolved' : ''}" data-approval-id="${idAttr}">
+        <header class="a3-hd">
+          <span class="a3-kind">${typeLabel}</span>
+          <span class="approval-card-risk risk-${this.escapeAttribute(riskClass)}">${this.escapeHtml(riskClass.toUpperCase())}</span>
+          <strong class="a3-target" title="${targetText}">${targetText}</strong>
+          ${statusBadge}
+          <span class="a3-grow"></span>
+          ${createdAgo ? `<small class="a3-when">${this.escapeHtml(createdAgo)}</small>` : ''}
+        </header>
+        <div class="a3-bd">
+          <div class="a3-row"><span class="lbl">ACTION</span><code class="a3-row-code">${this.escapeHtml(explained.actionClass || '—')}</code></div>
+          <div class="a3-row"><span class="lbl">REASON</span><span class="a3-row-text">${this.escapeHtml(explained.policyReason || '—')}</span></div>
+          <div class="a3-row"><span class="lbl">EFFECT</span><span class="a3-row-text">${this.escapeHtml(explained.expectedEffect || '—')}</span></div>
+          ${sideFx ? `<div class="a3-row a3-row-list"><span class="lbl">SIDE FX</span><ul class="a3-side-effects">${sideFx}</ul></div>` : ''}
+          ${denialReasonRow}
         </div>
-        <div class="approval-install-tools">${this.escapeHtml(r.toolIds.join(', '))}</div>
-        ${cmdPreview ? `<div class="approval-install-cmd"><code>${this.escapeHtml(cmdPreview)}</code></div>` : ''}
-        <div class="approval-install-actions">
-          <button class="btn btn-secondary btn-sm" data-install-cancel="${this.escapeAttribute(r.id)}">Cancel</button>
-          <button class="btn btn-primary btn-sm"   data-install-approve="${this.escapeAttribute(r.id)}">Approve &amp; install</button>
-        </div>
-      </div>
+        ${noteInput}
+        ${actionsHtml}
+        <details class="a3-raw-details">
+          <summary>Raw details</summary>
+          <pre class="a3-raw-json">${rawJson}</pre>
+        </details>
+      </article>
     `;
+  },
+
+  renderStatusBadge(explained) {
+    const status = String(explained.status || 'pending').toLowerCase();
+    const map = {
+      pending: { cls: 'a3-status-pending', label: '⌛ PENDING' },
+      approved: { cls: 'a3-status-approved', label: '✓ APPROVED' },
+      denied: { cls: 'a3-status-denied', label: '✗ DENIED' },
+    };
+    const entry = map[status] || map.pending;
+    return `<span class="a3-status ${entry.cls}">${entry.label}</span>`;
   },
 
   async approveInstall(id, btn) {
@@ -166,14 +264,30 @@ window.ApprovalsPage = {
   },
 
   async cancelInstall(id, btn) {
+    // A3 — installs are always credentialed (high-risk); harvest the
+    // operator-supplied denial note before posting.
+    const noteEl = document.querySelector(`[data-approval-note="${this.escapeAttribute(id)}"]`);
+    const denialReason = noteEl ? noteEl.value.trim() : '';
+    if (!denialReason) {
+      alert('A denial note is required for credentialed actions. Please describe why this install is being denied.');
+      noteEl?.focus();
+      return;
+    }
     if (btn) { btn.disabled = true; btn.textContent = 'Cancelling…'; }
     try {
-      const res = await fetch(`/api/installer/requests/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await fetch(`/api/installer/requests/${encodeURIComponent(id)}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ denialReason }),
+      });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.message || detail.error || `HTTP ${res.status}`);
+      }
       await this.load();
     } catch (err) {
       alert(`Cancel failed: ${err.message}`);
-      if (btn) { btn.disabled = false; btn.textContent = btn.textContent === 'Cancelling…' ? 'Cancel' : btn.textContent; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Deny'; }
     }
   },
 
@@ -230,10 +344,23 @@ window.ApprovalsPage = {
       override: '⚠ OVERRIDE',
       timeout: '⌛ TIMED OUT',
     })[e.decision] || e.decision;
+    // A3 — try to pull the explained row produced by the server for this
+    // event so we can show the human-readable policy reason / effect /
+    // side effects in the expanded body without recomputing on the client.
+    const explained = (this.approvalsExplained || []).find((row) => row && row.id === e.id);
+    const ago = this.timeAgo(e.occurredAt);
     const args = e.args
       ? `<pre>${this.escapeHtml(JSON.stringify(e.args, null, 2))}</pre>`
       : '<small class="caption">(no args)</small>';
-    const ago = this.timeAgo(e.occurredAt);
+    const explainedRows = explained ? `
+      <div class="a3-event-meta">
+        <div class="a3-row"><span class="lbl">TARGET</span><span class="a3-row-text">${this.escapeHtml(explained.target)}</span></div>
+        <div class="a3-row"><span class="lbl">EFFECT</span><span class="a3-row-text">${this.escapeHtml(explained.expectedEffect)}</span></div>
+        <div class="a3-row a3-row-list"><span class="lbl">SIDE FX</span><ul class="a3-side-effects">${(explained.sideEffects || []).map(s => `<li>${this.escapeHtml(s)}</li>`).join('')}</ul></div>
+        ${explained.denialReason ? `<div class="a3-row"><span class="lbl">NOTE</span><span class="a3-row-text">${this.escapeHtml(explained.denialReason)}</span></div>` : ''}
+      </div>
+    ` : '';
+
     return `
       <div class="approval-row decision-${decisionClass}">
         <button type="button" class="approval-row-summary">
@@ -251,7 +378,11 @@ window.ApprovalsPage = {
             <div><span class="lbl">POLICY</span><span>${this.escapeHtml(e.policyMode || '—')}</span></div>
             ${e.gate ? `<div><span class="lbl">GATE</span><span>${this.escapeHtml(e.gate)}</span></div>` : ''}
           </div>
-          <div class="approval-row-args">${args}</div>
+          ${explainedRows}
+          <details class="a3-raw-details">
+            <summary>Raw details</summary>
+            <div class="approval-row-args">${args}</div>
+          </details>
         </div>
       </div>
     `;

@@ -466,6 +466,12 @@ export function initDB(dbPath = config.db.path) {
   ensureColumn('scopes', 'rate_caps_json', 'TEXT');
   ensureColumn('scopes', 'rules_of_engagement', 'TEXT');
 
+  // A3 — Approval explainability: high|crit denials persist a free-text
+  // reason. Additive column on install_requests; future approval types
+  // (registry imports, elevated commands) will reuse the same column when
+  // their record stores land.
+  ensureColumn('install_requests', 'denial_reason', 'TEXT');
+
   return db;
 }
 
@@ -1013,6 +1019,8 @@ function normalizeInstallRequest(row) {
     requested_at: row.requested_at,
     decided_at: row.decided_at,
     completed_at: row.completed_at,
+    // A3 — persisted operator reason for high|crit denials.
+    denial_reason: row.denial_reason || null,
   };
 }
 
@@ -1039,13 +1047,14 @@ export function getInstallRequests({ status = null, limit = 50 } = {}) {
   return getDB().prepare(sql).all(...params).map(normalizeInstallRequest);
 }
 
-export function updateInstallRequest(id, { status = null, result = null, decidedAt = null, completedAt = null }) {
+export function updateInstallRequest(id, { status = null, result = null, decidedAt = null, completedAt = null, denialReason = null }) {
   const fields = [];
   const params = [];
   if (status) { fields.push('status = ?'); params.push(status); }
   if (result !== null) { fields.push('result_json = ?'); params.push(JSON.stringify(result)); }
   if (decidedAt) { fields.push('decided_at = ?'); params.push(decidedAt); }
   if (completedAt) { fields.push('completed_at = ?'); params.push(completedAt); }
+  if (denialReason !== null) { fields.push('denial_reason = ?'); params.push(denialReason || null); }
   if (!fields.length) return getInstallRequest(id);
   params.push(id);
   getDB().prepare(`UPDATE install_requests SET ${fields.join(', ')} WHERE id = ?`).run(...params);
