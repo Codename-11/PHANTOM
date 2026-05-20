@@ -49,7 +49,7 @@ describe('diagnostics', () => {
     assert.ok(Array.isArray(result.checks));
     // All expected check ids present (or budget marker)
     const ids = new Set(result.checks.map((c) => c.id));
-    const expected = ['runtime', 'db', 'workspace', 'provider', 'docs', 'toolpacks', 'campaigns', 'registry'];
+    const expected = ['runtime', 'db', 'workspace', 'provider', 'docs', 'toolpacks', 'campaigns', 'registry', 'parity'];
     const hasAll = expected.every((id) => ids.has(id));
     const hasBudget = ids.has('__budget__');
     assert.ok(hasAll || hasBudget, `missing checks: ${expected.filter(e => !ids.has(e)).join(',')}`);

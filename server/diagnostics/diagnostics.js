@@ -181,6 +181,34 @@ function checkToolpacks() {
   }
 }
 
+// B1 (continued) — Manifest parity check.
+// Async because the parity helper dynamic-imports the manifest loader.
+// Reports degraded when the JS registry and manifest world disagree
+// (manifest missing or invalid for ≥1 toolpack).
+async function checkToolpackParity() {
+  try {
+    const mod = await import('../toolpacks/toolpack-registry.js');
+    const packs = await mod.getToolpacksWithManifestStatus();
+    const ok = packs.filter((p) => p.parity.status === 'ok').length;
+    const missing = packs.filter((p) => p.parity.status === 'manifest_missing').length;
+    const invalid = packs.filter((p) => p.parity.status === 'manifest_invalid').length;
+    const status = invalid > 0 ? 'degraded'
+      : missing > 0 ? 'needs_setup'
+      : 'ok';
+    return {
+      status,
+      detail: invalid
+        ? `${invalid} manifest(s) failed validation, ${missing} missing`
+        : missing
+          ? `${missing} of ${packs.length} toolpacks have no manifest fixture yet`
+          : `${ok} of ${packs.length} toolpacks have valid manifests`,
+      data: { total: packs.length, ok, missing, invalid },
+    };
+  } catch (err) {
+    return { status: 'degraded', detail: `parity probe failed: ${err.message}` };
+  }
+}
+
 function checkCampaigns() {
   try {
     const all = listCampaigns();
@@ -229,6 +257,7 @@ export async function getDiagnostics() {
       runCheck('toolpacks', checkToolpacks),
       runCheck('campaigns', checkCampaigns),
       runCheck('registry',  checkRegistry),
+      runCheck('parity',    checkToolpackParity),
     ]),
     new Promise((resolve) => setTimeout(() => resolve([
       { id: '__budget__', status: 'degraded', detail: `total budget ${TOTAL_BUDGET_MS}ms exceeded`, elapsedMs: TOTAL_BUDGET_MS },
@@ -248,6 +277,7 @@ export async function getDiagnostics() {
     toolpacks: byId.toolpacks?.data || null,
     campaigns: byId.campaigns?.data || null,
     registry:  byId.registry?.data || null,
+    parity:    byId.parity?.data || null,
     checks: checks.map(({ id, status, elapsedMs, detail }) => ({ id, status, elapsedMs, detail })),
     elapsedMs: Date.now() - started,
     generatedAt: new Date().toISOString(),
