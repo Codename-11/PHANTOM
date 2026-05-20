@@ -21,10 +21,24 @@ import {
 import { getFindings } from '../assets/asset-store.js';
 import { evaluateGoal, summarizeRunForEvaluator } from './goal-evaluator.js';
 import { spawnGoalRun, BACKEND_ID as PHANTOM_NATIVE } from './worker-backends/phantom-native.js';
+import {
+  spawnGoalRun as spawnCodexGoalRun,
+  BACKEND_ID as CODEX_EXEC,
+  isAvailable as codexIsAvailable,
+} from './worker-backends/codex-exec.js';
 
 const BACKENDS = {
-  [PHANTOM_NATIVE]: { spawn: spawnGoalRun },
+  [PHANTOM_NATIVE]: { spawn: spawnGoalRun, isAvailable: () => true },
+  [CODEX_EXEC]:     { spawn: spawnCodexGoalRun, isAvailable: codexIsAvailable },
 };
+
+/** Backend metadata for /api/campaigns/backends — UI hides anything not available. */
+export function listAvailableBackends() {
+  return Object.entries(BACKENDS).map(([id, b]) => ({
+    id,
+    available: typeof b.isAvailable === 'function' ? !!b.isAvailable() : true,
+  }));
+}
 
 /**
  * Spawn one campaign goal as a child run. Returns the run + the link.

@@ -747,12 +747,73 @@
               <p>Scoped security objectives that continue across child runs until completion, blocker, approval gate, budget limit, or stop. PHANTOM remains the supervisor — every child action is a normal PHANTOM run.</p>
             </div>
             <div class="page-actions">
-              <button id="refresh-campaigns-btn" class="btn btn-secondary">↻ Refresh</button>
+              <button id="refresh-campaigns-btn" class="btn ghost sm" title="Refresh">↻ Refresh</button>
+              <button id="new-campaign-btn" class="btn primary sm" type="button" aria-haspopup="dialog" aria-controls="campaign-create-overlay">
+                <span aria-hidden="true">+</span> New campaign
+              </button>
             </div>
           </div>
-          <div id="campaigns-list" class="campaigns-list" data-empty="true">
-            <div class="campaigns-empty">
-              No campaigns yet. Create one via <code>POST /api/campaigns</code> — the inline creation form lands in a follow-up task. See <code>docs/plans/2026-05-20-phantom-goal-engine-plan.md</code>.
+
+          <div id="campaigns-layout" class="campaigns-layout">
+            <aside class="campaigns-aside" aria-label="Campaign list">
+              <div id="campaigns-list" class="campaigns-list" data-empty="true">
+                <div class="campaigns-empty">
+                  <p class="campaigns-empty-title">No campaigns yet</p>
+                  <p class="campaigns-empty-help">Campaigns are scoped, governed multi-run objectives. Create one with <strong>+ New campaign</strong>.</p>
+                </div>
+              </div>
+            </aside>
+
+            <section id="campaign-detail-drawer" class="campaign-detail-drawer hidden" aria-label="Campaign detail" role="region">
+              <header class="drawer-hd">
+                <div class="head-line">
+                  <span id="campaign-detail-pill" class="campaign-pill campaign-pill-draft">draft</span>
+                  <span class="drawer-sub" id="campaign-detail-id">—</span>
+                </div>
+                <h2 id="campaign-detail-title">Select a campaign</h2>
+                <p id="campaign-detail-objective" class="drawer-desc">—</p>
+                <div class="campaign-detail-actions" id="campaign-detail-actions"></div>
+              </header>
+
+              <nav class="drawer-tabs" role="tablist">
+                <button class="drawer-tab active" role="tab" data-tab="overview">Overview</button>
+                <button class="drawer-tab" role="tab" data-tab="goals">Goals <span class="ct" id="campaign-tab-goals-ct"></span></button>
+                <button class="drawer-tab" role="tab" data-tab="runs">Runs <span class="ct" id="campaign-tab-runs-ct"></span></button>
+                <button class="drawer-tab" role="tab" data-tab="evidence">Evidence</button>
+              </nav>
+
+              <div class="drawer-bd" id="campaign-detail-body">
+                <div class="drawer-pane" data-pane="overview"></div>
+                <div class="drawer-pane" data-pane="goals" hidden></div>
+                <div class="drawer-pane" data-pane="runs" hidden></div>
+                <div class="drawer-pane" data-pane="evidence" hidden></div>
+              </div>
+            </section>
+          </div>
+
+          <!-- Create / edit overlay — modal slide-in form -->
+          <div id="campaign-create-overlay" class="campaign-create-overlay hidden" role="dialog"
+               aria-modal="true" aria-labelledby="campaign-create-title">
+            <div class="campaign-create-scrim" data-create-close></div>
+            <div class="campaign-create-panel" role="document">
+              <header class="campaign-create-hd">
+                <div>
+                  <p class="eyebrow">Draft a governed campaign</p>
+                  <h2 id="campaign-create-title">New campaign</h2>
+                </div>
+                <button class="btn-icon" data-create-close aria-label="Close">×</button>
+              </header>
+              <div class="campaign-create-bd" id="campaign-create-bd">
+                <!-- The form is rendered here by CampaignForm.render() -->
+              </div>
+              <footer class="campaign-create-ft">
+                <span id="campaign-create-feedback" class="test-result"></span>
+                <span class="grow"></span>
+                <button class="btn ghost sm" data-create-close>Cancel</button>
+                <button id="campaign-create-submit" class="btn primary sm" type="button">
+                  Save as draft
+                </button>
+              </footer>
             </div>
           </div>
         </section>
@@ -1641,6 +1702,8 @@
   <script src="js/management.js"></script>
   <script src="js/goals.js"></script>
   <script src="js/campaigns/campaign-presenter.js"></script>
+  <script src="js/campaigns/campaign-form.js"></script>
+  <script src="js/campaigns/campaign-client.js"></script>
   <script src="js/pages/campaigns-page.js"></script>
   <script src="js/app.js"></script>
 </body>

@@ -51,7 +51,10 @@ import {
   recordEvaluatorResult,
   listCampaignRuns, listGoalRuns, countCampaignRuns,
 } from '../campaigns/campaign-store.js';
-import { runOneGoal, nextQueuedGoal } from '../campaigns/goal-engine.js';
+import { runOneGoal, nextQueuedGoal, listAvailableBackends } from '../campaigns/goal-engine.js';
+import {
+  buildCampaignReplay, generateCampaignReport, generateCampaignEvidenceBundle,
+} from '../campaigns/campaign-replay.js';
 import { evaluateToolAction, normalizeOperatorOverride, ACTION_CLASSES } from '../scope/policy.js';
 import { parseTargetInput, targetsToScopeFields } from '../scope/target-parser.js';
 import { getScopeTemplates } from '../scope/templates.js';
@@ -926,6 +929,12 @@ router.get('/campaigns', (req, res) => {
   res.json({ campaigns: listCampaigns({ status }) });
 });
 
+// Backend availability — campaign creation form polls this to hide
+// codex-exec when the binary isn't installed. Cheap (PATH lookup).
+router.get('/campaigns/backends', (req, res) => {
+  res.json({ backends: listAvailableBackends() });
+});
+
 router.post('/campaigns', (req, res) => {
   if (!validateCampaignRefs(req.body || {}, res)) return;
   try {
@@ -1108,6 +1117,57 @@ router.post('/campaigns/:id/cancel', (req, res) => {
     updateCampaignGoalStatus(g.id, 'skipped', { stampEnd: true });
   }
   res.json(out);
+});
+
+// ─── Campaign replay + evidence (Task 9) ───
+// Replay returns a JSON roll-up across goals + linked runs (no artifacts
+// written). Report + evidence-bundle persist artifacts attached to the
+// first child run so they show up in the artifacts index.
+router.get('/campaigns/:id/replay', (req, res) => {
+  try {
+    const replay = buildCampaignReplay(req.params.id);
+    // Strip event arrays from the response to keep the payload small;
+    // the detail page hydrates trace per-run on demand.
+    res.json({
+      campaign: replay.campaign,
+      goals: replay.goals,
+      summary: replay.summary,
+      runs: replay.runs.map((r) => ({
+        run: { id: r.run.id, title: r.run.title, status: r.run.status,
+               started_at: r.run.started_at, ended_at: r.run.ended_at,
+               conversation_id: r.run.conversation_id },
+        goal: r.goal ? { id: r.goal.id, title: r.goal.title, status: r.goal.status } : null,
+        link: r.link,
+        artifactCount: r.artifacts.length,
+        findingCount: r.findings.length,
+        blockedCount: r.blockedCount,
+        evaluator: r.evaluator,
+      })),
+    });
+  } catch (err) {
+    res.status(err.message.startsWith('campaign not found') ? 404 : 400)
+      .json({ error: err.message });
+  }
+});
+
+router.post('/campaigns/:id/artifacts/report', (req, res) => {
+  try {
+    const artifact = generateCampaignReport(req.params.id);
+    res.json(artifactToPublic(artifact, { includeMetadata: true }));
+  } catch (err) {
+    res.status(err.message.startsWith('campaign not found') ? 404 : 400)
+      .json({ error: err.message });
+  }
+});
+
+router.post('/campaigns/:id/artifacts/evidence-bundle', (req, res) => {
+  try {
+    const artifact = generateCampaignEvidenceBundle(req.params.id);
+    res.json(artifactToPublic(artifact, { includeMetadata: true }));
+  } catch (err) {
+    res.status(err.message.startsWith('campaign not found') ? 404 : 400)
+      .json({ error: err.message });
+  }
 });
 
 // ─── Assets, Findings, Baselines, Reruns ───
