@@ -193,6 +193,36 @@ export function checkToolpackAvailability(id, { commandExists = defaultCommandEx
   };
 }
 
+// B1 (continued) — Manifest parity helper.
+// Returns the JS-registry view of every toolpack PLUS a parity flag
+// describing the manifest world's status for that id. Purely additive
+// — runtime resolution still goes through getToolpacks() / getToolpack()
+// against the JS registry. This helper exists so the diagnostics page +
+// registry UI can show "JS+manifest in agreement", "manifest missing",
+// or "manifest invalid" badges without changing tool dispatch.
+//
+// Dynamic import keeps the dependency optional: a fresh install with no
+// fixtures directory continues working unchanged.
+export async function getToolpacksWithManifestStatus() {
+  const packs = getToolpacks();
+  let manifestsById = new Map();
+  try {
+    const mod = await import('../registry/local-manifest-loader.js');
+    const all = mod.loadLocalManifests();
+    manifestsById = new Map(all.map((m) => [m.id, m]));
+  } catch {
+    // No manifest loader / no fixtures — return JS-only parity status.
+  }
+  return packs.map((pack) => {
+    const manifest = manifestsById.get(pack.id);
+    let parity;
+    if (!manifest) parity = { status: 'manifest_missing', detail: 'No local manifest fixture for this toolpack.' };
+    else if (!manifest.valid) parity = { status: 'manifest_invalid', detail: `${manifest.errors.length} validation error(s)`, errors: manifest.errors };
+    else parity = { status: 'ok', detail: 'JS registry + manifest both present', digest: manifest.computedDigest };
+    return { ...pack, parity };
+  });
+}
+
 export function buildToolpackPrompt(ids = []) {
   const selected = normalizeToolpackIds(ids).map(getToolpack).filter(Boolean);
   if (!selected.length) return '';
