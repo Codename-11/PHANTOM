@@ -22,6 +22,13 @@
  *   fronts Claude Pro / ChatGPT Pro / SuperGrok subscriptions as an
  *   OpenAI-compatible endpoint. Any bearer token works on the client
  *   side — the proxy attaches real OAuth credentials per-request.
+ *
+ * Note on port-collision deploys: the registry default below is the
+ * upstream-canonical 127.0.0.1:8645. Some self-hosted setups run Hermes
+ * on a different local port (e.g. :8648 when :8645 is already taken by
+ * another service) — operators override via the onboarding URL field or
+ * the `API_BASE_URL` env var. For containerized deploys, `host.docker.internal`
+ * resolves back to the docker host (requires `extra_hosts` in compose).
  */
 
 export const PROVIDERS = [
@@ -45,6 +52,18 @@ export const PROVIDERS = [
       'hermes-4-405b',
     ],
     docsUrl: 'https://hermes-agent.nousresearch.com/docs/user-guide/features/subscription-proxy',
+  },
+  {
+    id: 'modelfoundry',
+    name: 'ModelFoundry (self-hosted)',
+    baseUrl: 'http://127.0.0.1:7352/v1',
+    description:
+      'Self-hosted ModelFoundry / modelrelay OpenAI-compatible router. Useful as a single endpoint that fronts multiple providers with per-key access control. Requires inbound bearer (MODELFOUNDRY_INBOUND_API_KEYS).',
+    keyHint: 'modelfoundry bearer',
+    keyOptional: false,
+    openaiCompatible: true,
+    suggestedModels: [],
+    docsUrl: 'https://github.com/Codename-11/model-foundry',
   },
   {
     id: 'openai',

@@ -82,6 +82,18 @@
     } catch {
       state.providers = [];
     }
+    // After the registry seed, overlay current /api/settings so the wizard
+    // shows the *active* config (env-driven or previously persisted) rather
+    // than a stale registry default. Without this, a re-opened wizard
+    // misrepresents reality and a casual click-through silently overwrites
+    // working values (e.g. an env-set host.docker.internal URL).
+    try {
+      const cur = await fetchJson('/api/settings');
+      if (cur.provider) state.provider = cur.provider;
+      if (cur.baseUrl)  state.baseUrl  = cur.baseUrl;
+      // cur.apiKey is masked server-side ("••••xxxx"); leave state.apiKey
+      // alone so the password input keeps its empty placeholder.
+    } catch { /* non-fatal — registry seed still applies */ }
   }
 
   async function renderProvider() {
