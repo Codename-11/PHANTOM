@@ -55,6 +55,7 @@ import { runOneGoal, nextQueuedGoal, listAvailableBackends } from '../campaigns/
 import {
   buildCampaignReplay, generateCampaignReport, generateCampaignEvidenceBundle,
 } from '../campaigns/campaign-replay.js';
+import { getDiagnostics } from '../diagnostics/diagnostics.js';
 import { evaluateToolAction, normalizeOperatorOverride, ACTION_CLASSES } from '../scope/policy.js';
 import { parseTargetInput, targetsToScopeFields } from '../scope/target-parser.js';
 import { getScopeTemplates } from '../scope/templates.js';
@@ -1574,6 +1575,19 @@ router.post('/sudo/validate', async (req, res) => {
 });
 
 // ─── System Info ───
+// ─── Diagnostics / readiness (A0) ───
+// Bounded per-check timeout (≤500ms each); total budget 1500ms.
+// Secrets are redacted in the diagnostics module before they reach
+// this route. The frontend Dash/Settings cards consume this directly.
+router.get('/diagnostics', async (req, res) => {
+  try {
+    const result = await getDiagnostics();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ overall: 'blocked', error: err.message, generatedAt: new Date().toISOString() });
+  }
+});
+
 router.get('/system/info', async (req, res) => {
   const info = {
     hostname: os.hostname(),

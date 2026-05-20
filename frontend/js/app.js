@@ -113,6 +113,9 @@
   checkSudoStatus();
   window.Goals?.init?.();
   window.CampaignsPage?.init?.();
+  window.DiagnosticsCard?.init?.();
+  // Paint the Dash diagnostics card immediately so first paint shows readiness.
+  window.DiagnosticsCard?.show?.('dash');
   // initOperatorOverrideControl() is called later, after OverrideController
   // (a `const`) is declared. Calling it here would hit a temporal-dead-zone
   // ReferenceError because the function declaration is hoisted but the

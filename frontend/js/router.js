@@ -57,9 +57,13 @@ window.Router = {
     }
 
     // Page-specific show hooks
-    if (route === 'dash') window.Dash?.show?.();
+    if (route === 'dash') {
+      window.Dash?.show?.();
+      window.DiagnosticsCard?.show?.('dash');
+    }
     if (route === 'approvals') window.ApprovalsPage?.show?.();
     if (route === 'campaigns') window.CampaignsPage?.show?.();
+    if (route === 'settings') window.DiagnosticsCard?.show?.('settings');
 
     window.dispatchEvent(new CustomEvent('phantom:route', { detail: { route } }));
   },

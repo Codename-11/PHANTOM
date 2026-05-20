@@ -297,6 +297,10 @@
             </div>
           </div>
 
+          <!-- A0 — Diagnostics readiness card. Mounts at the top of Dash
+               so the operator sees system state before scrolling. -->
+          <section id="dash-diagnostics-card" class="dash-diagnostics-card" aria-label="System readiness"></section>
+
           <!-- Cockpit summary (kit-aligned). Hidden until data arrives;
                when empty it falls back to .welcome-features (existing). -->
           <section id="cockpit" class="cockpit hidden" aria-label="Operations overview">
@@ -1407,6 +1411,14 @@
             <small id="model-source-hint" class="model-source-hint"></small>
           </section>
 
+          <!-- A0 — Full diagnostics panel on Settings. Shows every check
+               with elapsed timing + copy-as-JSON affordance. -->
+          <section class="settings-section" id="settings-diagnostics-section">
+            <h3>Diagnostics</h3>
+            <small class="goals-card-help">System readiness probes — DB, workspace, provider, docs, toolpacks, campaigns. Each check has a 500ms budget; the route returns within 1500ms total even if every check fails.</small>
+            <div id="settings-diagnostics-card" class="settings-diagnostics-card"></div>
+          </section>
+
           <!-- System Access — hidden when the server reports a non-'sudo'
                elevation mode (containerized root, Windows, etc.). The
                sudo-password input is intentionally left in the DOM but
@@ -1700,6 +1712,8 @@
   <script src="js/scope/scope-builder.js"></script>
   <script src="js/pages/scope-page.js"></script>
   <script src="js/management.js"></script>
+  <script src="js/lib/fetch-helper.js"></script>
+  <script src="js/pages/diagnostics-card.js"></script>
   <script src="js/goals.js"></script>
   <script src="js/campaigns/campaign-presenter.js"></script>
   <script src="js/campaigns/campaign-form.js"></script>
