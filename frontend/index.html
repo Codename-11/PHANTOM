@@ -84,6 +84,7 @@
         <button class="sidebar-nav-item" data-route="artifacts" title="Artifacts"><span class="nav-glyph" aria-hidden="true">EVD</span><span class="nav-label">Artifacts</span></button>
         <button class="sidebar-nav-item" data-route="approvals" title="Approvals"><span class="nav-glyph" aria-hidden="true">APV</span><span class="nav-label">Approvals</span></button>
         <button class="sidebar-nav-item" data-route="scope" title="Assets / Scope"><span class="nav-glyph" aria-hidden="true">SCP</span><span class="nav-label">Assets / Scope</span></button>
+        <button class="sidebar-nav-item" data-route="campaigns" title="Campaigns"><span class="nav-glyph" aria-hidden="true">CMP</span><span class="nav-label">Campaigns</span></button>
         <button class="sidebar-nav-item" data-route="settings" title="Settings"><span class="nav-glyph" aria-hidden="true">CFG</span><span class="nav-label">Settings</span></button>
         <!-- Docs link · opens the built-in user-docs in a new tab so the
              operator's run state isn't disturbed. Hidden when /api/settings
@@ -163,6 +164,17 @@
             <span class="name">No scope selected</span>
             <span class="meta"></span>
             <span class="chev" aria-hidden="true">▾</span>
+          </button>
+
+          <!-- Goal strip mirrors the scope-strip visual. Hidden until a
+               goal is activated via Settings → Goals or POST
+               /api/goals/:id/activate. Clicking routes to the settings
+               page where the goal is editable. -->
+          <button type="button" id="active-goal-strip" class="scope-strip goal-strip" data-empty="true"
+                  hidden aria-label="Active goal">
+            <span class="lbl">GOAL</span>
+            <span class="name">No goal active</span>
+            <span class="meta"></span>
           </button>
 
           <button id="alerts-bell" class="alerts-bell" data-route="alerts"
@@ -724,6 +736,24 @@
           <div class="artifacts-layout">
             <aside id="artifacts-list" class="artifacts-list"></aside>
             <section id="artifact-detail" class="artifact-detail"></section>
+          </div>
+        </section>
+
+        <section class="app-page" data-page="campaigns" id="campaigns-page">
+          <div class="page-header">
+            <div>
+              <p class="eyebrow">Governed multi-run automation</p>
+              <h1>Campaigns</h1>
+              <p>Scoped security objectives that continue across child runs until completion, blocker, approval gate, budget limit, or stop. PHANTOM remains the supervisor — every child action is a normal PHANTOM run.</p>
+            </div>
+            <div class="page-actions">
+              <button id="refresh-campaigns-btn" class="btn btn-secondary">↻ Refresh</button>
+            </div>
+          </div>
+          <div id="campaigns-list" class="campaigns-list" data-empty="true">
+            <div class="campaigns-empty">
+              No campaigns yet. Create one via <code>POST /api/campaigns</code> — the inline creation form lands in a follow-up task. See <code>docs/plans/2026-05-20-phantom-goal-engine-plan.md</code>.
+            </div>
           </div>
         </section>
 
@@ -1316,16 +1346,59 @@
             <small id="model-source-hint" class="model-source-hint"></small>
           </section>
 
-          <!-- System Access -->
-          <section class="settings-section">
+          <!-- System Access — hidden when the server reports a non-'sudo'
+               elevation mode (containerized root, Windows, etc.). The
+               sudo-password input is intentionally left in the DOM but
+               wrapped in a host that JS can show/hide; the info-panel
+               sibling renders in its place when no password is needed. -->
+          <section class="settings-section" id="settings-system-access">
             <h3>System Access</h3>
-            <div class="form-group">
+            <div class="form-group" id="setting-sudo-password-host">
               <label for="setting-sudo-password">Sudo Password</label>
               <div class="input-with-toggle">
                 <input type="password" id="setting-sudo-password" placeholder="For tool installation &amp; privileged commands" />
                 <button id="toggle-sudo-pass" class="btn-icon-sm" title="Show/Hide">Show</button>
               </div>
               <small>Persisted securely in local database across restarts</small>
+            </div>
+            <div class="form-group" id="setting-elevation-info" style="display:none;">
+              <label>Elevation</label>
+              <div id="setting-elevation-badge" class="settings-elevation-badge"></div>
+              <small id="setting-elevation-hint"></small>
+            </div>
+          </section>
+
+          <!-- Goals -->
+          <section class="settings-section" id="settings-goals">
+            <h3>Goals</h3>
+            <small class="goals-card-help">Persistent multi-step objectives. One can be active at a time — it's injected into the agent's system prompt and runs launched while active are tagged for synthesis-time progress.</small>
+
+            <!-- Create form -->
+            <div class="goals-create">
+              <div class="form-group">
+                <label for="goal-title-input">Title</label>
+                <input type="text" id="goal-title-input" placeholder="Short headline, e.g. Map AdminPortal exposure" />
+              </div>
+              <div class="form-group">
+                <label for="goal-objective-input">Objective</label>
+                <textarea id="goal-objective-input" rows="3" placeholder="What the agent should accomplish. Markdown OK."></textarea>
+              </div>
+              <div class="form-group">
+                <label for="goal-criteria-input">Success criteria</label>
+                <textarea id="goal-criteria-input" rows="3" placeholder="How we'll know it's done. Markdown OK."></textarea>
+              </div>
+              <div class="form-actions">
+                <button id="goal-create-btn" class="btn btn-primary" type="button">Create goal</button>
+                <span id="goal-create-feedback" class="test-result"></span>
+              </div>
+            </div>
+
+            <!-- List -->
+            <div class="goals-list-wrap">
+              <h4 class="goals-list-title">All goals</h4>
+              <ul id="goals-list" class="goals-list" data-empty="true">
+                <li class="goals-empty">No goals yet — create one above.</li>
+              </ul>
             </div>
           </section>
 
@@ -1566,6 +1639,9 @@
   <script src="js/scope/scope-builder.js"></script>
   <script src="js/pages/scope-page.js"></script>
   <script src="js/management.js"></script>
+  <script src="js/goals.js"></script>
+  <script src="js/campaigns/campaign-presenter.js"></script>
+  <script src="js/pages/campaigns-page.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

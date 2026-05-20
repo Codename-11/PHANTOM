@@ -3955,6 +3955,21 @@ svg.ico [stroke] {
 }
 .sudo-modal-icon { color: var(--cy-1); }
 
+/* Elevation badge shown in Settings → System Access when the server runs
+   in 'root' or 'none' mode (no sudo password needed). Pill-shaped, cyan
+   accent, monospace to match the boot-panel "elevation" row. */
+.settings-elevation-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  color: var(--cy-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
 /* ── Global caption-contrast (fg-3 → fg-2) — 13 selectors, body AA pass ── */
 .cmdk-group-label,
 .cmdk-ft,
@@ -6498,3 +6513,195 @@ svg.ico [stroke] {
   transition: background var(--t-fast);
 }
 .installer-step-copy:hover { background: var(--cy-tint); }
+
+/* ─── Goal engine ─────────────────────────────────────────────────────────
+   Top-bar goal-strip mirrors scope-strip styling but uses a magenta-ish
+   tint so the two strips are distinguishable at a glance. Settings →
+   Goals card uses the existing settings-section + form-group tokens
+   plus a few goal-specific pills. */
+.goal-strip {
+  border-color: var(--line-2);
+}
+.goal-strip .lbl {
+  color: var(--cy-2);
+}
+.goal-strip[data-empty="true"] {
+  opacity: 0.65;
+}
+
+.goals-card-help {
+  display: block;
+  color: var(--fg-2);
+  margin: 4px 0 12px;
+}
+.goals-create {
+  background: var(--bg-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  padding: 12px;
+  margin-bottom: 16px;
+}
+.goals-list-wrap {
+  margin-top: 8px;
+}
+.goals-list-title {
+  margin: 0 0 8px;
+  color: var(--fg-2);
+  font-size: var(--fs-12);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.goals-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.goals-list[data-empty="true"] .goals-empty {
+  color: var(--fg-3);
+  font-style: italic;
+}
+.goals-empty {
+  padding: 12px;
+  background: var(--bg-2);
+  border: 1px dashed var(--line-1);
+  border-radius: var(--r-3);
+}
+.goal-row {
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  padding: 10px 12px;
+}
+.goal-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.goal-row-title {
+  font-weight: 600;
+  color: var(--fg-1);
+}
+.goal-row-objective {
+  color: var(--fg-2);
+  font-size: var(--fs-13);
+  margin-bottom: 8px;
+}
+.goal-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.goal-row-actions .btn {
+  padding: 4px 10px;
+  font-size: var(--fs-12);
+}
+.goal-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  color: var(--fg-2);
+}
+.goal-pill-active {
+  background: var(--cy-tint);
+  color: var(--cy-1);
+  border-color: var(--line-cy);
+}
+.goal-pill-completed {
+  color: var(--ok-1, #66c293);
+  border-color: var(--ok-1, #66c293);
+}
+.goal-pill-paused {
+  color: var(--fg-3);
+}
+.goal-pill-cancelled {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* ─── Campaigns page ─────────────────────────────────────────────────────
+   Mirrors the artifacts/runs page layout: header strip + list of rows.
+   v1 is read-only — creation form, lifecycle controls, and detail view
+   land in follow-up tasks. */
+.campaigns-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 0;
+}
+.campaigns-rows {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.campaigns-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--fg-3);
+  background: var(--bg-2);
+  border: 1px dashed var(--line-1);
+  border-radius: var(--r-3);
+}
+.campaign-row {
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-3);
+  padding: 12px 14px;
+}
+.campaign-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.campaign-row-title {
+  font-weight: 600;
+  color: var(--fg-1);
+}
+.campaign-row-objective {
+  color: var(--fg-2);
+  font-size: var(--fs-13);
+  margin-bottom: 8px;
+}
+.campaign-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+.campaign-meta-item {
+  display: inline-block;
+}
+.campaign-pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  color: var(--fg-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.campaign-pill-draft { color: var(--fg-3); }
+.campaign-pill-queued { color: var(--cy-2); }
+.campaign-pill-running { color: var(--cy-1); border-color: var(--line-cy); background: var(--cy-tint); }
+.campaign-pill-paused { color: var(--fg-2); }
+.campaign-pill-needs_approval { color: var(--warn, #d8b15a); border-color: var(--warn, #d8b15a); }
+.campaign-pill-completed { color: var(--ok-1, #66c293); border-color: var(--ok-1, #66c293); }
+.campaign-pill-failed { color: var(--danger); border-color: var(--danger); }
+.campaign-pill-canceled { color: var(--fg-3); border-color: var(--fg-3); }

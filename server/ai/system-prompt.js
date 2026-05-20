@@ -6,6 +6,7 @@ import { join } from 'path';
 import { resolvePrompt } from '../prompts/prompt-store.js';
 import { hasCommand } from '../utils/has-command.js';
 import { getInstallerStatus } from '../tools/installer.js';
+import { getCurrentGoal, getProgress, countLinkedRuns } from '../goals/goal-store.js';
 
 function getSystemInfo() {
   try {
@@ -186,11 +187,95 @@ function renderUiContextBlock(uiContext) {
   return `\n## CURRENT UI CONTEXT\nThe operator is looking at this surface right now. Use phantom_* tools to inspect or act on it, and prefer ids from this block when the operator says "this scope" / "this run" / "this asset."\n${lines.join('\n')}\n${overrideBlock}`;
 }
 
+// Hard caps on the rendered block so a long goal can't blow up the
+// prompt budget. The agent gets the full body via `phantom_get_goal`.
+const GOAL_OBJECTIVE_CAP = 800;
+const GOAL_CRITERIA_CAP = 600;
+const GOAL_PROGRESS_PREVIEW = 5;
+
+function truncate(text, max) {
+  if (!text) return '';
+  const s = String(text);
+  return s.length > max ? s.slice(0, max - 1) + '…' : s;
+}
+
+function formatRelative(iso) {
+  if (!iso) return 'unknown';
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return 'unknown';
+  const diff = Date.now() - then;
+  if (diff < 60_000) return 'just now';
+  const m = Math.round(diff / 60_000);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  return `${d}d ago`;
+}
+
+/**
+ * Render the CURRENT GOAL block. Returns '' when there is no active
+ * goal — the prompt should not carry an empty "goal: none" stub
+ * because goal-presence is itself a meaningful signal to the agent.
+ *
+ * Pulled live from the goal store on every prompt build so the latest
+ * progress notes always appear. Cost: 2 cheap indexed queries.
+ */
+function renderActiveGoalBlock() {
+  let goal = null;
+  try {
+    goal = getCurrentGoal();
+  } catch {
+    // Goal store may be unavailable during partial migrations; degrade
+    // silently rather than failing prompt build.
+    return '';
+  }
+  if (!goal) return '';
+
+  const progress = (() => {
+    try { return getProgress(goal.id, { limit: GOAL_PROGRESS_PREVIEW }); }
+    catch { return []; }
+  })();
+  const linkedRuns = (() => {
+    try { return countLinkedRuns(goal.id, { terminalOnly: true }); }
+    catch { return 0; }
+  })();
+
+  const lines = [
+    `\n## CURRENT GOAL — ${goal.title}`,
+    truncate(goal.objective, GOAL_OBJECTIVE_CAP),
+    '',
+    '**Success criteria:**',
+    truncate(goal.success_criteria, GOAL_CRITERIA_CAP),
+  ];
+
+  if (progress.length) {
+    lines.push('');
+    lines.push(`**Progress so far (latest ${progress.length}, newest first):**`);
+    for (const p of progress) {
+      const when = p.created_at ? String(p.created_at).replace('T', ' ').slice(0, 16) : '';
+      const tag = p.kind && p.kind !== 'step' ? ` [${p.kind}]` : '';
+      lines.push(`- ${when}${tag} — ${p.note}`);
+    }
+  }
+
+  lines.push('');
+  lines.push(`**Status:** ${goal.status} · linked runs: ${linkedRuns} · created ${formatRelative(goal.created_at)}`);
+  if (goal.satisfied_at) {
+    lines.push(`**Satisfaction claim:** filed ${formatRelative(goal.satisfied_at)} — awaiting operator confirmation`);
+  }
+  lines.push('');
+  lines.push('> Call `phantom_log_goal_progress` after a meaningful step toward this goal, and `phantom_declare_goal_satisfied` only when you believe the success criteria are met. Both are advisory — the operator confirms completion. Scope policy always takes precedence over goal progress.');
+
+  return lines.join('\n') + '\n';
+}
+
 export function buildSystemPrompt({ profileId = null, scopeId = null, raw = false, uiContext = null } = {}) {
   const sys = getSystemInfo();
   const skills = getAvailableSkills();
   const traces = getRecentTraces();
   const uiContextBlock = renderUiContextBlock(uiContext);
+  const goalBlock = renderActiveGoalBlock();
   const secOpsBlock = renderSecOpsToolsBlock(sys);
 
   const basePrompt = `You are PHANTOM — an elite AI-powered pentesting and red teaming command center. You run locally on the operator's machine with full system access and unlimited tool iterations.
@@ -214,7 +299,7 @@ export function buildSystemPrompt({ profileId = null, scopeId = null, raw = fals
 - Installed Tools: ${sys.installed_tools?.length > 0 ? sys.installed_tools.join(', ') : 'None — install as needed'}
 ${skills.length > 0 ? `\n## AVAILABLE SKILLS\n${skills.join('\n')}` : ''}
 ${traces ? `\n## RECENT EXECUTION TRACES (for self-optimization)\n${traces}` : ''}
-${uiContextBlock}${secOpsBlock}
+${uiContextBlock}${goalBlock}${secOpsBlock}
 ## ASK-GATED ACTIONS & ALLOW-ONCE OVERRIDES
 The scope policy classifies every tool call into one of four outcomes:
 

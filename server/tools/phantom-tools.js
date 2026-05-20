@@ -23,6 +23,10 @@ import { getToolpacks } from '../toolpacks/toolpack-registry.js';
 import { renderExecutiveSummary, renderPentestReport } from '../artifacts/report-renderers.js';
 import { writeArtifact } from '../artifacts/artifact-store.js';
 import { parseTargetInput } from '../scope/target-parser.js';
+import {
+  getCurrentGoal, getProgress, getLinkedRuns,
+  logProgress, recordSatisfactionClaim,
+} from '../goals/goal-store.js';
 
 const SEVERITIES = ['info', 'low', 'medium', 'high', 'critical'];
 const STATUSES = ['open', 'triaged', 'fixed', 'wont_fix', 'duplicate'];
@@ -328,6 +332,44 @@ export function getPhantomToolDefinitions() {
         },
       },
     },
+    {
+      type: 'function',
+      function: {
+        name: 'phantom_get_goal',
+        description: 'Return the full active goal — title, full objective, success criteria, recent progress, linked-run summary. Use when the CURRENT GOAL block in the system prompt was truncated and you need the full body to reason about it.',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'phantom_log_goal_progress',
+        description: 'Append a short progress note (≤ 280 chars) to the active goal. Use after a MEANINGFUL step toward the goal — a finding filed, a scope mapped, a milestone hit. Do NOT use as a thinking-out-loud channel; one note per real step. Returns the persisted note or an error string if rate-capped / no active goal.',
+        parameters: {
+          type: 'object',
+          properties: {
+            note: { type: 'string', description: 'Single-sentence progress note. Server truncates at 280 chars.' },
+            kind: { type: 'string', description: 'Optional tag: "step" | "finding" | "blocker" | "pivot". Default "step".' },
+          },
+          required: ['note'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'phantom_declare_goal_satisfied',
+        description: 'File a claim that the active goal\'s success criteria are met. Records justification + confidence on the goal row and emits a trace event on the current run. The operator confirms completion in the UI — this DOES NOT close the goal. Use sparingly; one claim per goal is the norm.',
+        parameters: {
+          type: 'object',
+          properties: {
+            justification: { type: 'string', description: 'Why the criteria are met. Cite specific findings, runs, or artifacts by id where possible.' },
+            confidence: { type: 'string', description: 'Optional: "high" | "medium" | "low". Default "medium".' },
+          },
+          required: ['justification'],
+        },
+      },
+    },
   ];
 }
 
@@ -359,6 +401,9 @@ export async function executePhantomTool(name, args = {}, context = {}) {
       case 'phantom_list_artifacts':        return opListArtifacts(args);
       case 'phantom_list_toolpacks':        return opListToolpacks();
       case 'phantom_generate_report':       return opGenerateReport(args, context);
+      case 'phantom_get_goal':              return opGetGoal();
+      case 'phantom_log_goal_progress':     return opLogGoalProgress(args, context);
+      case 'phantom_declare_goal_satisfied': return opDeclareGoalSatisfied(args, context);
       default:
         return `Unknown PHANTOM tool: ${name}`;
     }
@@ -587,4 +632,72 @@ function opGenerateReport({ runId, kind = 'pentest' } = {}, context = {}) {
     artifact: { id: artifact.id, type: artifact.type, title: artifact.title, path: artifact.path },
     markdown_preview: markdown.slice(0, 1200) + (markdown.length > 1200 ? '\n…' : ''),
   });
+}
+
+// ── Goal-engine operations ──────────────────────────────────────────────────
+
+function opGetGoal() {
+  const goal = getCurrentGoal();
+  if (!goal) return 'No active goal.';
+  const progress = getProgress(goal.id, { limit: 20 });
+  const runs = getLinkedRuns(goal.id, { limit: 10 });
+  return json({
+    goal,
+    recent_progress: progress,
+    recent_runs: runs.map((r) => ({
+      id: r.id,
+      title: r.title,
+      status: r.status,
+      goal: r.goal,
+      started_at: r.started_at,
+      ended_at: r.ended_at,
+      summary: r.summary,
+    })),
+  });
+}
+
+function opLogGoalProgress({ note, kind } = {}, context = {}) {
+  const goal = getCurrentGoal();
+  if (!goal) return 'No active goal.';
+  if (!note || !String(note).trim()) return 'note is required';
+  try {
+    const progress = logProgress({
+      goalId: goal.id,
+      note,
+      kind: kind || 'step',
+      runId: context.runId || null,
+    });
+    return json({ logged: true, progress });
+  } catch (err) {
+    // Surface rate-cap and other validation errors as a plain string so the
+    // agent can react (back off / mention it to the operator) rather than
+    // re-throwing into the LLM loop.
+    return `phantom_log_goal_progress error: ${err.message}`;
+  }
+}
+
+function opDeclareGoalSatisfied({ justification, confidence } = {}, context = {}) {
+  const goal = getCurrentGoal();
+  if (!goal) return 'No active goal.';
+  if (!justification || !String(justification).trim()) return 'justification is required';
+  try {
+    const updated = recordSatisfactionClaim(goal.id, {
+      justification,
+      confidence: confidence || 'medium',
+      runId: context.runId || null,
+    });
+    return json({
+      claimed: true,
+      goal: {
+        id: updated.id,
+        title: updated.title,
+        status: updated.status,
+        satisfied_at: updated.satisfied_at,
+        satisfaction_claim: updated.satisfaction_claim,
+      },
+      note: 'Claim recorded. Operator must confirm completion via the UI — status remains active until they do.',
+    });
+  } catch (err) {
+    return `phantom_declare_goal_satisfied error: ${err.message}`;
+  }
 }

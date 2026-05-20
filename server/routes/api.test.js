@@ -656,4 +656,206 @@ describe('API Routes Integration', () => {
     assert.strictEqual(graphSnapshot.runId, run.id);
     assert.ok(graphSnapshot.nodes.length >= graph.nodes.length);
   });
+
+  test('Goal CRUD + activate/complete/progress flow', async () => {
+    // POST create
+    let res = await fetch(`${baseUrl}/goals`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'API goal',
+        objective: 'Demonstrate the goal API end-to-end.',
+        successCriteria: 'All CRUD endpoints respond as documented.',
+      }),
+    });
+    assert.strictEqual(res.status, 201);
+    const created = (await res.json()).goal;
+    assert.ok(created.id);
+    assert.strictEqual(created.status, 'active');
+
+    // GET list (active by default)
+    res = await fetch(`${baseUrl}/goals`);
+    assert.strictEqual(res.status, 200);
+    const list = (await res.json()).goals;
+    assert.ok(list.some((g) => g.id === created.id));
+
+    // POST validation error
+    res = await fetch(`${baseUrl}/goals`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '', objective: 'x', successCriteria: 'y' }),
+    });
+    assert.strictEqual(res.status, 400);
+
+    // GET current is null before activation
+    res = await fetch(`${baseUrl}/goals/current`);
+    let body = await res.json();
+    assert.strictEqual(body.goal, null);
+
+    // POST /goals/:id/activate
+    res = await fetch(`${baseUrl}/goals/${created.id}/activate`, { method: 'POST' });
+    assert.strictEqual(res.status, 200);
+
+    res = await fetch(`${baseUrl}/goals/current`);
+    body = await res.json();
+    assert.strictEqual(body.goal.id, created.id);
+
+    // POST progress
+    res = await fetch(`${baseUrl}/goals/${created.id}/progress`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: 'kicked off the recon phase', kind: 'step' }),
+    });
+    assert.strictEqual(res.status, 201);
+    const prog = (await res.json()).progress;
+    assert.strictEqual(prog.kind, 'step');
+
+    // GET progress
+    res = await fetch(`${baseUrl}/goals/${created.id}/progress`);
+    assert.strictEqual(res.status, 200);
+    const all = (await res.json()).progress;
+    assert.ok(all.length >= 1);
+
+    // GET /goals/:id detail bundles goal + progress + runs + count
+    res = await fetch(`${baseUrl}/goals/${created.id}`);
+    assert.strictEqual(res.status, 200);
+    const detail = await res.json();
+    assert.strictEqual(detail.goal.id, created.id);
+    assert.ok(Array.isArray(detail.progress));
+    assert.ok(Array.isArray(detail.runs));
+    assert.strictEqual(typeof detail.linkedRunCount, 'number');
+
+    // PATCH
+    res = await fetch(`${baseUrl}/goals/${created.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'API goal (renamed)' }),
+    });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual((await res.json()).goal.title, 'API goal (renamed)');
+
+    // POST complete
+    res = await fetch(`${baseUrl}/goals/${created.id}/complete`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: 'operator confirmed' }),
+    });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual((await res.json()).goal.status, 'completed');
+
+    // GET current is null again (complete clears the pointer)
+    res = await fetch(`${baseUrl}/goals/current`);
+    assert.strictEqual((await res.json()).goal, null);
+
+    // GET list with status=all sees the completed one
+    res = await fetch(`${baseUrl}/goals?status=all`);
+    assert.ok((await res.json()).goals.some((g) => g.id === created.id));
+
+    // DELETE
+    res = await fetch(`${baseUrl}/goals/${created.id}`, { method: 'DELETE' });
+    assert.strictEqual(res.status, 204);
+
+    res = await fetch(`${baseUrl}/goals/${created.id}`);
+    assert.strictEqual(res.status, 404);
+  });
+
+  test('Campaign CRUD + goal queue + lifecycle controls', async () => {
+    // POST create — missing required fields
+    let res = await fetch(`${baseUrl}/campaigns`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '', objective: 'o' }),
+    });
+    assert.strictEqual(res.status, 400);
+
+    // POST create — unknown scope id (must fail with 400 not 500)
+    res = await fetch(`${baseUrl}/campaigns`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 't', objective: 'o', scopeId: 'does-not-exist' }),
+    });
+    assert.strictEqual(res.status, 400);
+    assert.match((await res.json()).error, /unknown scope_id/);
+
+    // POST create — unknown toolpack
+    res = await fetch(`${baseUrl}/campaigns`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 't', objective: 'o', toolpackIds: ['totally-fake'] }),
+    });
+    assert.strictEqual(res.status, 400);
+    assert.match((await res.json()).error, /unknown toolpack/);
+
+    // POST create — happy path
+    res = await fetch(`${baseUrl}/campaigns`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Web recon campaign',
+        objective: 'Map authorized lab and identify safe findings',
+        runBudget: { maxChildRuns: 3 },
+      }),
+    });
+    assert.strictEqual(res.status, 201);
+    const campaign = (await res.json()).campaign;
+    assert.strictEqual(campaign.status, 'draft');
+    assert.strictEqual(campaign.run_budget.maxChildRuns, 3);
+
+    // POST goal under campaign
+    res = await fetch(`${baseUrl}/campaigns/${campaign.id}/goals`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'first goal', prompt: 'do recon' }),
+    });
+    assert.strictEqual(res.status, 201);
+    const goal = (await res.json()).goal;
+    assert.strictEqual(goal.status, 'queued');
+
+    // GET detail bundles goals + runs
+    res = await fetch(`${baseUrl}/campaigns/${campaign.id}`);
+    const detail = await res.json();
+    assert.strictEqual(detail.goals.length, 1);
+    assert.strictEqual(detail.runCount, 0);
+
+    // Lifecycle: draft → running
+    res = await fetch(`${baseUrl}/campaigns/${campaign.id}/start`, { method: 'POST' });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual((await res.json()).campaign.status, 'running');
+
+    // Lifecycle: can't start again (already running)
+    res = await fetch(`${baseUrl}/campaigns/${campaign.id}/start`, { method: 'POST' });
+    assert.strictEqual(res.status, 409);
+
+    // Pause → resume
+    res = await fetch(`${baseUrl}/campaigns/${campaign.id}/pause`, { method: 'POST' });
+    assert.strictEqual((await res.json()).campaign.status, 'paused');
+    res = await fetch(`${baseUrl}/campaigns/${campaign.id}/resume`, { method: 'POST' });
+    assert.strictEqual((await res.json()).campaign.status, 'running');
+
+    // Patch goal to running
+    res = await fetch(`${baseUrl}/campaigns/${campaign.id}/goals/${goal.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'running' }),
+    });
+    assert.strictEqual((await res.json()).goal.status, 'running');
+
+    // Patch evaluator result
+    res = await fetch(`${baseUrl}/campaigns/${campaign.id}/goals/${goal.id}/evaluate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision: 'complete', confidence: 0.9, summary: 'all done' }),
+    });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual((await res.json()).goal.evaluator_result.decision, 'complete');
+
+    // Cancel: any → canceled; queued goals get skipped
+    // First create a second queued goal so cancel has something to skip
+    await fetch(`${baseUrl}/campaigns/${campaign.id}/goals`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'second goal', prompt: 'next' }),
+    });
+    res = await fetch(`${baseUrl}/campaigns/${campaign.id}/cancel`, { method: 'POST' });
+    assert.strictEqual((await res.json()).campaign.status, 'canceled');
+
+    res = await fetch(`${baseUrl}/campaigns/${campaign.id}/goals`);
+    const finalGoals = (await res.json()).goals;
+    const queuedRemaining = finalGoals.filter((g) => g.status === 'queued');
+    assert.strictEqual(queuedRemaining.length, 0, 'cancel skips remaining queued goals');
+
+    // DELETE cascades
+    res = await fetch(`${baseUrl}/campaigns/${campaign.id}`, { method: 'DELETE' });
+    assert.strictEqual(res.status, 204);
+    res = await fetch(`${baseUrl}/campaigns/${campaign.id}`);
+    assert.strictEqual(res.status, 404);
+  });
 });

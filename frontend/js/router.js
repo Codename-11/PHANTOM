@@ -5,7 +5,7 @@ window.Router = {
   // to landing on Settings after a reload.
   noRestore: new Set(['settings']),
   storeKey: 'phantom:last-route',
-  routes: ['dash', 'chat', 'runs', 'graph', 'alerts', 'artifacts', 'approvals', 'scope', 'settings'],
+  routes: ['dash', 'chat', 'runs', 'graph', 'alerts', 'artifacts', 'approvals', 'scope', 'campaigns', 'settings'],
 
   init() {
     this.chatArea = document.getElementById('chat-area');
@@ -59,6 +59,7 @@ window.Router = {
     // Page-specific show hooks
     if (route === 'dash') window.Dash?.show?.();
     if (route === 'approvals') window.ApprovalsPage?.show?.();
+    if (route === 'campaigns') window.CampaignsPage?.show?.();
 
     window.dispatchEvent(new CustomEvent('phantom:route', { detail: { route } }));
   },

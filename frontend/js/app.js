@@ -111,6 +111,8 @@
   connectWebSocket();
   loadConversations();
   checkSudoStatus();
+  window.Goals?.init?.();
+  window.CampaignsPage?.init?.();
   // initOperatorOverrideControl() is called later, after OverrideController
   // (a `const`) is declared. Calling it here would hit a temporal-dead-zone
   // ReferenceError because the function declaration is hoisted but the
@@ -868,11 +870,15 @@ Start the investigation immediately!`;
   setTimeout(() => { window.OnboardingWizard?.maybeOpen?.(); }, 800);
 
   // ─── Sudo Modal ───
+  // Only auto-open in 'sudo' mode (bare-metal Linux/macOS where the agent
+  // needs an interactive password to cache). 'root' (containerized) and
+  // 'none' (Windows / no escalation path) skip the modal — root has no
+  // sudo binary, and Windows uses the per-step elevatedCommand affordance.
   async function checkSudoStatus() {
     try {
       const res = await fetch('/api/system/info');
       const info = await res.json();
-      if (!info.sudoConfigured) {
+      if (info.elevationMode === 'sudo' && !info.sudoConfigured) {
         showSudoModal();
       }
     } catch {}

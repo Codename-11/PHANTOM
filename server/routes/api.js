@@ -38,6 +38,20 @@ import { renderExecutiveSummary, renderPentestReport } from '../artifacts/report
 import { deriveRunGraph } from '../graph/graph-derive.js';
 import { buildSystemPrompt } from '../ai/system-prompt.js';
 import { createScope, getScope, getScopes, updateScope, archiveScope } from '../scope/scope-store.js';
+import {
+  createGoal, getGoal, getGoals, updateGoal, deleteGoal,
+  activateGoal, getCurrentGoal, clearCurrentGoal,
+  completeGoal,
+  logProgress, getProgress,
+  getLinkedRuns, countLinkedRuns,
+} from '../goals/goal-store.js';
+import {
+  createCampaign, getCampaign, listCampaigns, updateCampaign, updateCampaignStatus, deleteCampaign,
+  createCampaignGoal, getCampaignGoal, listCampaignGoals, updateCampaignGoalStatus,
+  recordEvaluatorResult,
+  listCampaignRuns, listGoalRuns, countCampaignRuns,
+} from '../campaigns/campaign-store.js';
+import { runOneGoal, nextQueuedGoal } from '../campaigns/goal-engine.js';
 import { evaluateToolAction, normalizeOperatorOverride, ACTION_CLASSES } from '../scope/policy.js';
 import { parseTargetInput, targetsToScopeFields } from '../scope/target-parser.js';
 import { getScopeTemplates } from '../scope/templates.js';
@@ -72,6 +86,27 @@ import multer from 'multer';
 import AdmZip from 'adm-zip';
 
 const router = Router();
+
+// Privilege model on Linux:
+//   - bare-metal install → server runs as the operator's user, sudo cached
+//     via /api/sudo/validate and piped to `sudo -S` for installer steps
+//   - containerized install → server runs as uid 0 (Docker default), no
+//     sudo binary in the image, every privileged op already succeeds
+// IS_ROOT collapses both cases into one flag so the API layer can
+// short-circuit sudo prompts that have no meaning inside a root container.
+// Windows has no getuid() — treat it as "not root" so the sudo path
+// stays a no-op there (Windows uses the elevatedCommand affordance).
+const IS_ROOT = (typeof process.getuid === 'function' && process.getuid() === 0);
+
+// Resolve the active elevation mode for the running process.
+//   'root' — uid 0 (typically containerized); no escalation needed
+//   'sudo' — non-root POSIX; agent ops that need root must shell `sudo`
+//   'none' — Windows / other; admin escalation via Start-Process -Verb RunAs
+function getElevationMode() {
+  if (IS_ROOT) return 'root';
+  if (process.platform === 'linux' || process.platform === 'darwin') return 'sudo';
+  return 'none';
+}
 
 // Multer for file uploads (skills .zip)
 const upload = multer({ dest: '/tmp/phantom-uploads/', limits: { fileSize: 50 * 1024 * 1024 } });
@@ -244,17 +279,27 @@ function runStep(entry, timeoutMs) {
 
     // Linux sudo password injection. The installer's apt/dnf/pacman steps
     // resolve to `sudo apt-get install …`; without a TTY (we're inside an
-    // Express request) sudo fails to prompt. If the operator has cached
-    // their sudo password via /api/sudo/validate, prepend `-S` and pipe
-    // the password to stdin so the install proceeds non-interactively.
+    // Express request) sudo fails to prompt. Two cases:
+    //   1. Containerized (uid 0, no sudo binary) → drop the sudo wrapper
+    //      entirely and exec the underlying binary directly. Mirrors
+    //      stripSudo() in server/tools/executor.js.
+    //   2. Bare-metal POSIX with a cached password → prepend `-S` and
+    //      pipe the password to stdin so the install runs non-interactively.
     let cmd = entry.command;
     let args = entry.args || [];
     let stdinFeed = null;
-    if (process.platform === 'linux' && cmd === 'sudo' && !args.includes('-S')) {
-      const cachedPass = getSetting('sudo_password', '');
-      if (cachedPass) {
-        args = ['-S', ...args];
-        stdinFeed = cachedPass + '\n';
+    if (cmd === 'sudo') {
+      if (IS_ROOT) {
+        // entry was built as { command:'sudo', args:['apt-get','install','-y',pkg] }
+        // — peel sudo off, the rest already targets the real package manager.
+        cmd = args[0];
+        args = args.slice(1);
+      } else if (process.platform === 'linux' && !args.includes('-S')) {
+        const cachedPass = getSetting('sudo_password', '');
+        if (cachedPass) {
+          args = ['-S', ...args];
+          stdinFeed = cachedPass + '\n';
+        }
       }
     }
 
@@ -497,7 +542,12 @@ router.get('/settings', (req, res) => {
     temperature: parseFloat(settings.api_temperature || config.api.temperature),
     maxTokens: parseInt(settings.api_max_tokens || config.api.maxTokens),
     workspace: settings.workspace || config.workspace,
-    sudoConfigured: !!settings.sudo_password,
+    // Elevation surface: root containers report sudoConfigured:true so the
+    // frontend's modal gate stops firing, plus an explicit elevationMode
+    // tristate so the Settings UI can swap "Sudo Password" for an
+    // informational "Container — no sudo needed" pill.
+    elevationMode: getElevationMode(),
+    sudoConfigured: IS_ROOT ? true : !!settings.sudo_password,
     synthesisLlmEnabled: settings.synthesis_llm_enabled === '1',
     // docs_enabled defaults to ON so first-time operators land on a useful
     // /docs route without ceremony. Restart required after toggling.
@@ -535,7 +585,10 @@ router.put('/settings', (req, res) => {
   if (model) { setSetting('api_model', model); updateConfig({ model }); }
   if (temperature !== undefined) { setSetting('api_temperature', String(temperature)); updateConfig({ temperature }); }
   if (maxTokens !== undefined) { setSetting('api_max_tokens', String(maxTokens)); updateConfig({ maxTokens }); }
-  if (sudoPassword !== undefined) { setSetting('sudo_password', sudoPassword); }
+  // sudoPassword is ignored when running as root — no escalation is
+  // needed, and persisting a password the agent will never use just
+  // creates an audit/forensic liability.
+  if (sudoPassword !== undefined && !IS_ROOT) { setSetting('sudo_password', sudoPassword); }
   if (workspace) { setSetting('workspace', workspace); updateConfig({ workspace }); }
 
   resetClient();
@@ -738,6 +791,323 @@ router.post('/scopes/:id/evaluate', (req, res) => {
     scope,
     operatorOverride: normalizeOperatorOverride(req.body?.operatorOverride),
   }));
+});
+
+// ─── Goals ───
+// Persistent multi-step operator objectives. See
+// docs/plans/2026-05-20-phantom-goal-engine-plan.md.
+//
+// Route ordering note: /current and /current/clear are declared BEFORE
+// /:id so Express doesn't capture "current" as an id segment.
+router.get('/goals/current', (req, res) => {
+  res.json({ goal: getCurrentGoal() });
+});
+
+router.post('/goals/current/clear', (req, res) => {
+  clearCurrentGoal();
+  res.status(204).end();
+});
+
+router.get('/goals', (req, res) => {
+  const status = String(req.query.status || 'active');
+  res.json({ goals: getGoals({ status }) });
+});
+
+router.post('/goals', (req, res) => {
+  try {
+    const goal = createGoal({
+      title: req.body?.title,
+      objective: req.body?.objective,
+      successCriteria: req.body?.successCriteria,
+      scopeId: req.body?.scopeId || null,
+      metadata: req.body?.metadata || null,
+    });
+    res.status(201).json({ goal });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get('/goals/:id', (req, res) => {
+  const goal = getGoal(req.params.id);
+  if (!goal) return res.status(404).json({ error: 'Goal not found' });
+  res.json({
+    goal,
+    progress: getProgress(req.params.id, { limit: 50 }),
+    runs: getLinkedRuns(req.params.id, { limit: 20 }),
+    linkedRunCount: countLinkedRuns(req.params.id, { terminalOnly: false }),
+  });
+});
+
+router.patch('/goals/:id', (req, res) => {
+  try {
+    const updated = updateGoal(req.params.id, req.body || {});
+    if (!updated) return res.status(404).json({ error: 'Goal not found' });
+    res.json({ goal: updated });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/goals/:id', (req, res) => {
+  const ok = deleteGoal(req.params.id);
+  if (!ok) return res.status(404).json({ error: 'Goal not found' });
+  res.status(204).end();
+});
+
+router.post('/goals/:id/activate', (req, res) => {
+  const goal = activateGoal(req.params.id);
+  if (!goal) return res.status(404).json({ error: 'Goal not found' });
+  res.json({ goal });
+});
+
+router.post('/goals/:id/complete', (req, res) => {
+  const goal = completeGoal(req.params.id, { note: req.body?.note || null });
+  if (!goal) return res.status(404).json({ error: 'Goal not found' });
+  res.json({ goal });
+});
+
+router.get('/goals/:id/progress', (req, res) => {
+  const goal = getGoal(req.params.id);
+  if (!goal) return res.status(404).json({ error: 'Goal not found' });
+  res.json({ progress: getProgress(req.params.id, { limit: req.query.limit || 50 }) });
+});
+
+router.post('/goals/:id/progress', (req, res) => {
+  try {
+    const progress = logProgress({
+      goalId: req.params.id,
+      note: req.body?.note,
+      kind: req.body?.kind,
+      runId: req.body?.runId || null,
+    });
+    res.status(201).json({ progress });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ─── Campaigns (governed multi-run engine) ───
+// Distinct from /api/goals (the v0 single-chat context pointer). See
+// docs/plans/2026-05-20-phantom-goal-engine-plan.md.
+//
+// Validation guard rails up front so a bad scope/profile/toolpack id
+// fails at the API boundary rather than at run time.
+function validateCampaignRefs(body, res) {
+  if (body?.scopeId) {
+    const scope = getScope(body.scopeId);
+    if (!scope) {
+      res.status(400).json({ error: `unknown scope_id: ${body.scopeId}` });
+      return false;
+    }
+  }
+  if (body?.promptProfileId) {
+    // prompt-store imports already exist via the resolvePrompt path;
+    // we re-use getPromptProfile via the store re-export.
+    const profile = getPromptProfile(body.promptProfileId);
+    if (!profile) {
+      res.status(400).json({ error: `unknown prompt_profile_id: ${body.promptProfileId}` });
+      return false;
+    }
+  }
+  if (Array.isArray(body?.toolpackIds) && body.toolpackIds.length) {
+    const known = new Set(getToolpacks().map((tp) => tp.id));
+    const unknown = body.toolpackIds.filter((id) => !known.has(id));
+    if (unknown.length) {
+      res.status(400).json({ error: `unknown toolpack ids: ${unknown.join(', ')}` });
+      return false;
+    }
+  }
+  return true;
+}
+
+router.get('/campaigns', (req, res) => {
+  const status = req.query.status || null;
+  res.json({ campaigns: listCampaigns({ status }) });
+});
+
+router.post('/campaigns', (req, res) => {
+  if (!validateCampaignRefs(req.body || {}, res)) return;
+  try {
+    const campaign = createCampaign({
+      title: req.body?.title,
+      objective: req.body?.objective,
+      scopeId: req.body?.scopeId || null,
+      promptProfileId: req.body?.promptProfileId || null,
+      toolpackIds: req.body?.toolpackIds || [],
+      workerBackend: req.body?.workerBackend || 'phantom-native',
+      riskBudget: req.body?.riskBudget || null,
+      runBudget: req.body?.runBudget || null,
+      notificationPolicy: req.body?.notificationPolicy || null,
+    });
+    res.status(201).json({ campaign });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get('/campaigns/:id', (req, res) => {
+  const campaign = getCampaign(req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+  res.json({
+    campaign,
+    goals: listCampaignGoals(req.params.id),
+    runs: listCampaignRuns(req.params.id),
+    runCount: countCampaignRuns(req.params.id),
+  });
+});
+
+router.patch('/campaigns/:id', (req, res) => {
+  if (!validateCampaignRefs(req.body || {}, res)) return;
+  try {
+    const updated = updateCampaign(req.params.id, req.body || {});
+    if (!updated) return res.status(404).json({ error: 'Campaign not found' });
+    res.json({ campaign: updated });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/campaigns/:id', (req, res) => {
+  const ok = deleteCampaign(req.params.id);
+  if (!ok) return res.status(404).json({ error: 'Campaign not found' });
+  res.status(204).end();
+});
+
+// ─── Campaign goals ───
+
+router.get('/campaigns/:id/goals', (req, res) => {
+  const campaign = getCampaign(req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+  res.json({ goals: listCampaignGoals(req.params.id, { status: req.query.status || null }) });
+});
+
+router.post('/campaigns/:id/goals', (req, res) => {
+  const campaign = getCampaign(req.params.id);
+  if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+  try {
+    const goal = createCampaignGoal({
+      campaignId: req.params.id,
+      title: req.body?.title,
+      prompt: req.body?.prompt,
+      parentGoalId: req.body?.parentGoalId || null,
+      priority: req.body?.priority || 0,
+      maxAttempts: req.body?.maxAttempts || null,
+      completionCriteria: req.body?.completionCriteria || null,
+    });
+    res.status(201).json({ goal });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.patch('/campaigns/:id/goals/:goalId', (req, res) => {
+  const goal = getCampaignGoal(req.params.goalId);
+  if (!goal || goal.campaign_id !== req.params.id) {
+    return res.status(404).json({ error: 'Goal not found' });
+  }
+  if (req.body?.status) {
+    const stampStart = req.body.status === 'running';
+    const stampEnd = ['completed', 'failed', 'skipped'].includes(req.body.status);
+    try {
+      const updated = updateCampaignGoalStatus(req.params.goalId, req.body.status, { stampStart, stampEnd });
+      res.json({ goal: updated });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+    return;
+  }
+  res.json({ goal });
+});
+
+router.post('/campaigns/:id/goals/:goalId/run', (req, res) => {
+  try {
+    const out = runOneGoal({ campaignId: req.params.id, goalId: req.params.goalId });
+    res.status(201).json({
+      run: { id: out.run.id, title: out.run.title, status: out.run.status },
+      link: out.link,
+      conversationId: out.conversationId,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/campaigns/:id/run-next', (req, res) => {
+  // Convenience: pick the next queued goal and spawn it. Returns 404
+  // when the queue is drained.
+  const goal = nextQueuedGoal(req.params.id);
+  if (!goal) return res.status(404).json({ error: 'No queued goals' });
+  try {
+    const out = runOneGoal({ campaignId: req.params.id, goalId: goal.id });
+    res.status(201).json({
+      run: { id: out.run.id, title: out.run.title, status: out.run.status },
+      goal: { id: goal.id, title: goal.title },
+      link: out.link,
+      conversationId: out.conversationId,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/campaigns/:id/goals/:goalId/evaluate', (req, res) => {
+  // MVP: accept an externally-supplied evaluator result and persist it.
+  // The orchestrator (server/campaigns/goal-engine.js) calls this internally
+  // after each run; the route exists so operators can also patch verdicts
+  // via curl during development.
+  const goal = getCampaignGoal(req.params.goalId);
+  if (!goal || goal.campaign_id !== req.params.id) {
+    return res.status(404).json({ error: 'Goal not found' });
+  }
+  const updated = recordEvaluatorResult(req.params.goalId, req.body || {});
+  res.json({ goal: updated });
+});
+
+// ─── Lifecycle controls (Task 8) ───
+// Start: draft|paused → running, stamps started_at.
+// Pause: running → paused (new child runs blocked; in-flight runs complete).
+// Resume: paused → running.
+// Cancel: any → canceled; queued goals get status=skipped.
+function lifecycleTransition(id, fromStates, to, opts = {}) {
+  const c = getCampaign(id);
+  if (!c) return { error: 'Campaign not found', status: 404 };
+  if (fromStates.length && !fromStates.includes(c.status)) {
+    return { error: `cannot ${opts.actionLabel || to} a campaign in status ${c.status}`, status: 409 };
+  }
+  return { campaign: updateCampaignStatus(id, to, opts) };
+}
+
+router.post('/campaigns/:id/start', (req, res) => {
+  const out = lifecycleTransition(req.params.id, ['draft', 'paused', 'queued'], 'running',
+    { stampStart: true, actionLabel: 'start' });
+  if (out.error) return res.status(out.status).json({ error: out.error });
+  res.json(out);
+});
+
+router.post('/campaigns/:id/pause', (req, res) => {
+  const out = lifecycleTransition(req.params.id, ['running', 'needs_approval'], 'paused',
+    { actionLabel: 'pause' });
+  if (out.error) return res.status(out.status).json({ error: out.error });
+  res.json(out);
+});
+
+router.post('/campaigns/:id/resume', (req, res) => {
+  const out = lifecycleTransition(req.params.id, ['paused', 'needs_approval'], 'running',
+    { actionLabel: 'resume' });
+  if (out.error) return res.status(out.status).json({ error: out.error });
+  res.json(out);
+});
+
+router.post('/campaigns/:id/cancel', (req, res) => {
+  const out = lifecycleTransition(req.params.id, [], 'canceled',
+    { stampEnd: true, actionLabel: 'cancel' });
+  if (out.error) return res.status(out.status).json({ error: out.error });
+  // Queued goals become skipped so the orchestrator knows not to pick them up.
+  for (const g of listCampaignGoals(req.params.id, { status: 'queued' })) {
+    updateCampaignGoalStatus(g.id, 'skipped', { stampEnd: true });
+  }
+  res.json(out);
 });
 
 // ─── Assets, Findings, Baselines, Reruns ───
@@ -1104,7 +1474,21 @@ router.delete('/mcp/servers/:id', (req, res) => {
 });
 
 // ─── Sudo Validation ───
+//
+// In a root container there is no `sudo` binary and no password to
+// validate — every privileged op already succeeds. Short-circuit to
+// `valid:true` so the UI's gate flips without us trying to exec a
+// binary that doesn't exist (which would otherwise surface as the
+// misleading "Incorrect sudo password").
 router.post('/sudo/validate', async (req, res) => {
+  if (IS_ROOT) {
+    return res.json({
+      valid: true,
+      mode: 'root',
+      message: 'Container running as root — no sudo needed',
+    });
+  }
+
   const { password } = req.body;
   if (!password) {
     return res.json({ valid: false, message: 'No password provided' });
@@ -1120,7 +1504,7 @@ router.post('/sudo/validate', async (req, res) => {
       });
       // Password is correct — store it
       setSetting('sudo_password', password);
-      res.json({ valid: true, message: 'Sudo access granted ✅' });
+      res.json({ valid: true, mode: 'sudo', message: 'Sudo access granted ✅' });
     } catch (err) {
       res.json({ valid: false, message: 'Incorrect sudo password' });
     }
@@ -1159,8 +1543,12 @@ router.get('/system/info', async (req, res) => {
     info.ip = results[1].value.stdout.trim();
   }
 
-  // Check if sudo password is stored
-  info.sudoConfigured = !!getSetting('sudo_password', '');
+  // Elevation surface — see /api/settings for the same fields. Root
+  // containers always report sudoConfigured:true so existing UI gates
+  // that key off it skip without restructuring.
+  info.elevationMode = getElevationMode();
+  info.elevated = IS_ROOT;
+  info.sudoConfigured = IS_ROOT ? true : !!getSetting('sudo_password', '');
   info.workspace = config.workspace;
 
   res.json(info);

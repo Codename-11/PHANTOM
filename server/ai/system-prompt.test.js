@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSystemPrompt } from './system-prompt.js';
+import { initDB, closeDB } from '../memory/store.js';
+import { createGoal, activateGoal, logProgress, clearCurrentGoal } from '../goals/goal-store.js';
 
 test('system prompt always renders without uiContext', () => {
   const prompt = buildSystemPrompt({ raw: true });
@@ -46,4 +48,50 @@ test('operator override directive still rides through when uiContext flags it', 
   });
   assert.match(prompt, /OPERATOR OVERRIDE/);
   assert.match(prompt, /lab test/);
+});
+
+test('CURRENT GOAL block is omitted when no active goal exists', () => {
+  initDB(':memory:');
+  clearCurrentGoal();
+  const prompt = buildSystemPrompt({ raw: true });
+  assert.ok(!prompt.includes('CURRENT GOAL'), 'no goal stub should appear when none is active');
+  closeDB();
+});
+
+test('CURRENT GOAL block renders objective, criteria, progress, and position', () => {
+  initDB(':memory:');
+  const goal = createGoal({
+    title: 'Test goal',
+    objective: 'Find any open AdminPortal interfaces.',
+    successCriteria: 'A finding exists for every host in the subnet.',
+  });
+  activateGoal(goal.id);
+  logProgress({ goalId: goal.id, note: 'enumerated 10.0.0.0/24', kind: 'step' });
+
+  const prompt = buildSystemPrompt({ raw: true, uiContext: { route: 'chat' } });
+  assert.match(prompt, /CURRENT GOAL — Test goal/);
+  assert.match(prompt, /Find any open AdminPortal interfaces/);
+  assert.match(prompt, /A finding exists for every host/);
+  assert.match(prompt, /enumerated 10\.0\.0\.0\/24/);
+  assert.match(prompt, /phantom_log_goal_progress/);
+
+  // Goal block lives between UI context and ASK-GATED actions
+  const uiIdx = prompt.indexOf('CURRENT UI CONTEXT');
+  const goalIdx = prompt.indexOf('CURRENT GOAL');
+  const askIdx = prompt.indexOf('ASK-GATED ACTIONS');
+  assert.ok(uiIdx < goalIdx, 'goal block follows UI context');
+  assert.ok(goalIdx < askIdx, 'goal block precedes ASK-GATED actions');
+  closeDB();
+});
+
+test('CURRENT GOAL truncates objective beyond ~800 chars', () => {
+  initDB(':memory:');
+  const huge = 'x'.repeat(2000);
+  const g = createGoal({ title: 'big', objective: huge, successCriteria: 'sc' });
+  activateGoal(g.id);
+  const prompt = buildSystemPrompt({ raw: true });
+  // Truncated body ends with ellipsis; we shouldn't see all 2000 x's
+  assert.ok(!prompt.includes('x'.repeat(900)), 'objective truncates well under raw length');
+  assert.match(prompt, /…/);
+  closeDB();
 });

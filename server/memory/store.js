@@ -343,9 +343,118 @@ export function initDB(dbPath = config.db.path) {
       completed_at DATETIME
     );
     CREATE INDEX IF NOT EXISTS idx_install_requests_status ON install_requests(status);
+
+    -- ─── Goal Context (v0) ─────────────────────────────────────────────
+    -- A flat "what we're working toward in this chat" pointer + progress
+    -- notes the agent files itself. See docs/plans/2026-05-20-phantom-
+    -- goal-prompt.md for the prompt-level surface. Distinct from the
+    -- Campaign engine below — goals here are an ad-hoc context primitive,
+    -- not the governed multi-run supervisor.
+    CREATE TABLE IF NOT EXISTS goals (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      objective TEXT NOT NULL,
+      success_criteria TEXT NOT NULL,
+      scope_id TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      satisfied_at DATETIME,
+      satisfaction_claim_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      completed_at DATETIME,
+      metadata_json TEXT,
+      FOREIGN KEY (scope_id) REFERENCES scopes(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS goal_progress (
+      id TEXT PRIMARY KEY,
+      goal_id TEXT NOT NULL,
+      run_id TEXT,
+      note TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'step',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (goal_id) REFERENCES goals(id) ON DELETE CASCADE,
+      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_goals_status        ON goals(status);
+    CREATE INDEX IF NOT EXISTS idx_goals_scope         ON goals(scope_id);
+    CREATE INDEX IF NOT EXISTS idx_goal_progress_goal  ON goal_progress(goal_id);
+    CREATE INDEX IF NOT EXISTS idx_goal_progress_run   ON goal_progress(run_id);
+
+    -- ─── Campaign engine (v1) ──────────────────────────────────────────
+    -- A campaign is a governed multi-run security objective. It owns a
+    -- queue of child goals; each goal spawns one or more PHANTOM runs
+    -- via a worker_backend (phantom-native | codex-exec | codex-goal-
+    -- experimental). Evaluator decides next state after every run. See
+    -- docs/plans/2026-05-20-phantom-goal-engine-plan.md.
+    CREATE TABLE IF NOT EXISTS campaigns (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      objective TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft',
+      scope_id TEXT,
+      prompt_profile_id TEXT,
+      toolpack_ids_json TEXT,
+      worker_backend TEXT NOT NULL DEFAULT 'phantom-native',
+      risk_budget_json TEXT,
+      run_budget_json TEXT,
+      notification_policy_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      started_at DATETIME,
+      ended_at DATETIME,
+      FOREIGN KEY (scope_id) REFERENCES scopes(id) ON DELETE SET NULL,
+      FOREIGN KEY (prompt_profile_id) REFERENCES prompt_profiles(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS campaign_goals (
+      id TEXT PRIMARY KEY,
+      campaign_id TEXT NOT NULL,
+      parent_goal_id TEXT,
+      title TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      priority INTEGER DEFAULT 0,
+      attempt_count INTEGER DEFAULT 0,
+      max_attempts INTEGER DEFAULT 2,
+      completion_criteria_json TEXT,
+      evaluator_result_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      started_at DATETIME,
+      ended_at DATETIME,
+      FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
+      FOREIGN KEY (parent_goal_id) REFERENCES campaign_goals(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS campaign_goal_runs (
+      id TEXT PRIMARY KEY,
+      campaign_id TEXT NOT NULL,
+      goal_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      worker_backend TEXT NOT NULL DEFAULT 'phantom-native',
+      status TEXT NOT NULL DEFAULT 'spawned',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
+      FOREIGN KEY (goal_id) REFERENCES campaign_goals(id) ON DELETE CASCADE,
+      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_campaigns_status            ON campaigns(status);
+    CREATE INDEX IF NOT EXISTS idx_campaigns_scope             ON campaigns(scope_id);
+    CREATE INDEX IF NOT EXISTS idx_campaign_goals_campaign     ON campaign_goals(campaign_id);
+    CREATE INDEX IF NOT EXISTS idx_campaign_goals_status       ON campaign_goals(status);
+    CREATE INDEX IF NOT EXISTS idx_campaign_goals_parent       ON campaign_goals(parent_goal_id);
+    CREATE INDEX IF NOT EXISTS idx_campaign_goal_runs_campaign ON campaign_goal_runs(campaign_id);
+    CREATE INDEX IF NOT EXISTS idx_campaign_goal_runs_goal     ON campaign_goal_runs(goal_id);
+    CREATE INDEX IF NOT EXISTS idx_campaign_goal_runs_run      ON campaign_goal_runs(run_id);
   `);
 
   ensureColumn('runs', 'prompt_snapshot_json', 'TEXT');
+  // Phase 4 goal engine: links a run to the active goal it was launched
+  // under so synthesis-time progress can be attributed cleanly.
+  ensureColumn('runs', 'goal_id', 'TEXT');
 
   // Scope-policy expansion (action_modes, time windows, rate caps, ROE).
   // These are additive — existing scopes continue working with their

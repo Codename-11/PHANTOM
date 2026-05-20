@@ -20,6 +20,9 @@ import { normalizeOperatorOverride } from './scope/policy.js';
 import { getToolpacks } from './toolpacks/toolpack-registry.js';
 import { writePreviewArtifact, exportRunTrace } from './artifacts/artifact-store.js';
 import { artifactToPublic } from './artifacts/renderers.js';
+import { getCurrentGoalId, tagRunWithGoal } from './goals/goal-store.js';
+import { recordRunOutcomeAgainstGoal } from './goals/goal-progress.js';
+import { finalizeRunForCampaign } from './campaigns/goal-engine.js';
 import apiRouter from './routes/api.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -308,6 +311,16 @@ wss.on('connection', (ws) => {
               providerRoute: providerRoute(),
             },
           });
+
+          // Tag the new run with the active goal so synthesis-time
+          // auto-progress can attribute the outcome cleanly. Best-effort:
+          // a missing goal_id column or partial migration must not break
+          // the chat loop.
+          try {
+            const activeGoalId = getCurrentGoalId();
+            if (activeGoalId) tagRunWithGoal(run.id, activeGoalId);
+          } catch { /* non-fatal */ }
+
           currentRunId = run.id;
           currentRunStopped = false;
           let runHadError = false;
@@ -465,6 +478,8 @@ wss.on('connection', (ws) => {
               { type: 'run.stopped', phase: 'chat', status: 'stopped', outputPreview: 'Stopped by user' }
             );
             exportTraceArtifact(run.id, conversationId);
+            recordRunOutcomeAgainstGoal(run.id);
+            finalizeRunForCampaign(run.id);
           } else if (runHadError) {
             failRun(run.id, 'Completed with error');
             sendTrace(run.id,
@@ -472,6 +487,8 @@ wss.on('connection', (ws) => {
               { type: 'run.failed', phase: 'chat', status: 'failed', outputPreview: 'Completed with error' }
             );
             exportTraceArtifact(run.id, conversationId);
+            recordRunOutcomeAgainstGoal(run.id);
+            finalizeRunForCampaign(run.id);
           } else {
             completeRun(run.id, 'Completed');
             sendTrace(run.id,
@@ -479,6 +496,8 @@ wss.on('connection', (ws) => {
               { type: 'run.completed', phase: 'chat', status: 'completed', outputPreview: 'Completed' }
             );
             exportTraceArtifact(run.id, conversationId);
+            recordRunOutcomeAgainstGoal(run.id);
+            finalizeRunForCampaign(run.id);
           }
 
           currentRunId = null;
@@ -594,6 +613,28 @@ function printBootPanel() {
     ? `custom · ${config.api.baseUrl}`
     : `${providerId} · ${config.api.baseUrl}`;
 
+  // Elevation: how the agent will escalate when a tool needs root.
+  //   root (containerized) — uid 0 inside the container, sudo is a no-op
+  //   sudo cached          — bare-metal POSIX + a stored sudo password
+  //   sudo (interactive)   — bare-metal POSIX, password prompt required
+  //                          (installer steps will fail without TTY until
+  //                          the operator validates via Settings)
+  //   admin (per-command)  — Windows; per-step Start-Process -Verb RunAs
+  //                          affordances surface on failed installs.
+  const isRoot = (typeof process.getuid === 'function' && process.getuid() === 0);
+  let elevationLabel;
+  if (isRoot) {
+    elevationLabel = c.cy('root') + c.dim(' (containerized)');
+  } else if (process.platform === 'linux' || process.platform === 'darwin') {
+    elevationLabel = getSetting('sudo_password', '')
+      ? c.cy('sudo') + c.dim(' (cached)')
+      : c.cy('sudo') + c.dim(' (interactive)');
+  } else if (process.platform === 'win32') {
+    elevationLabel = c.cy('admin') + c.dim(' (per-command)');
+  } else {
+    elevationLabel = c.dim('user');
+  }
+
   const lines = [];
   lines.push('');
   lines.push('  ' + c.b(c.cy('PHANTOM SEC')) + c.dim('  Governed AI · Security-Ops Cockpit'));
@@ -603,6 +644,7 @@ function printBootPanel() {
   lines.push('  ' + label('provider')  + providerLabel);
   lines.push('  ' + label('model')     + (config.api.model || c.dim('unset')));
   lines.push('  ' + label('api key')   + maskedKey);
+  lines.push('  ' + label('elevation') + elevationLabel);
   lines.push('');
   lines.push('  ' + label('local')     + c.cy(`http://localhost:${port}`));
   if (lan.length) {

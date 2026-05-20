@@ -57,10 +57,13 @@ window.Settings = {
       input.type = input.type === 'password' ? 'text' : 'password';
     });
 
-    // Sudo password visibility toggle
-    document.getElementById('toggle-sudo-pass').addEventListener('click', () => {
+    // Sudo password visibility toggle. The toggle button only exists when
+    // the host (#setting-sudo-password-host) is visible — see applyElevationMode().
+    // Null-guarded so containerized boots (host hidden, button removed
+    // from layout) don't throw at init.
+    document.getElementById('toggle-sudo-pass')?.addEventListener('click', () => {
       const input = document.getElementById('setting-sudo-password');
-      input.type = input.type === 'password' ? 'text' : 'password';
+      if (input) input.type = input.type === 'password' ? 'text' : 'password';
     });
 
     // Test connection
@@ -220,6 +223,13 @@ window.Settings = {
       this.updateProviderChrome(providerId, data.baseUrl || providerBaseUrl);
       document.getElementById('quick-model-label').textContent = data.model || 'No Model';
 
+      // Reconcile the System Access card with the server's elevation mode
+      // so the sudo-password input only appears where it actually means
+      // something (bare-metal POSIX). Older /api/settings responses without
+      // the new field fall back to 'sudo' so existing installs keep their
+      // current UI.
+      this.applyElevationMode(data.elevationMode || 'sudo');
+
       // Update model badge
       document.getElementById('current-model').textContent = data.model || 'No Model';
 
@@ -228,6 +238,37 @@ window.Settings = {
       this.refreshModels();
     } catch (err) {
       console.error('Failed to load settings:', err);
+    }
+  },
+
+  /**
+   * Reconcile the System Access card with the server's elevation mode.
+   * 'sudo' is the bare-metal POSIX path — input + visibility toggle stay
+   * as-is. 'root' / 'none' swap the input for an informational badge so
+   * operators see the active model without being prompted for a password
+   * that has no meaning in their environment.
+   */
+  applyElevationMode(mode) {
+    const host = document.getElementById('setting-sudo-password-host');
+    const info = document.getElementById('setting-elevation-info');
+    const badge = document.getElementById('setting-elevation-badge');
+    const hint = document.getElementById('setting-elevation-hint');
+    if (!host || !info) return;
+
+    if (mode === 'sudo') {
+      host.style.display = '';
+      info.style.display = 'none';
+      return;
+    }
+
+    host.style.display = 'none';
+    info.style.display = '';
+    if (mode === 'root') {
+      if (badge) badge.textContent = 'root (containerized)';
+      if (hint) hint.textContent = 'Server is running as uid 0 — privileged operations execute directly. No sudo password is needed or stored.';
+    } else {
+      if (badge) badge.textContent = 'admin (per-command)';
+      if (hint) hint.textContent = 'No cached escalation. The installer surfaces a copy-able Start-Process -Verb RunAs command per failed step.';
     }
   },
 
@@ -328,7 +369,10 @@ window.Settings = {
       settings.apiKey = apiKey;
     }
 
-    const sudoPassword = document.getElementById('setting-sudo-password').value;
+    // The sudo input only exists in 'sudo' elevation mode — null-guard
+    // for containerized boots where applyElevationMode() hid the host.
+    const sudoInput = document.getElementById('setting-sudo-password');
+    const sudoPassword = sudoInput?.value || '';
     if (sudoPassword) {
       settings.sudoPassword = sudoPassword;
     }
