@@ -1,5 +1,9 @@
 # AI Sync - Security
 
+## Deployment shape
+
+Production deployment is Docker-on-Linux (see `ai_sync/containerization.md`). PHANTOM ships as a single `debian:stable-slim` image with Node 20 + Python + Go inside; SQLite + WAL/SHM live on the `phantom-db` named volume and the workspace lives on `phantom-workspace`, so `docker compose down` is non-destructive. The multi-backend installer in `server/tools/installer.js` (winget/choco/scoop/wsl-apt/brew) stays for dev-on-Windows but is **not** load-bearing in production — production trusts `PHANTOM_BACKEND=apt` (set via Dockerfile or env) and the install path runs only `apt + pipx + go` inside the container. Windows and macOS are dev-only environments; native installs there exist to make iteration fast, not to be deployment targets.
+
 ## What we have
 
 - Local SQLite storage for settings, conversations, runs, trace events, artifacts, scopes, prompt profiles/fragments, assets, findings, snapshots, rerun templates, comparisons, and **install requests**.

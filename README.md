@@ -60,51 +60,79 @@ PHANTOM is intended for **authorized security testing, lab work, research, and d
 
 ## 🚀 Quick Start
 
-### Prerequisites
+### Production: Docker on Linux (primary)
 
-- **Node.js** 18+
-- **npm**
-- **Python** 3.10+ for optional smoke tests and some scraping workflows
+PHANTOM ships as a single container image. Docker-on-Linux is the supported production install path; Windows and macOS are dev environments only.
+
+**Prerequisites**
+
+- **Docker** 24+ with the `docker compose` v2 plugin (legacy `docker-compose` is not supported)
 - An **OpenAI-compatible API endpoint** and key/token, or a local model endpoint
-
-### Installation
 
 ```bash
 # Clone the maintained fork, or replace with your preferred remote
 git clone https://github.com/Codename-11/PHANTOM.git
 cd PHANTOM
 
-# Install dependencies
-npm install
-
 # Configure your model provider
 cp .env.example .env
-nano .env
+nano .env   # set API_PROVIDER, API_KEY, MODEL_ID (and API_BASE_URL if custom)
+
+# Build phantom:base and start the stack
+docker compose up
 ```
 
-### Configuration
+Open <http://localhost:1337>. State (SQLite DB + WAL/SHM, workspace artifacts) lives on the `phantom-db` and `phantom-workspace` named volumes and survives `docker compose down`.
 
-Edit `.env` with your provider. Never commit `.env`, API keys, local databases, traces, or workspace output.
+The built-in user-docs site is served at <http://localhost:1337/docs/> whenever the `docs_enabled` flag is on (default). Toggle from **Settings → Advanced → Built-in user docs**; the change requires a server restart because the static handler mounts at boot.
 
-```env
-# OpenAI-compatible endpoint
-API_BASE_URL=https://api.openai.com/v1
-API_KEY=[REDACTED]
-MODEL_ID=gpt-4o
+### Image variants
 
-# Local Ollama-compatible example
-# API_BASE_URL=http://localhost:11434/v1
-# API_KEY=[REDACTED]
-# MODEL_ID=llama3
-```
-
-### Run
+`docker compose up` builds `phantom:base` (curl, git, nmap, jq, dnsutils). Other toolpack variants are built from the same Dockerfile via `--build-arg PROFILE=`:
 
 ```bash
+node scripts/build-variants.js              # build all five
+node scripts/build-variants.js --only blue  # build one
+node scripts/build-variants.js --dry-run    # print the docker commands only
+```
+
+| Tag | Profile | Adds on top of `base` |
+|---|---|---|
+| `phantom:base`       | base       | (recon/OSINT minimum) |
+| `phantom:offensive`  | offensive  | nikto, whatweb, gobuster, hydra |
+| `phantom:blue`       | blue       | tshark, tcpdump, chkrootkit, rkhunter |
+| `phantom:full`       | full       | offensive + blue |
+| `phantom:full-msf`   | full + `INCLUDE_MSF=1` | Metasploit Framework (separate layer) |
+
+To run a variant instead of `phantom:base`, edit `docker-compose.yml` and point `image:` at the tag you built.
+
+> **Note** — `scripts/install-profile.sh` (the build-time tool list) and `server/profiles/profile-store.js` (the runtime profile table from Phase 4) are not yet unified. Editing one does not propagate to the other; touch both until the resolver consolidation lands.
+
+### Docker smoke test
+
+```bash
+npm run smoke:docker
+```
+
+Mirrors `docker compose build → up -d → poll /api/installer/status → probe routes → compose down`. Catches dev/prod drift in <60s without leaving the Windows editor.
+
+### Dev environment (Windows / macOS)
+
+For native Node + Vite HMR, native sqlite, and native file watchers, run PHANTOM directly:
+
+**Prerequisites**
+
+- **Node.js** 18+
+- **npm**
+- **Python** 3.10+ for optional smoke tests and some scraping workflows
+
+```bash
+npm install
+cp .env.example .env
 npm run dev
 ```
 
-Open <http://localhost:5173>.
+Open <http://localhost:5173> (Vite dev) — Express API runs on `:1337` behind the proxy.
 
 For a production-style local server without the Vite dev process:
 
@@ -113,13 +141,33 @@ npm run build     # builds frontend AND user-docs together
 npm start
 ```
 
-The built-in user-docs site is served at `http://localhost:1337/docs/` whenever the `docs_enabled` flag is on (default). Toggle from **Settings → Advanced → Built-in user docs**; the change requires a server restart because the static handler mounts at boot. Run `npm run build:docs` separately to refresh just the docs after editing pages in `user-docs/`.
-
 For docs hot-reload while authoring:
 
 ```bash
 npm run dev:docs   # VitePress dev server on port 5174
 ```
+
+Dev mode runs the multi-backend sec-ops installer (winget/choco/scoop/apt/dnf/pacman/brew/wsl-apt) so the agent reaches for whatever your host has. Production runs only `apt + pipx + go` inside the container.
+
+### Configure
+
+PHANTOM reads its provider configuration from `.env`. Never commit `.env`, API keys, local databases, traces, or workspace output.
+
+```env
+# Pick a provider id from server/ai/providers.js — default is `hermes`.
+# Other options: openai · xai · openrouter · groq · deepseek · together
+# · ollama · lmstudio · custom
+API_PROVIDER=openai
+
+# Auto-derived from the provider id; override only for `custom` or a
+# self-hosted endpoint that doesn't match the registry default.
+# API_BASE_URL=http://127.0.0.1:11434/v1
+
+API_KEY=sk-…
+MODEL_ID=gpt-4o
+```
+
+Provider, base URL, key, and model are all editable from **Settings → Models** after the server boots — `.env` is just the seed.
 
 ## 🏗️ Architecture
 

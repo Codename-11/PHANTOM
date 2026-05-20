@@ -1,36 +1,105 @@
 # Getting started
 
-PHANTOM runs locally on your workstation — no managed service, no cloud database, no telemetry. You'll need Node, npm, an OpenAI-compatible model endpoint, and ~5 minutes.
+PHANTOM is local-first — no managed service, no cloud database, no telemetry. Production deploys are Docker-on-Linux; Windows and macOS are dev environments.
 
-## Prerequisites
+This page walks both paths. Pick the one that matches where you'll actually run PHANTOM.
 
-- **Node.js** 18 or newer
-- **npm** (ships with Node)
+## Production: Docker on Linux (primary)
+
+You'll have a running container serving the SPA, the API, and the in-app docs at `http://localhost:1337` after these steps.
+
+### Prerequisites
+
+- **Docker** 24 or newer with the `docker compose` v2 plugin
+  - Legacy `docker-compose` (v1) is not supported — the smoke target and build-variants script both call `docker compose` (space, not hyphen)
 - An **OpenAI-compatible API endpoint** — any of:
   - OpenAI, OpenRouter, xAI, DeepSeek, Together, Groq
   - Local: Ollama, LM Studio, llama.cpp's OpenAI server, vLLM
   - The Hermes proxy (`hermes-relay`) that fronts Pro subscriptions as one endpoint
+
+### Clone, configure, and bring up the stack
+
+```bash
+git clone https://github.com/Codename-11/PHANTOM.git
+cd PHANTOM
+cp .env.example .env
+# edit .env — set API_PROVIDER, API_KEY, MODEL_ID
+docker compose up
+```
+
+You'll see Docker build `phantom:base` (debian-slim + Node 20 + Python + Go + the base recon toolpack), then the Express server starts on port 1337. Open <http://localhost:1337>.
+
+::: tip State lives on named volumes
+SQLite (with WAL/SHM siblings) lives on `phantom-db`, mounted at `/app/data`. Workspace artifacts live on `phantom-workspace`. `docker compose down` stops the container but keeps state; `docker compose down -v` wipes both volumes.
+:::
+
+### Image variants
+
+`phantom:base` ships the recon/OSINT minimum. Build the other variants from the same Dockerfile via the build-variants script:
+
+```bash
+node scripts/build-variants.js              # build all five
+node scripts/build-variants.js --only blue  # build one
+node scripts/build-variants.js --dry-run    # print docker commands only
+```
+
+| Tag                | Adds on top of `base`                       |
+| ------------------ | ------------------------------------------- |
+| `phantom:base`     | (recon/OSINT minimum)                       |
+| `phantom:offensive`| nikto, whatweb, gobuster, hydra             |
+| `phantom:blue`     | tshark, tcpdump, chkrootkit, rkhunter       |
+| `phantom:full`     | offensive + blue                            |
+| `phantom:full-msf` | full + Metasploit Framework (opt-in layer)  |
+
+To run a variant instead of `phantom:base`, edit `docker-compose.yml` and point `image:` at the variant tag.
+
+### Smoke the container before relying on it
+
+```bash
+npm run smoke:docker
+```
+
+The script runs `docker compose build → up -d`, polls `/api/installer/status` until it returns 200, hits `/api/onboarding/status`, `/api/runs`, and `/api/toolpacks`, then tears the stack down. You'll get a non-zero exit and a banner pointing at the failing stage if anything drifts.
+
+## Dev environment (Windows / macOS)
+
+For HMR, native sqlite, and native file watchers, run PHANTOM directly. The multi-backend installer (winget/choco/scoop/apt/dnf/pacman/brew/wsl-apt) detects what's available on your host and surfaces it in Settings → Tools.
+
+### Prerequisites
+
+- **Node.js** 18 or newer
+- **npm** (ships with Node)
+- An **OpenAI-compatible API endpoint** (same list as above)
 - (Optional) **Python 3.10+** for the smoke tests bundled under `tests/`
 
-PHANTOM is platform-agnostic on the developer side — it runs on Linux, macOS, and Windows (PowerShell or WSL). Some sec-ops tools the agent calls are Linux-native; the [installer](/features/sec-ops-installer) detects what's available on your host.
-
-## Install
+### Install and run
 
 ```bash
 git clone https://github.com/Codename-11/PHANTOM.git
 cd PHANTOM
 npm install
+cp .env.example .env
+npm run dev
 ```
 
-## Configure
+This starts Express on `http://localhost:1337` and Vite on `http://localhost:5173`. Open the Vite URL.
 
-PHANTOM reads its provider configuration from `.env`. A first run copies `.env.example` to `.env` automatically; you can also do it by hand:
+For a production-style server without the Vite dev process:
 
 ```bash
-cp .env.example .env
+npm run build
+npm start
 ```
 
-Edit `.env` with your provider:
+For docs hot-reload while authoring:
+
+```bash
+npm run dev:docs   # VitePress dev server on port 5174
+```
+
+## Configure your provider
+
+PHANTOM reads provider configuration from `.env`. The same file works for both Docker compose (passed through to the container) and the dev environment.
 
 ```env
 # Pick a provider id from server/ai/providers.js — default is `hermes`.
@@ -53,23 +122,8 @@ MAX_TOKENS=4096
 ```
 
 ::: tip You can also configure in the UI
-Provider, base URL, key, and model are all editable from Settings → Models after the server boots — `.env` is just the seed. Settings persists changes to the local SQLite database.
+Provider, base URL, key, and model are all editable from Settings → Models after the server boots — `.env` is just the seed. Settings persists changes to the local SQLite database (which lives on the `phantom-db` volume in Docker, or `phantom.db` in the repo root in dev).
 :::
-
-## Run the dev server
-
-```bash
-npm run dev
-```
-
-This starts Express on `http://localhost:1337` and Vite on `http://localhost:5173`. Open the Vite URL.
-
-For a production-style server without the Vite dev process:
-
-```bash
-npm run build
-npm start
-```
 
 ## First boot
 

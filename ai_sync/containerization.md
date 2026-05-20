@@ -102,7 +102,7 @@ and runtime toolpack profiles. Windows remains the dev environment only.
 Every phase must pass before moving on:
 
 - `node --check` on every changed `.js` file.
-- `npm test` — full suite stays green (currently 155/155).
+- `npm test` — full suite stays green (currently 189/189).
 - From Phase 2 onward: `npm run smoke:docker` passes.
 - `git diff --check`.
 - UI phases: settings page renders, no browser console errors, manual smoke

@@ -1,5 +1,32 @@
 # PHANTOM DEVLOG
 
+## 2026-05-19 — Containerization Rollout (Phases 1–6)
+
+Six-phase rollout converting PHANTOM into a Docker-on-Linux primary, Windows-dev-only project with build-time and runtime toolpack profiles. Plan in `ai_sync/containerization.md`; phase ordering preserved across six commits (`e78db3c`, `352b4c0`, `93920dc`, `c5168ce`, `05a78d3`, this commit) so each phase is independently revertible.
+
+**Phase 1 — Container substrate.** `Dockerfile` on `debian:stable-slim`, single-stage with `build-essential` retained because `better-sqlite3` compiles native bindings from source on this base. Layer order: system deps → toolpack layer → npm deps → source copy → `npm run build` (frontend + VitePress). `docker-compose.yml` exposes 1337, environment passthrough for `API_BASE_URL` / `API_KEY` / `MODEL_ID`, named volumes `phantom-workspace` and `phantom-db` (no bind mounts). `.dockerignore` keeps `node_modules/`, `workspace/`, `*.db*`, `.design-fetch*/`, `.verify-shots/`, `.claude/`, `tests/__pycache__/` out of the build context.
+
+**Phase 2 — Docker smoke.** `scripts/smoke-docker.js` mirrors the style of `scripts/run-tests.js`: `docker compose build → up -d`, polls `/api/installer/status` until 200 (60s timeout), probes `/api/onboarding/status` + `/api/runs` + `/api/toolpacks`, tears down. `--no-down` keeps the stack running for inspection. `PHANTOM_DB_PATH` env override added to `server/config.js` so the in-container SQLite file lives on the `phantom-db` volume instead of the disposable `/app/phantom.db`. New `npm run smoke:docker` script.
+
+**Phase 3 — Tool install via build args.** `scripts/install-profile.sh` (POSIX) reads a profile name and runs `apt-get install --no-install-recommends ...` (pipx/go pipelines wired but empty until the resolver lands). Dockerfile gains `ARG PROFILE=base` + `ARG INCLUDE_MSF=0`; Metasploit installs in its own layer so non-msf variants don't pay the cost. `server/tools/installer.js` cleaned up: replaced the `eval("require")('fs')` brittle pattern with a static import and honored a `PHANTOM_BACKEND` env var so detection short-circuits inside the container.
+
+**Phase 4 — Profile table + REST CRUD.** New SQLite `profiles` table; `server/profiles/profile-store.js` (CRUD) + `server/profiles/profile-resolver.js` (`expandProfile`, `renderProfileAsDockerfile`, `resolveProfileAsInstallPlan`). REST routes in `server/routes/api.js`: `GET/POST/PUT/DELETE /api/profiles`, `GET /api/profiles/:id/dockerfile`, `POST /api/profiles/:id/install` (routes through existing approvals queue — no new approval surface).
+
+**Phase 5 — Profile UI subtab.** `frontend/js/pages/profiles-panel.js` renders a CRUD list under Settings → Tools / MCP / Skills, vanilla JS matching the pattern in `installer-panel.js`. Apply-runtime / Export-Dockerfile actions present. Render-stub tests in `profiles-panel.test.js` follow the existing test pattern.
+
+**Phase 6 — Variants + docs (this commit).** New `scripts/build-variants.js` exports the canonical `VARIANTS` matrix (`base | offensive | blue | full | full-msf`) and drives `docker build --build-arg PROFILE=...` across the set with `--only <name>`, `--dry-run`, `--keep-going` flags. README install section restructured: Docker compose is the headline path, `npm install` is demoted to "Dev environment (Windows/macOS)". Variants table + smoke-target call-out + docker compose v2 prereq noted. `user-docs/guide/getting-started.md` mirrors the README structure in user-facing prose. `ai_sync/security.md` gained a Deployment shape paragraph naming Docker-on-Linux as primary and `PHANTOM_BACKEND=apt` as the production assumption.
+
+**Key locked decisions across the rollout.** debian-slim single-stage base; named volumes (not bind mounts); `PHANTOM_DB_PATH` env override so the DB file lives on a Docker volume; `PHANTOM_BACKEND` short-circuit so the installer skips host probing inside the container; build-arg PROFILE matrix instead of per-variant Dockerfiles; profile table behind REST CRUD; vanilla-JS Profiles subtab matching the installer-panel pattern; no live uninstall path (rebuild without the line); no split-container topology; manual `docker push` for now (no registry automation).
+
+**Tests.** 166 → 189 across the rollout (Phase 4 added profile-store + profile-resolver + route coverage; Phase 5 added render tests). `npm test` is 189/189 at HEAD. `node --check` clean across all changed JS. `git diff --check` clean.
+
+**Open follow-ups (not in scope for Phase 6).**
+- CSS for the Profiles subtab — classes `profiles-table`, `profiles-form`, `profiles-field`, `profiles-empty`, `profiles-form-err`, `profiles-header-actions`, `profiles-caption`, and `installer-toast-action` referenced from `frontend/js/pages/profiles-panel.js` are not yet styled. Append-only pass 31+ candidate.
+- Catalog/script unification — `scripts/install-profile.sh` (build-time, static `case` per profile) and `server/profiles/profile-store.js` (runtime profile table) currently hold separate tool lists. Until a unified resolver lands, editing one requires editing the other.
+- `.gitattributes` — Windows CRLF noise on every checkout. A normalization file would silence it.
+- `scripts/seed.js` — referenced from `package.json` (`seed`, `seed:reset`) but untracked in git. Out of scope for Phase 6.
+- Image registry push automation — explicit no for now; the docker-server operator pushes tags manually after `node scripts/build-variants.js` succeeds.
+
 ## 2026-05-19 — Cohesive Flow + Sec-Ops Installer + Agent Loop + Test Suite
 
 Large session covering five gap-closing rounds, in two arcs:
