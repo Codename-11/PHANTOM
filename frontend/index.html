@@ -85,6 +85,7 @@
         <button class="sidebar-nav-item" data-route="approvals" title="Approvals"><span class="nav-glyph" aria-hidden="true">APV</span><span class="nav-label">Approvals</span></button>
         <button class="sidebar-nav-item" data-route="scope" title="Assets / Scope"><span class="nav-glyph" aria-hidden="true">SCP</span><span class="nav-label">Assets / Scope</span></button>
         <button class="sidebar-nav-item" data-route="campaigns" title="Campaigns"><span class="nav-glyph" aria-hidden="true">CMP</span><span class="nav-label">Campaigns</span></button>
+        <button class="sidebar-nav-item" data-route="registry" title="Toolpack Registry"><span class="nav-glyph" aria-hidden="true">REG</span><span class="nav-label">Registry</span></button>
         <button class="sidebar-nav-item" data-route="settings" title="Settings"><span class="nav-glyph" aria-hidden="true">CFG</span><span class="nav-label">Settings</span></button>
         <!-- Docs link · opens the built-in user-docs in a new tab so the
              operator's run state isn't disturbed. Hidden when /api/settings
@@ -839,6 +840,42 @@
                 </button>
               </footer>
             </div>
+          </div>
+        </section>
+
+        <!-- B2 — Toolpack Registry (browse + preview, read-only). The
+             write paths (import / enable / install / rollback) thread
+             through Approvals in a follow-up. -->
+        <section class="app-page" data-page="registry" id="registry-page">
+          <div class="page-header">
+            <div>
+              <p class="eyebrow">Governed catalog</p>
+              <h1>Toolpack Registry</h1>
+              <p>Local-first signed manifests. Every toolpack PHANTOM knows about — installed or not — appears here with its risk classes, install recipe, and trust digest. Hosted registries land in a follow-up.</p>
+            </div>
+            <div class="page-actions">
+              <button id="refresh-registry-btn" class="btn ghost sm">↻ Refresh</button>
+            </div>
+          </div>
+          <div class="registry-layout" id="registry-layout">
+            <aside class="registry-aside" aria-label="Manifest list">
+              <div id="registry-list" class="registry-list" data-empty="true">
+                <div class="campaigns-empty">
+                  <p class="campaigns-empty-title">Loading registry…</p>
+                </div>
+              </div>
+            </aside>
+            <section id="registry-detail" class="registry-detail hidden" aria-label="Manifest detail">
+              <header class="drawer-hd">
+                <div class="head-line">
+                  <span id="registry-detail-pill" class="campaign-pill">manifest</span>
+                  <span class="drawer-sub" id="registry-detail-id">—</span>
+                </div>
+                <h2 id="registry-detail-title">Select a manifest</h2>
+                <p id="registry-detail-summary" class="drawer-desc">—</p>
+              </header>
+              <div class="drawer-bd" id="registry-detail-body"></div>
+            </section>
           </div>
         </section>
 
@@ -1792,6 +1829,8 @@
   <script src="js/pages/onboarding-checklist.js"></script>
   <script src="js/pages/run-evidence-tab.js"></script>
   <script src="js/pages/dash-hero.js"></script>
+  <script src="js/registry/registry-presenter.js"></script>
+  <script src="js/pages/registry-page.js"></script>
   <script src="js/goals.js"></script>
   <script src="js/campaigns/campaign-presenter.js"></script>
   <script src="js/campaigns/campaign-form.js"></script>

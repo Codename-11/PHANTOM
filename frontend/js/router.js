@@ -5,7 +5,7 @@ window.Router = {
   // to landing on Settings after a reload.
   noRestore: new Set(['settings']),
   storeKey: 'phantom:last-route',
-  routes: ['dash', 'chat', 'runs', 'graph', 'alerts', 'artifacts', 'approvals', 'scope', 'campaigns', 'settings'],
+  routes: ['dash', 'chat', 'runs', 'graph', 'alerts', 'artifacts', 'approvals', 'scope', 'campaigns', 'registry', 'settings'],
 
   init() {
     this.chatArea = document.getElementById('chat-area');
@@ -65,6 +65,7 @@ window.Router = {
     }
     if (route === 'approvals') window.ApprovalsPage?.show?.();
     if (route === 'campaigns') window.CampaignsPage?.show?.();
+    if (route === 'registry') window.RegistryPage?.show?.();
     if (route === 'settings') window.DiagnosticsCard?.show?.('settings');
 
     window.dispatchEvent(new CustomEvent('phantom:route', { detail: { route } }));

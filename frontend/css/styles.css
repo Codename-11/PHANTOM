@@ -7873,3 +7873,72 @@ svg.ico [stroke] {
   color: var(--ok-1, #66c293); border-color: rgba(102,194,147,0.32);
 }
 
+/* ═══ B2 — Registry page (browse + detail) ═══ */
+.registry-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 460px) 1fr;
+  gap: 14px;
+  padding: 16px 0 24px;
+  min-height: 0;
+}
+.registry-layout:has(.registry-detail.hidden) {
+  grid-template-columns: 1fr;
+}
+.registry-aside { min-width: 0; }
+.registry-summary {
+  display: flex; flex-wrap: wrap; gap: 12px;
+  margin-bottom: 12px;
+  color: var(--fg-3); font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.registry-rows { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.registry-row {
+  background: var(--bg-2); border: 1px solid var(--line-1);
+  border-radius: var(--r-3); padding: 12px 14px;
+  cursor: pointer; outline: none;
+  transition: border-color 120ms ease, background 120ms ease;
+  animation: campaign-row-in 220ms ease both;
+}
+.registry-row:hover { border-color: var(--line-cy); background: var(--bg-3); }
+.registry-row:focus-visible { box-shadow: var(--ring-focus); }
+.registry-row.selected { border-color: var(--cy-1); background: var(--bg-3); }
+.registry-row-head {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+.registry-row-title { font-weight: 600; color: var(--fg-1); flex: 1; min-width: 0; }
+.registry-row-version { color: var(--fg-3); font-size: var(--fs-11); }
+.registry-row-summary { color: var(--fg-2); font-size: var(--fs-12); }
+.registry-row-meta {
+  display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px;
+  font-family: var(--font-mono); font-size: var(--fs-11); color: var(--fg-3);
+}
+.registry-detail {
+  background: var(--bg-2); border: 1px solid var(--line-1); border-radius: var(--r-4);
+  display: flex; flex-direction: column; overflow: hidden; min-height: 0;
+  animation: campaign-drawer-in 200ms ease both;
+}
+.registry-detail.hidden { display: none; }
+.registry-detail .drawer-hd {
+  padding: 14px 16px; border-bottom: 1px solid var(--line-1);
+  background: var(--bg-1);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.registry-detail .drawer-hd h2 {
+  font-size: var(--fs-15); font-weight: 600; color: var(--fg-1);
+  margin: 0; line-height: 1.3;
+}
+.registry-detail .drawer-bd {
+  padding: 14px 16px; overflow-y: auto; flex: 1; min-height: 0;
+}
+
+@media (max-width: 1100px) {
+  .registry-layout { grid-template-columns: 1fr; }
+  .registry-detail {
+    position: fixed; right: 0; top: 0; bottom: 0; left: auto;
+    width: min(440px, 100vw); z-index: 50; border-radius: 0;
+  }
+}
+
