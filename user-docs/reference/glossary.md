@@ -150,6 +150,47 @@ The signed metadata contract for a toolpack
 never execute it. PHANTOM verifies the digest + signature before
 import.
 
+## Registry source
+
+An operator-configured remote URL PHANTOM may fetch signed manifests
+from. Each source carries a pinned ed25519 trust root (base64 raw
+32-byte public key). Sources land **disabled** by default; the
+operator must explicitly enable browsing. HTTPS-only by policy.
+Channels: `stable` / `preview` / `dev`. See `user-docs/reference/registry.md`
+for the full operator flow.
+
+## Signature status
+
+The verification state of a single manifest or revocation feed against
+the configured trust roots. One of:
+
+- `unsigned` — no `trust.signature`, OR the digest is a placeholder
+  (e.g. `sha256:0000...`). All current built-in fixtures fall into
+  this bucket.
+- `unknown_signer` — signature present, but `signed_by` does not
+  match any configured trust root.
+- `verified` — signature + `signed_by` both validate against a
+  configured trust root.
+- `invalid` — signature decodable but verification against the
+  named root fails (tampered body, wrong key, etc.).
+
+## Revocation feed
+
+A signed `phantom.revocations/v1` JSON document published by a
+registry source listing package versions that should be warned or
+blocked. PHANTOM polls every enabled source's feed every 30 minutes
+and caches the parsed entries in-process. Severities: `warn` (UI
+banner; install allowed with acknowledgement) and `block` (install
+denied until pinned replacement is selected or an operator override
+is approved).
+
+## Trust root
+
+A pinned base64-encoded ed25519 raw 32-byte public key associated
+with a registry source. Used to verify the source's signed catalog +
+revocation feed. PHANTOM ships no default trust roots — operators
+choose what to trust.
+
 ---
 
 ## Approval
