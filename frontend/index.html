@@ -1712,6 +1712,48 @@
   <script src="js/pages/artifacts-page.js"></script>
   <script src="js/pages/alerts-page.js"></script>
   <script src="js/pages/approvals-page.js"></script>
+  <!-- Local-network scan modals (A1b) — driven by scope-page.js -->
+  <div id="scan-ack-modal" class="scan-modal hidden" hidden role="dialog" aria-modal="true" aria-labelledby="scan-ack-title">
+    <div class="scan-backdrop"></div>
+    <div class="scan-panel">
+      <div class="scan-hd">
+        <p class="eyebrow">No scope active</p>
+        <h2 id="scan-ack-title">Read this machine's neighbor table?</h2>
+        <button class="scan-close" data-scan-close aria-label="Close">×</button>
+      </div>
+      <div class="scan-body">
+        <p>PHANTOM will read the ARP / IP-neighbor table the kernel has already learned from local traffic. <strong>No packets are sent.</strong></p>
+        <ul class="scan-bullets">
+          <li>Reads visible to a host-based EDR or network monitor as an <code>arp -a</code> / <code>ip neigh show</code> invocation.</li>
+          <li>Discovered hosts land as <strong>draft assets</strong> — nothing is touched on the network.</li>
+          <li>You'll be able to review the list and choose which entries to keep.</li>
+        </ul>
+        <p class="scan-hint">For governed environments, create an authorized scope first so this run gets policy-checked.</p>
+      </div>
+      <div class="scan-ft">
+        <button id="scan-ack-cancel" class="btn btn-secondary">Cancel</button>
+        <button id="scan-ack-confirm" class="btn btn-primary">Yes, read neighbors</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="scan-review-modal" class="scan-modal hidden" hidden role="dialog" aria-modal="true" aria-labelledby="scan-review-title">
+    <div class="scan-backdrop"></div>
+    <div class="scan-panel scan-panel-wide">
+      <div class="scan-hd">
+        <p class="eyebrow">Local network scan</p>
+        <h2 id="scan-review-title">Discovered neighbors</h2>
+        <button class="scan-close" data-scan-close aria-label="Close">×</button>
+      </div>
+      <div class="scan-meta" id="scan-review-meta">—</div>
+      <div class="scan-body" id="scan-review-body">Loading…</div>
+      <div class="scan-ft">
+        <button id="scan-cancel-btn" class="btn btn-secondary">Cancel</button>
+        <button id="scan-promote-btn" class="btn btn-primary">Promote to assets</button>
+      </div>
+    </div>
+  </div>
+
   <script src="js/scope/scope-builder.js"></script>
   <script src="js/pages/scope-page.js"></script>
   <script src="js/management.js"></script>

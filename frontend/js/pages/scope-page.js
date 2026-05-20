@@ -639,7 +639,13 @@ window.ScopePage = {
     const list = document.getElementById('asset-list');
     if (!list) return;
     if (!this.assets.length) {
-      list.innerHTML = '<div class="empty-msg">No assets yet. Create a network, device, service, or web app target.</div>';
+      list.innerHTML = `
+        <div class="scan-empty">
+          <p class="scan-empty-lede">No assets yet.</p>
+          <p class="scan-empty-sub">Create a target manually, or let PHANTOM read this machine's ARP table to seed drafts.</p>
+          <button class="btn btn-primary btn-sm" data-action="scan-local-network">Scan this machine's network</button>
+        </div>`;
+      list.querySelector('[data-action="scan-local-network"]')?.addEventListener('click', () => this.openScanModal());
       return;
     }
     list.innerHTML = this.assets.map(asset => `
@@ -772,8 +778,174 @@ window.ScopePage = {
   renderEmptyAssets() {
     const main = document.getElementById('asset-main');
     const inspector = document.getElementById('asset-inspector');
-    if (main) main.innerHTML = '<div class="empty-msg">Create an asset to start tracking targets, history, findings, and mitigation state.</div>';
+    if (main) {
+      main.innerHTML = `
+        <div class="scan-empty-main">
+          <p class="eyebrow">Inventory empty</p>
+          <h2>No assets yet</h2>
+          <p>Create a target manually, or read this machine's ARP / neighbor table to propose drafts.</p>
+          <div class="scan-empty-actions">
+            <button class="btn btn-primary" data-action="scan-local-network">Scan this machine's network</button>
+            <button class="btn btn-secondary" id="empty-state-new-asset">Add asset manually</button>
+          </div>
+          <p class="scan-empty-hint">The scan is passive — PHANTOM only reads entries the kernel already learned from local traffic. No probes are sent.</p>
+        </div>`;
+      main.querySelector('[data-action="scan-local-network"]')?.addEventListener('click', () => this.openScanModal());
+      main.querySelector('#empty-state-new-asset')?.addEventListener('click', () => this.renderAssetEditor());
+    }
     if (inspector) inspector.innerHTML = '<div class="inspector-card">Assets are durable operational records. Scopes can reference assets for governed runs.</div>';
+  },
+
+  // ── Local-network scan modal (A1b) ────────────────────────────────────
+  //
+  // Two-stage flow:
+  //   1. Acknowledgement modal (only when no active scope is selected)
+  //      — operator confirms that the scan is OK to run.
+  //   2. Review modal — discovered hosts listed with checkboxes. Operator
+  //      selects which ones to promote to draft assets.
+  //
+  // The acknowledgement DOM lives in #scan-ack-modal; review DOM lives in
+  // #scan-review-modal (both in index.html). Both share the .scan-modal
+  // base class (kit-aligned tokens — see frontend/css/styles.css).
+  async openScanModal() {
+    const scopeId = document.getElementById('active-scope-select')?.value || '';
+    if (!scopeId) {
+      this.openScanAckModal();
+      return;
+    }
+    await this.runScan({ scopeId });
+  },
+
+  openScanAckModal() {
+    const modal = document.getElementById('scan-ack-modal');
+    if (!modal) {
+      // Fallback when markup is missing — proceed with built-in confirm.
+      if (window.confirm('No scope is active. ARP / neighbor reads can be visible to network monitoring. Continue?')) {
+        this.runScan({ scopeId: '', acknowledgedNoScope: true });
+      }
+      return;
+    }
+    modal.classList.remove('hidden');
+    modal.removeAttribute('hidden');
+    const close = () => { modal.classList.add('hidden'); modal.setAttribute('hidden', ''); };
+    const confirmBtn = document.getElementById('scan-ack-confirm');
+    const cancelBtn = document.getElementById('scan-ack-cancel');
+    const closeBtn = modal.querySelector('[data-scan-close]');
+    const backdrop = modal.querySelector('.scan-backdrop');
+    const onConfirm = () => { close(); this.runScan({ scopeId: '', acknowledgedNoScope: true }); };
+    const onCancel = () => { close(); };
+    // Re-bind defensively (modal can be re-opened multiple times).
+    confirmBtn?.replaceWith(confirmBtn.cloneNode(true));
+    cancelBtn?.replaceWith(cancelBtn.cloneNode(true));
+    closeBtn?.replaceWith(closeBtn.cloneNode(true));
+    document.getElementById('scan-ack-confirm')?.addEventListener('click', onConfirm);
+    document.getElementById('scan-ack-cancel')?.addEventListener('click', onCancel);
+    modal.querySelector('[data-scan-close]')?.addEventListener('click', onCancel);
+    backdrop?.addEventListener('click', onCancel, { once: true });
+  },
+
+  async runScan({ scopeId = '', acknowledgedNoScope = false } = {}) {
+    try {
+      const res = await fetch('/api/discover/local-network', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scopeId: scopeId || null, acknowledgedNoScope }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        this.showScanError(body?.error || `Scan failed (HTTP ${res.status})`);
+        return;
+      }
+      this.openScanReviewModal(body);
+    } catch (err) {
+      this.showScanError(err.message || 'Scan failed');
+    }
+  },
+
+  showScanError(message) {
+    const modal = document.getElementById('scan-review-modal');
+    if (!modal) { window.alert(message); return; }
+    modal.classList.remove('hidden');
+    modal.removeAttribute('hidden');
+    const body = document.getElementById('scan-review-body');
+    if (body) body.innerHTML = `<div class="empty-msg danger">${this.escapeHtml(message)}</div>`;
+    const closeBtn = modal.querySelector('[data-scan-close]');
+    closeBtn?.addEventListener('click', () => { modal.classList.add('hidden'); modal.setAttribute('hidden', ''); }, { once: true });
+  },
+
+  openScanReviewModal(result) {
+    const modal = document.getElementById('scan-review-modal');
+    if (!modal) { window.alert(`Found ${result.count} neighbors`); return; }
+    modal.classList.remove('hidden');
+    modal.removeAttribute('hidden');
+    const body = document.getElementById('scan-review-body');
+    const meta = document.getElementById('scan-review-meta');
+    const neighbors = result.neighbors || [];
+    if (meta) {
+      meta.textContent = `${neighbors.length} neighbor${neighbors.length === 1 ? '' : 's'} discovered · ${result.platform || ''} ${result.probe || ''}${result.cached ? ' · cached' : ''}`;
+    }
+    if (body) {
+      if (!neighbors.length) {
+        body.innerHTML = `<div class="empty-msg">No neighbors visible in the ARP / neighbor table. If you just connected, generate some traffic (e.g. ping your router) and re-run.</div>`;
+      } else {
+        body.innerHTML = `
+          <div class="scan-list-header">
+            <label class="scan-checkbox"><input type="checkbox" id="scan-select-all" checked> Select all</label>
+          </div>
+          <ul class="scan-list">
+            ${neighbors.map((n, i) => `
+              <li class="scan-row">
+                <label class="scan-checkbox">
+                  <input type="checkbox" class="scan-row-check" data-index="${i}" checked>
+                  <span class="scan-row-ip"><code>${this.escapeHtml(n.ip)}</code></span>
+                  <span class="scan-row-mac">${this.escapeHtml(n.mac || '')}</span>
+                  <span class="scan-row-host">${this.escapeHtml(n.hostname || '')}</span>
+                  <span class="scan-row-iface">${this.escapeHtml(n.interface || '')}</span>
+                </label>
+              </li>`).join('')}
+          </ul>`;
+        const selectAll = document.getElementById('scan-select-all');
+        selectAll?.addEventListener('change', () => {
+          body.querySelectorAll('.scan-row-check').forEach((cb) => { cb.checked = selectAll.checked; });
+        });
+      }
+    }
+    this._scanNeighbors = neighbors;
+    const close = () => { modal.classList.add('hidden'); modal.setAttribute('hidden', ''); };
+    const closeBtn = modal.querySelector('[data-scan-close]');
+    const promoteBtn = document.getElementById('scan-promote-btn');
+    const cancelBtn = document.getElementById('scan-cancel-btn');
+    closeBtn?.replaceWith(closeBtn.cloneNode(true));
+    promoteBtn?.replaceWith(promoteBtn.cloneNode(true));
+    cancelBtn?.replaceWith(cancelBtn.cloneNode(true));
+    modal.querySelector('[data-scan-close]')?.addEventListener('click', close);
+    document.getElementById('scan-cancel-btn')?.addEventListener('click', close);
+    document.getElementById('scan-promote-btn')?.addEventListener('click', () => this.promoteScanSelection(close));
+    modal.querySelector('.scan-backdrop')?.addEventListener('click', close, { once: true });
+  },
+
+  async promoteScanSelection(close) {
+    const checked = Array.from(document.querySelectorAll('.scan-row-check')).filter((cb) => cb.checked);
+    const items = checked.map((cb) => this._scanNeighbors[Number(cb.dataset.index)]).filter(Boolean);
+    if (!items.length) { window.alert('Select at least one neighbor to promote.'); return; }
+    try {
+      const res = await fetch('/api/discover/local-network/promote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { this.showScanError(body?.error || `Promote failed (HTTP ${res.status})`); return; }
+      if (typeof close === 'function') close();
+      await this.loadAssets();
+      // Notify the operator how many were created vs. skipped.
+      const msg = `Created ${body.createdCount || 0} asset${(body.createdCount || 0) === 1 ? '' : 's'}` +
+        ((body.skippedCount || 0) ? ` · skipped ${body.skippedCount} duplicate${body.skippedCount === 1 ? '' : 's'}` : '');
+      if (window.toast && typeof window.toast === 'function') window.toast(msg);
+      else if (window.Notify?.show) window.Notify.show(msg);
+    } catch (err) {
+      this.showScanError(err.message || 'Promote failed');
+    }
   },
 
   renderAssetEditor(asset = null) {

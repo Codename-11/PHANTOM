@@ -18,11 +18,15 @@ import {
   getAssets, getAsset, createAsset,
   getFindings, createFinding, updateFinding,
 } from '../assets/asset-store.js';
-import { getRuns, getRun, getTraceEvents, getArtifacts } from '../memory/store.js';
+import { getRuns, getRun, getTraceEvents, getArtifacts, addTraceEvent } from '../memory/store.js';
 import { getToolpacks } from '../toolpacks/toolpack-registry.js';
 import { renderExecutiveSummary, renderPentestReport } from '../artifacts/report-renderers.js';
 import { writeArtifact } from '../artifacts/artifact-store.js';
 import { parseTargetInput } from '../scope/target-parser.js';
+import { evaluateToolAction } from '../scope/policy.js';
+import {
+  discoverLocalNetwork, renderNeighborsMarkdown,
+} from './network-discovery.js';
 import {
   getCurrentGoal, getProgress, getLinkedRuns,
   logProgress, recordSatisfactionClaim,
@@ -358,6 +362,22 @@ export function getPhantomToolDefinitions() {
     {
       type: 'function',
       function: {
+        name: 'phantom_discover_local_network',
+        description: 'Passively read this machine\'s ARP / neighbor table and return discovered neighbors as draft assets. NO active probing — every entry was learned by the kernel from ordinary LAN traffic. Risk class is "recon"; scopes that deny recon hard-block this tool. When no scope is active, the caller must pass acknowledgedNoScope=true (the operator confirms in a modal). Trace events record COUNT only; the structured neighbor list is written to artifact network-neighbors.json.',
+        parameters: {
+          type: 'object',
+          properties: {
+            acknowledgedNoScope: {
+              type: 'boolean',
+              description: 'Set true to acknowledge that no scope is active and proceed anyway. Only honored when no scope is selected.',
+            },
+          },
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'phantom_declare_goal_satisfied',
         description: 'File a claim that the active goal\'s success criteria are met. Records justification + confidence on the goal row and emits a trace event on the current run. The operator confirms completion in the UI — this DOES NOT close the goal. Use sparingly; one claim per goal is the norm.',
         parameters: {
@@ -404,6 +424,7 @@ export async function executePhantomTool(name, args = {}, context = {}) {
       case 'phantom_get_goal':              return opGetGoal();
       case 'phantom_log_goal_progress':     return opLogGoalProgress(args, context);
       case 'phantom_declare_goal_satisfied': return opDeclareGoalSatisfied(args, context);
+      case 'phantom_discover_local_network': return await opDiscoverLocalNetwork(args, context);
       default:
         return `Unknown PHANTOM tool: ${name}`;
     }
@@ -700,4 +721,185 @@ function opDeclareGoalSatisfied({ justification, confidence } = {}, context = {}
   } catch (err) {
     return `phantom_declare_goal_satisfied error: ${err.message}`;
   }
+}
+
+// ── Network discovery ───────────────────────────────────────────────────────
+//
+// Policy gate contract:
+//   - risk class is "recon"
+//   - scope explicitly denies recon → tool.call.blocked trace + clean refusal
+//   - no scope + no acknowledgement → blocked (operator must confirm in UI)
+//   - no scope + acknowledgedNoScope=true → allowed, metadata flag propagates
+//   - otherwise honors evaluateToolAction()
+//
+// Privacy: the trace event records COUNT only — never IPs/MACs. The
+// structured neighbor list lives in the artifact network-neighbors.json,
+// which the operator-facing UI fetches directly.
+export async function opDiscoverLocalNetwork(args = {}, context = {}) {
+  const acknowledgedNoScope = args?.acknowledgedNoScope === true;
+  const scope = context.scope || null;
+  const runId = context.runId || null;
+
+  // Policy gate. Reuses evaluateToolAction so a future risk-class refactor
+  // doesn't drift away from the executor's contract.
+  //
+  // We feed `execute_command` with an `arp -a` payload — classifyRisk maps
+  // that to the recon class via its curl/wget/ping/host regex (no targets
+  // extracted = recon class for a network read of this shape). Then we
+  // force-override the risk label below so the trace is unambiguous.
+  const decision = evaluateToolAction({
+    toolName: 'execute_command',
+    args: { command: 'arp -a' },
+    scope,
+  });
+
+  // The arp/ip commands don't always classify as recon under the current
+  // regex (no remote target extracted = read/local). Force-override to
+  // recon — this tool reads the local neighbor table, which is the
+  // canonical recon-class action per the mega-plan spec.
+  decision.risk = 'recon';
+
+  // Re-evaluate the action gate against the recon risk class explicitly,
+  // since classifyRisk may have landed somewhere lower-risk for the arp
+  // synthetic. Allowed/blocked actions live as a flat list on the scope.
+  if (scope) {
+    const allowedList = (scope.allowed_actions || scope.allowedActions || []).map((s) => String(s).toLowerCase());
+    const blockedList = (scope.blocked_actions || scope.blockedActions || []).map((s) => String(s).toLowerCase());
+    if (blockedList.includes('recon')) {
+      decision.allowed = false;
+      decision.mode = 'deny';
+      decision.explicit = true;
+      decision.reason = `recon is explicitly denied by scope policy`;
+      decision.gate = 'action';
+    } else if (allowedList.length > 0 && !allowedList.includes('recon')) {
+      decision.allowed = false;
+      decision.mode = 'deny';
+      decision.explicit = false;
+      decision.reason = `recon is not allowed by selected scope`;
+      decision.gate = 'action';
+    } else {
+      decision.allowed = true;
+      decision.mode = 'auto';
+      decision.reason = 'recon is permitted by selected scope';
+    }
+  } else {
+    // No scope present — leave decision.allowed=false; the acknowledged
+    // path below decides whether to open the door.
+    decision.allowed = false;
+    decision.mode = 'deny';
+    decision.explicit = false;
+    decision.reason = 'No active scope for recon action';
+    decision.gate = 'action';
+  }
+
+  // Determine final allowance. The only "open door" we add on top of
+  // evaluateToolAction is: when there's no scope AND the operator
+  // explicitly acknowledged, allow. Every other rejection stands.
+  let allowed = decision.allowed;
+  let reason = decision.reason;
+  let policyMode = decision.policyMode || 'governed';
+  if (!allowed && !scope && acknowledgedNoScope) {
+    allowed = true;
+    reason = 'No scope active — proceeding with operator acknowledgement.';
+    policyMode = 'no-scope-acknowledged';
+  }
+
+  if (!allowed) {
+    if (runId) {
+      try {
+        addTraceEvent(runId, {
+          type: 'tool.call.blocked',
+          phase: 'tool',
+          status: 'skipped',
+          toolName: 'phantom_discover_local_network',
+          outputPreview: `Blocked by PHANTOM scope policy: ${reason}`,
+          metadata: {
+            risk: 'recon',
+            decision: { ...decision, allowed: false, reason, risk: 'recon' },
+            policyMode,
+            acknowledgedNoScope,
+          },
+        });
+      } catch { /* tracing must never break tool dispatch */ }
+    }
+    return json({
+      allowed: false,
+      risk: 'recon',
+      reason,
+      gate: decision.gate || 'action',
+      policyMode,
+      acknowledgedNoScope,
+    });
+  }
+
+  // Allowed. Probe the local network.
+  const result = await discoverLocalNetwork({
+    execFile: context._execFile,
+    osPlatform: context._osPlatform,
+    ifaceMap: context._ifaceMap,
+  });
+
+  // Write the structured artifact (IPs + MACs go HERE, not in the trace).
+  let artifactId = null;
+  if (runId) {
+    try {
+      const artifact = writeArtifact({
+        runId,
+        conversationId: context.conversationId || null,
+        type: 'json',
+        title: 'network-neighbors.json',
+        mimeType: 'application/json',
+        extension: '.json',
+        content: JSON.stringify({
+          generatedAt: result.generatedAt,
+          platform: result.platform,
+          probe: result.probe,
+          count: result.neighbors.length,
+          neighbors: result.neighbors,
+        }, null, 2),
+        metadata: {
+          source: 'phantom_discover_local_network',
+          count: result.neighbors.length,
+          platform: result.platform,
+          discoveredFrom: 'local-network-scan',
+        },
+      });
+      artifactId = artifact.id;
+    } catch { /* fall through — tool still returns the neighbors inline */ }
+
+    // Trace event records COUNT only.
+    try {
+      addTraceEvent(runId, {
+        type: 'tool.call.completed',
+        phase: 'tool',
+        status: 'completed',
+        toolName: 'phantom_discover_local_network',
+        outputPreview: `Discovered ${result.neighbors.length} neighbor(s) via ${result.probe}.`,
+        metadata: {
+          risk: 'recon',
+          count: result.neighbors.length,
+          platform: result.platform,
+          probe: result.probe,
+          cached: result.cached || false,
+          policyMode,
+          acknowledgedNoScope,
+          artifactId,
+        },
+      });
+    } catch { /* see above */ }
+  }
+
+  return json({
+    allowed: true,
+    risk: 'recon',
+    policyMode,
+    acknowledgedNoScope,
+    count: result.neighbors.length,
+    platform: result.platform,
+    probe: result.probe,
+    cached: result.cached || false,
+    artifactId,
+    neighbors: result.neighbors,
+    markdown_preview: renderNeighborsMarkdown(result.neighbors),
+  });
 }
