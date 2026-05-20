@@ -10,7 +10,7 @@
 // The exec side lives in server/routes/api.js so the file stays
 // dependency-light and easy to test in isolation.
 
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { platform } from 'os';
 import { hasCommand } from '../utils/has-command.js';
 import { getCatalog, getToolById, getToolsByTier, TIERS } from './installer-catalog.js';
@@ -24,7 +24,6 @@ function detectDistro() {
   try {
     // /etc/os-release is the canonical source for Linux distro id. We read
     // it synchronously because detection runs once and is small.
-    const { readFileSync } = eval("require")('fs');
     const text = readFileSync('/etc/os-release', 'utf8');
     const id = /^ID=(.*)$/m.exec(text)?.[1]?.replace(/"/g, '').toLowerCase() || null;
     const idLike = /^ID_LIKE=(.*)$/m.exec(text)?.[1]?.replace(/"/g, '').toLowerCase() || null;
@@ -37,7 +36,6 @@ function detectDistro() {
 function detectIsDocker() {
   try {
     if (existsSync('/.dockerenv')) return true;
-    const { readFileSync } = eval("require")('fs');
     return /docker|containerd|kubepods/.test(readFileSync('/proc/1/cgroup', 'utf8'));
   } catch {
     return false;
@@ -60,6 +58,19 @@ function detectPackageManagers() {
 }
 
 export function detectHost() {
+  // Container-internal escape hatch: when PHANTOM_BACKEND is set (the
+  // Dockerfile bakes it to "apt"), skip OS sniffing and trust the
+  // build-time choice. Keeps detection deterministic inside the image.
+  const envBackend = process.env.PHANTOM_BACKEND;
+  if (envBackend) {
+    return {
+      os: platform(),
+      distro: detectDistro(),
+      isDocker: detectIsDocker(),
+      packageManagers: { [envBackend]: true },
+      preferred: envBackend,
+    };
+  }
   const os = platform();
   const distro = detectDistro();
   const isDocker = detectIsDocker();

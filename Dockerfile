@@ -50,6 +50,35 @@ RUN apt-get update \
 # operator shells dropped into the running container.
 RUN pipx ensurepath
 
+# ─── Toolpack layer (Phase 3) ─────────────────────────────────────────────────
+# Selects which sec-ops tools are baked into the image. The script lives
+# at /tmp/install-profile.sh and is copied in *before* the source tree so
+# changing app code does not bust the (potentially expensive) tool layer.
+#
+# PROFILE      — one of base | offensive | blue | full. base is the
+#                default so the image always builds without explicit args.
+# INCLUDE_MSF  — set to 1 to install Metasploit in a separate layer.
+#                Held out of every profile because it pulls hundreds of
+#                MB and most operators want to opt in.
+#
+# Override at build time:
+#   docker build --build-arg PROFILE=offensive --build-arg INCLUDE_MSF=1 .
+ARG PROFILE=base
+ARG INCLUDE_MSF=0
+
+COPY scripts/install-profile.sh /tmp/install-profile.sh
+RUN chmod +x /tmp/install-profile.sh \
+ && /tmp/install-profile.sh "$PROFILE"
+
+# Metasploit is opt-in via INCLUDE_MSF=1. Kept in its own layer so the
+# base/offensive/blue variants don't pay the install cost. Uses Rapid7's
+# official msfinstall script.
+RUN if [ "$INCLUDE_MSF" = "1" ]; then \
+      curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb -o /tmp/msfinstall \
+   && chmod +x /tmp/msfinstall \
+   && /tmp/msfinstall; \
+    fi
+
 # ─── App workspace ────────────────────────────────────────────────────────────
 WORKDIR /app
 

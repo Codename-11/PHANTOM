@@ -18,13 +18,52 @@ test('catalog covers all three tiers and every entry has a command name', () => 
 });
 
 test('detectHost returns the running platform with package-manager probes', () => {
-  const host = detectHost();
-  assert.ok(['win32', 'linux', 'darwin'].includes(host.os));
-  assert.equal(typeof host.isDocker, 'boolean');
-  assert.equal(typeof host.packageManagers, 'object');
-  // preferred can be null on under-provisioned machines, but the field
-  // must exist on the response.
-  assert.ok('preferred' in host);
+  const prev = process.env.PHANTOM_BACKEND;
+  delete process.env.PHANTOM_BACKEND;
+  try {
+    const host = detectHost();
+    assert.ok(['win32', 'linux', 'darwin'].includes(host.os));
+    assert.equal(typeof host.isDocker, 'boolean');
+    assert.equal(typeof host.packageManagers, 'object');
+    // preferred can be null on under-provisioned machines, but the field
+    // must exist on the response.
+    assert.ok('preferred' in host);
+  } finally {
+    if (prev === undefined) delete process.env.PHANTOM_BACKEND;
+    else process.env.PHANTOM_BACKEND = prev;
+  }
+});
+
+test('detectHost short-circuits to PHANTOM_BACKEND when env var is set', () => {
+  const prev = process.env.PHANTOM_BACKEND;
+  process.env.PHANTOM_BACKEND = 'apt';
+  try {
+    const host = detectHost();
+    assert.equal(host.preferred, 'apt');
+    assert.equal(host.packageManagers.apt, true);
+    // The override stands in for whatever the actual host would have
+    // resolved to — no other managers should leak through.
+    assert.deepEqual(Object.keys(host.packageManagers), ['apt']);
+  } finally {
+    if (prev === undefined) delete process.env.PHANTOM_BACKEND;
+    else process.env.PHANTOM_BACKEND = prev;
+  }
+});
+
+test('detectHost runs normal detection when PHANTOM_BACKEND is unset', () => {
+  const prev = process.env.PHANTOM_BACKEND;
+  delete process.env.PHANTOM_BACKEND;
+  try {
+    const host = detectHost();
+    // Without the override, packageManagers reflects actual probes —
+    // which means multiple keys (apt/dnf/... or winget/choco/...) even
+    // when their values are false. The override path only has one key.
+    assert.ok(Object.keys(host.packageManagers).length > 1,
+      'normal detection probes multiple managers');
+  } finally {
+    if (prev === undefined) delete process.env.PHANTOM_BACKEND;
+    else process.env.PHANTOM_BACKEND = prev;
+  }
 });
 
 test('resolveInstallPlan picks apt on Debian-like Linux when apt is present', () => {
