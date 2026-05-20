@@ -451,6 +451,7 @@
                 <button class="run-tab" role="tab" data-tab="trace">Trace <span class="ct" id="run-tab-trace-ct"></span></button>
                 <button class="run-tab" role="tab" data-tab="graph">Graph</button>
                 <button class="run-tab" role="tab" data-tab="artifacts">Artifacts <span class="ct" id="run-tab-artifacts-ct"></span></button>
+                <button class="run-tab" role="tab" data-tab="evidence">Evidence</button>
                 <button class="run-tab" role="tab" data-tab="snapshot">Prompt snapshot</button>
                 <button class="run-tab" role="tab" data-tab="output">Output</button>
               </nav>
@@ -470,6 +471,9 @@
                 </div>
                 <div class="run-tab-pane artifacts" data-pane="artifacts" hidden>
                   <div class="run-artifact-grid" id="run-artifact-grid"></div>
+                </div>
+                <div class="run-tab-pane evidence" data-pane="evidence" hidden>
+                  <div id="run-evidence-pane"></div>
                 </div>
                 <div class="run-tab-pane snapshot" data-pane="snapshot" hidden>
                   <pre class="run-snapshot" id="run-snapshot"></pre>
@@ -1761,6 +1765,7 @@
   <script src="js/lib/demo-watermark.js"></script>
   <script src="js/pages/diagnostics-card.js"></script>
   <script src="js/pages/onboarding-checklist.js"></script>
+  <script src="js/pages/run-evidence-tab.js"></script>
   <script src="js/goals.js"></script>
   <script src="js/campaigns/campaign-presenter.js"></script>
   <script src="js/campaigns/campaign-form.js"></script>

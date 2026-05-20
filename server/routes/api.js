@@ -58,6 +58,7 @@ import {
 import { getDiagnostics } from '../diagnostics/diagnostics.js';
 import { getOnboardingChecklist } from '../onboarding/onboarding-status.js';
 import { runSeed, clearDemo } from '../../scripts/seed.js';
+import { buildRunEvidence, renderEvidenceMarkdown } from '../evidence/evidence-builder.js';
 import { evaluateToolAction, normalizeOperatorOverride, ACTION_CLASSES } from '../scope/policy.js';
 import { explain as explainApproval, requiresDenialReason } from '../approvals/explain.js';
 import { parseTargetInput, targetsToScopeFields } from '../scope/target-parser.js';
@@ -1468,6 +1469,54 @@ router.post('/runs/:id/artifacts/evidence', (req, res) => {
   const artifacts = getArtifactsForRun(req.params.id);
   const artifact = exportEvidenceBundle(run, events, artifacts);
   res.json(artifactToPublic(artifact, { includeMetadata: true }));
+});
+
+// ─── A4 — Unified Evidence (per-run rollup + redacted export) ───
+// GET returns the aggregated bundle for the Evidence tab. POST creates
+// a persistent markdown / JSON artifact tagged with metadata.source =
+// run_evidence_<format> so it surfaces in the artifacts index.
+router.get('/runs/:id/evidence', (req, res) => {
+  try {
+    const bundle = buildRunEvidence(req.params.id);
+    res.json(bundle);
+  } catch (err) {
+    const status = /run not found/i.test(err.message) ? 404 : 400;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+router.post('/runs/:id/evidence/export', (req, res) => {
+  const run = getRun(req.params.id);
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  const format = (req.body?.format || 'markdown').toLowerCase();
+  if (!['markdown', 'json'].includes(format)) {
+    return res.status(400).json({ error: 'format must be "markdown" or "json"' });
+  }
+  try {
+    const bundle = buildRunEvidence(req.params.id);
+    const isMd = format === 'markdown';
+    const artifact = writeArtifact({
+      runId: run.id,
+      conversationId: run.conversation_id,
+      type: isMd ? 'markdown' : 'json',
+      title: `Run evidence · ${run.title || run.id.slice(0, 8)}`,
+      mimeType: isMd ? 'text/markdown' : 'application/json',
+      extension: isMd ? '.md' : '.json',
+      content: isMd ? renderEvidenceMarkdown(bundle) : JSON.stringify(bundle, null, 2),
+      metadata: {
+        source: `run_evidence_${format}`,
+        runId: run.id,
+        toolCalls: bundle.summary?.toolCalls ?? 0,
+        findingCount: bundle.summary?.findingCount ?? 0,
+        artifactCount: bundle.summary?.artifactCount ?? 0,
+        blockedCount: bundle.summary?.blockedCount ?? 0,
+        generatedAt: bundle.generatedAt,
+      },
+    });
+    res.json(artifactToPublic(artifact, { includeMetadata: true }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 router.get('/runs/:id/events', (req, res) => {

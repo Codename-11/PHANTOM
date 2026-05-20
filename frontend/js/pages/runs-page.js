@@ -108,6 +108,13 @@ window.RunsPage = {
       if (match) pane.removeAttribute('hidden');
       else pane.setAttribute('hidden', '');
     });
+    // Evidence tab hydrates on first display via RunEvidenceTab.show.
+    // Cheap re-fetch on every switch — the bundle is small and the
+    // operator may have just exported something.
+    if (tab === 'evidence' && this.selectedRunId) {
+      const host = document.getElementById('run-evidence-pane');
+      window.RunEvidenceTab?.show?.(host, this.selectedRunId);
+    }
   },
 
   async loadRuns(selectRunId = this.selectedRunId) {

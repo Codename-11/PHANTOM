@@ -7735,3 +7735,67 @@ svg.ico [stroke] {
   background: var(--bg-2);
 }
 
+/* ═══ A4 — Run Evidence tab ═══ */
+.run-evid { padding: 4px 0 14px; }
+.run-evid-hd { margin-bottom: 12px; }
+.run-evid-title { margin: 0 0 4px; font-size: var(--fs-15); font-weight: 600; }
+.run-evid-help { margin: 0 0 10px; color: var(--fg-2); font-size: var(--fs-12); }
+.run-evid-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.run-evid-kpis {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
+  margin: 8px 0 14px;
+}
+.run-evid-kpi {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: var(--bg-3); border: 1px solid var(--line-1); border-radius: var(--r-3);
+  padding: 10px 8px; transition: border-color 120ms ease;
+}
+.run-evid-kpi:hover { border-color: var(--line-cy); }
+.run-evid-kpi-num {
+  font-family: var(--font-mono); font-size: 20px; line-height: 1; color: var(--cy-1);
+}
+.run-evid-kpi-cap {
+  font-family: var(--font-mono); font-size: var(--fs-10); color: var(--fg-3);
+  text-transform: uppercase; letter-spacing: 0.08em; margin-top: 6px;
+}
+.run-evid-kpi[data-status="ok"]   .run-evid-kpi-num { color: var(--ok-1, #66c293); }
+.run-evid-kpi[data-status="warn"] .run-evid-kpi-num { color: var(--warn, #d8b15a); }
+.run-evid-kpi[data-status="high"] .run-evid-kpi-num { color: var(--sev-high, #fb923c); }
+.run-evid-kpi[data-status="crit"] .run-evid-kpi-num { color: var(--danger); }
+.run-evid-section {
+  background: var(--bg-3); border: 1px solid var(--line-1); border-radius: var(--r-3);
+  padding: 10px 12px; margin-bottom: 8px;
+}
+.run-evid-section summary {
+  cursor: pointer; font-family: var(--font-mono); font-size: var(--fs-11);
+  color: var(--fg-2); text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 2px 0;
+}
+.run-evid-section[open] summary { color: var(--cy-1); margin-bottom: 8px; }
+.run-evid-table { width: 100%; border-collapse: collapse; font-size: var(--fs-12); }
+.run-evid-table th { text-align: left; padding: 4px 8px; color: var(--fg-3); font-family: var(--font-mono); font-size: var(--fs-10); text-transform: uppercase; letter-spacing: 0.06em; }
+.run-evid-table td { padding: 6px 8px; border-top: 1px solid var(--line-1); color: var(--fg-1); }
+.run-evid-table tr[data-sev="critical"] td:first-child,
+.run-evid-table tr[data-sev="high"]     td:first-child { color: var(--danger); }
+.run-evid-table tr[data-sev="medium"]   td:first-child { color: var(--warn, #d8b15a); }
+.run-evid-table tr[data-sev="low"]      td:first-child { color: var(--sev-low, #4ade80); }
+.run-evid-artifacts { list-style: none; padding: 0; margin: 0; }
+.run-evid-artifact {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 0; border-bottom: 1px dashed var(--line-1); font-size: var(--fs-12);
+}
+.run-evid-artifact:last-child { border-bottom: 0; }
+.run-evid-art-title { flex: 1; color: var(--fg-1); }
+.run-evid-art-id { color: var(--fg-3); }
+.run-evid-empty {
+  padding: 12px; text-align: center; color: var(--fg-3); font-size: var(--fs-12);
+}
+.run-evid-meta { margin-top: 8px; color: var(--fg-3); font-size: var(--fs-10); }
+.run-evid-feedback { margin-top: 8px; }
+@media (max-width: 1100px) {
+  .run-evid-kpis { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 640px) {
+  .run-evid-kpis { grid-template-columns: repeat(2, 1fr); }
+}
+
