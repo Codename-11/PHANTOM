@@ -60,6 +60,10 @@ import { getOnboardingChecklist } from '../onboarding/onboarding-status.js';
 import { runSeed, clearDemo } from '../../scripts/seed.js';
 import { buildRunEvidence, renderEvidenceMarkdown } from '../evidence/evidence-builder.js';
 import { loadLocalManifests, getLocalManifest, getLocalManifestSummary } from '../registry/local-manifest-loader.js';
+import {
+  createRegistrySource, getRegistrySource, listRegistrySources,
+  updateRegistrySource, deleteRegistrySource,
+} from '../registry/registry-source-store.js';
 import { evaluateToolAction, normalizeOperatorOverride, ACTION_CLASSES } from '../scope/policy.js';
 import { explain as explainApproval, requiresDenialReason } from '../approvals/explain.js';
 import { parseTargetInput, targetsToScopeFields } from '../scope/target-parser.js';
@@ -1729,6 +1733,54 @@ router.get('/registry/local/:id', (req, res) => {
   const m = getLocalManifest(req.params.id);
   if (!m) return res.status(404).json({ error: 'manifest not found' });
   res.json(m);
+});
+
+// ─── B3-full — Hosted registry sources ───
+// CRUD over the operator-managed list of remote registry URLs PHANTOM
+// may fetch signed manifests from. Sources land DISABLED by default;
+// browsing requires explicit operator enable. The fetch / verify /
+// import routes land in a follow-up — this commit ships the source
+// management surface alongside the registry_sources table.
+router.get('/registry/sources', (req, res) => {
+  res.json({ sources: listRegistrySources({ enabledOnly: req.query.enabledOnly === '1' }) });
+});
+
+router.post('/registry/sources', (req, res) => {
+  try {
+    const source = createRegistrySource({
+      label: req.body?.label,
+      url: req.body?.url,
+      channel: req.body?.channel,
+      signingKey: req.body?.signingKey,
+      signingKeyId: req.body?.signingKeyId,
+      enabled: req.body?.enabled === true,
+    });
+    res.status(201).json({ source });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get('/registry/sources/:id', (req, res) => {
+  const s = getRegistrySource(req.params.id);
+  if (!s) return res.status(404).json({ error: 'source not found' });
+  res.json({ source: s });
+});
+
+router.patch('/registry/sources/:id', (req, res) => {
+  try {
+    const updated = updateRegistrySource(req.params.id, req.body || {});
+    if (!updated) return res.status(404).json({ error: 'source not found' });
+    res.json({ source: updated });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/registry/sources/:id', (req, res) => {
+  const ok = deleteRegistrySource(req.params.id);
+  if (!ok) return res.status(404).json({ error: 'source not found' });
+  res.status(204).end();
 });
 
 // Preview install — returns the declarative plan that would run if

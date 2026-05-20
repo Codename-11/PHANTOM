@@ -480,6 +480,30 @@ export function initDB(dbPath = config.db.path) {
   ensureColumn('findings', 'triage_status', 'TEXT');
   ensureColumn('findings', 'dismissal_note', 'TEXT');
 
+  // B3-full — Hosted registry sources. Operator-managed list of remote
+  // registry URLs PHANTOM may fetch signed manifests from. Each source
+  // has a pinned ed25519 trust root (base64-encoded raw 32-byte public
+  // key) — without it, fetched manifests are treated as unsigned. New
+  // sources land disabled by default; the operator must explicitly
+  // enable browsing.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS registry_sources (
+      id              TEXT PRIMARY KEY,
+      label           TEXT NOT NULL,
+      url             TEXT NOT NULL UNIQUE,
+      channel         TEXT NOT NULL DEFAULT 'stable',
+      signing_key     TEXT,
+      signing_key_id  TEXT,
+      enabled         INTEGER NOT NULL DEFAULT 0,
+      last_fetched_at TEXT,
+      last_status     TEXT,
+      last_error      TEXT,
+      created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_registry_sources_enabled ON registry_sources(enabled);
+  `);
+
   return db;
 }
 
