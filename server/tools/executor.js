@@ -11,6 +11,16 @@ import { recordAction, getUsage } from '../scope/rate-limiter.js';
 import { isPhantomTool, executePhantomTool } from './phantom-tools.js';
 import config from '../config.js';
 
+// Containerized deploys run as root (uid 0) and typically ship without
+// the `sudo` binary, so prepending `sudo` to every privileged command
+// just fails with "sudo: not found". When we're already root, sudo is a
+// no-op anyway — strip the prefix and return the raw command instead.
+const IS_ROOT = (typeof process.getuid === 'function' && process.getuid() === 0);
+
+function stripSudo(cmd) {
+  return cmd.trim().startsWith('sudo ') ? cmd.trim().replace(/^sudo\s+/, '') : cmd;
+}
+
 /**
  * Helper to securely escape arguments for bash shell
  */
@@ -308,16 +318,20 @@ async function executeCommand({ command, timeout = 120, working_directory, use_s
   return new Promise((resolvePromise) => {
     let cmd = command;
 
-    const needsSudo = use_sudo || command.trim().startsWith('sudo ');
+    const needsSudo = !IS_ROOT && (use_sudo || command.trim().startsWith('sudo '));
     if (needsSudo) {
       const sudoPass = getSetting('sudo_password', '');
       if (sudoPass) {
-        const cleanCmd = command.trim().startsWith('sudo ') ? command.trim().replace(/^sudo\s+/, '') : command;
+        const cleanCmd = stripSudo(command);
         const escaped = sudoPass.replace(/'/g, "'\\''");
         cmd = `echo '${escaped}' | sudo -S -p '' ${cleanCmd} 2>&1`;
       } else {
         cmd = command.trim().startsWith('sudo ') ? command : `sudo ${command}`;
       }
+    } else if (IS_ROOT) {
+      // Already privileged — strip any inherited `sudo ` prefix the caller
+      // (agent loop, install plan) might have emitted assuming a Linux dev box.
+      cmd = stripSudo(command);
     }
 
     let cwd = working_directory || config.workspace;
@@ -418,7 +432,11 @@ async function installTool({ name, method = 'auto', source }) {
   }
 
   const sudoPass = getSetting('sudo_password', '');
-  const sudoPrefix = sudoPass ? `echo '${sudoPass.replace(/'/g, "'\\''")}' | sudo -S` : 'sudo';
+  // When running as root (containerized deploy), drop the sudo prefix
+  // entirely — `sudo` may not even be installed on the slim base image.
+  const sudoPrefix = IS_ROOT
+    ? ''
+    : (sudoPass ? `echo '${sudoPass.replace(/'/g, "'\\''")}' | sudo -S` : 'sudo');
 
   let cmd;
   switch (method) {

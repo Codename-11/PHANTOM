@@ -18,6 +18,7 @@
     open: false,
     step: 'welcome',
     provider: null,
+    baseUrl: '',
     apiKey: '',
     model: null,
     scopeName: 'Lab Recon',
@@ -30,6 +31,11 @@
       synthesisStub: null,
     },
   };
+
+  function baseUrlForProvider(id) {
+    const p = state.providers.find((x) => x.id === id);
+    return p ? (p.baseUrl || '') : '';
+  }
 
   function esc(v) {
     const d = document.createElement('div');
@@ -69,6 +75,10 @@
       const data = await fetchJson('/api/providers');
       state.providers = data.providers || [];
       if (!state.provider) state.provider = data.default || (state.providers[0] && state.providers[0].id) || null;
+      // Seed the URL field from the selected provider's registry default so
+      // operators see what we'll call and can override per-deploy (e.g. point
+      // a 'custom' or 'hermes' selection at a self-hosted proxy on the LAN).
+      if (!state.baseUrl && state.provider) state.baseUrl = baseUrlForProvider(state.provider);
     } catch {
       state.providers = [];
     }
@@ -87,6 +97,10 @@
         <label class="onb-field">
           <span class="onb-label">Provider</span>
           <select id="onb-provider-select">${opts || '<option value="">No providers wired</option>'}</select>
+        </label>
+        <label class="onb-field">
+          <span class="onb-label">Base URL <small>(override for self-hosted proxies; required when "Custom" is selected)</small></span>
+          <input type="text" id="onb-base-url" placeholder="https://…/v1" value="${escAttr(state.baseUrl)}" autocomplete="off" spellcheck="false" />
         </label>
         <label class="onb-field">
           <span class="onb-label">API key <small>(optional for local endpoints like Ollama)</small></span>
@@ -202,10 +216,22 @@
     if (state.step === 'provider') {
       const sel = document.getElementById('onb-provider-select');
       const key = document.getElementById('onb-api-key');
+      const urlInput = document.getElementById('onb-base-url');
       const testBtn = document.getElementById('onb-test-btn');
       const resultEl = document.getElementById('onb-test-result');
-      if (sel) sel.onchange = () => { state.provider = sel.value; };
+      if (sel) sel.onchange = () => {
+        state.provider = sel.value;
+        // Re-seed the URL field from the new provider's registry default
+        // unless the operator has typed a value that diverges from the
+        // previous provider's default (i.e. they're customizing).
+        const nextDefault = baseUrlForProvider(state.provider);
+        if (urlInput && (urlInput.value === '' || state.providers.some((p) => p.baseUrl === urlInput.value))) {
+          urlInput.value = nextDefault;
+          state.baseUrl = nextDefault;
+        }
+      };
       if (key) key.oninput = () => { state.apiKey = key.value; };
+      if (urlInput) urlInput.oninput = () => { state.baseUrl = urlInput.value.trim(); };
       if (testBtn) testBtn.onclick = async () => {
         if (!state.provider) { resultEl.textContent = 'pick a provider first'; return; }
         // Persist provisional settings so the /test endpoint exercises this
@@ -253,6 +279,15 @@
 
   async function persistProviderSettings() {
     const body = { provider: state.provider };
+    // Send baseUrl when the operator has typed something AND it differs from
+    // the registry default for the current provider — that way casual picks
+    // (Hermes/OpenAI/etc.) round-trip the canonical URL, while a customized
+    // value (or any "custom" selection) wins and gets persisted.
+    if (state.baseUrl && state.baseUrl !== baseUrlForProvider(state.provider)) {
+      body.baseUrl = state.baseUrl;
+    } else if (state.provider === 'custom' && state.baseUrl) {
+      body.baseUrl = state.baseUrl;
+    }
     if (state.apiKey && state.apiKey !== '••••••••') body.apiKey = state.apiKey;
     try {
       await fetch('/api/settings', {
