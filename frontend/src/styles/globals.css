@@ -1,0 +1,58 @@
+/* PHANTOM React bundle · global styles.
+ *
+ * Tailwind base/components/utilities sit on top of the cool-slate token
+ * palette from frontend/css/styles.css. The @layer base block below
+ * mirrors those CSS variables so the React bundle renders identically
+ * during dev (when only this file is loaded) AND in production (where
+ * the legacy stylesheet may also be present). Once A8.5 deletes the
+ * legacy bundle these variables become the single source of truth.
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Surfaces */
+    --bg-0: #0a0c10;
+    --bg-1: #0f1218;
+    --bg-2: #141821;
+    --bg-3: #1a1f2a;
+    --bg-4: #212838;
+
+    /* Lines */
+    --line-1: #1d2330;
+    --line-2: #2a3242;
+    --line-3: #3a4458;
+
+    /* Foreground */
+    --fg-1: #e8edf5;
+    --fg-2: #9aa4b6;
+    --fg-3: #6a7587;
+    --fg-4: #4a5263;
+
+    /* Cyan accent (single primary accent — no green) */
+    --cy-1: #5fb6ff;
+    --cy-2: #2d8fdb;
+    --cy-3: #1a4a73;
+    --cy-fg: #aed8ff;
+
+    /* Status */
+    --danger: #ef4444;
+    --warn: #f59e0b;
+    --ok: #4ade80;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--bg-0);
+    color: var(--fg-1);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+}

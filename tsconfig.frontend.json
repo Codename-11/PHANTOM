@@ -1,0 +1,26 @@
+{
+  "//": "Scoped TypeScript config for the React bundle. The vanilla JS under frontend/js/ is intentionally NOT included — it stays plain ES modules until the A8 migration phases delete it.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": false,
+    "useDefineForClassFields": true,
+    "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"],
+    "noEmit": true
+  },
+  "include": ["frontend/src/**/*.ts", "frontend/src/**/*.tsx"],
+  "exclude": ["node_modules", "dist", "frontend/dist"]
+}

@@ -5,21 +5,25 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"node server/index.js\" \"vite --port 5173\"",
+    "dev:react": "vite --config vite.config.react.ts",
     "dev:docs": "npm --prefix user-docs run dev -- --port 5174",
     "start": "node server/index.js",
     "build": "npm run build:frontend && npm run build:docs",
     "build:frontend": "vite build frontend",
+    "build:react": "vite build --config vite.config.react.ts",
     "build:docs": "npm --prefix user-docs run build",
     "test": "node scripts/run-tests.js",
     "test:unit": "node scripts/run-tests.js --unit",
     "test:e2e": "node scripts/run-tests.js --e2e",
     "test:watch": "node scripts/run-tests.js --unit --watch",
+    "test:frontend": "vitest run --root frontend/src",
     "smoke:docker": "node scripts/smoke-docker.js",
     "build:variants": "node scripts/build-variants.js",
     "seed": "node scripts/seed.js",
     "seed:reset": "node scripts/seed.js --reset"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.0.0",
     "adm-zip": "^0.5.17",
     "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
@@ -30,11 +34,26 @@
     "marked": "^18.0.4",
     "multer": "^2.1.1",
     "openai": "^4.78.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.0",
     "uuid": "^11.1.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "zustand": "^4.5.0"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.4.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.2",
-    "vite": "^6.3.0"
+    "jsdom": "^25.0.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.14",
+    "typescript": "^5.6.0",
+    "vite": "^6.3.0",
+    "vitest": "^2.1.0"
   }
 }

@@ -28,6 +28,16 @@ import apiRouter from './routes/api.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 
+// ─── React migration gate (Phase A8.0) ──────────────────────────────────
+// Each entry is a route prefix that should be served by the React bundle
+// in dist/react/index.html INSTEAD of the legacy vanilla bundle.
+// Empty default = the React bundle is built but never served, so behavior
+// is identical to pre-A8.0. Phase A8.1+ adds entries one route at a time.
+const REACT_PAGES = new Set([]);
+const reactDistPath = join(ROOT, 'dist', 'react');
+const reactIndexPath = join(reactDistPath, 'index.html');
+const reactBundleAvailable = existsSync(reactIndexPath);
+
 // Initialize database
 initDB();
 
@@ -69,14 +79,33 @@ if (docsEnabled && docsBuilt) {
 // Serve frontend
 const distPath = join(ROOT, 'frontend');
 if (existsSync(distPath)) {
+  // React bundle assets (dist/react/assets/*) ship under /react/ when the
+  // bundle exists. Mounting express.static here is a no-op when dist/react
+  // is missing, so this is safe to leave in even before `npm run build:react`
+  // has been invoked. The mount is unconditional w.r.t. REACT_PAGES because
+  // individual asset URLs are referenced by hash from the React HTML.
+  if (reactBundleAvailable) {
+    app.use('/react', express.static(reactDistPath, { fallthrough: true, maxAge: '1h' }));
+  }
   app.use(express.static(distPath));
   app.get('*', (req, res) => {
     // Excluded prefixes: API, WebSocket upgrade, and the docs route (if
     // mounted above — express.static handles it; the catch-all just
     // shouldn't intercept what's already served).
-    if (!req.path.startsWith('/api') && !req.path.startsWith('/ws') && !req.path.startsWith('/docs')) {
-      res.sendFile(join(distPath, 'index.html'));
+    if (req.path.startsWith('/api') || req.path.startsWith('/ws') || req.path.startsWith('/docs')) {
+      return;
     }
+    // React routing: if the requested page lives in REACT_PAGES AND the
+    // React bundle has been built, hand the SPA shell to it. Otherwise
+    // fall through to the legacy vanilla bundle exactly as before.
+    if (reactBundleAvailable && REACT_PAGES.size > 0) {
+      for (const prefix of REACT_PAGES) {
+        if (req.path === prefix || req.path.startsWith(prefix + '/')) {
+          return res.sendFile(reactIndexPath);
+        }
+      }
+    }
+    res.sendFile(join(distPath, 'index.html'));
   });
 }
 
