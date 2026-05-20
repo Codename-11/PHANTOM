@@ -14,6 +14,9 @@ import CampaignCreateRoute from './pages/CampaignCreate';
 import SettingsPage from './pages/Settings';
 import ScopesPage, { ScopeDetailRoute } from './pages/Scope';
 import ScopeCreateRoute from './pages/ScopeCreate';
+import RunsPage, { RunDetailRoute } from './pages/Runs';
+import GraphPage from './pages/Graph';
+import ArtifactsPage from './pages/Artifacts';
 
 function HealthCard() {
   return (
@@ -58,6 +61,12 @@ export function App() {
           <Route path="new" element={<ScopeCreateRoute />} />
           <Route path=":id" element={<ScopeDetailRoute />} />
         </Route>
+        <Route path="/react/runs" element={<RunsPage />}>
+          <Route path=":id" element={<RunDetailRoute />} />
+        </Route>
+        <Route path="/react/graph" element={<GraphPage />} />
+        <Route path="/react/graph/:runId" element={<GraphPage />} />
+        <Route path="/react/artifacts" element={<ArtifactsPage />} />
         <Route path="/react" element={<Navigate to="/react/health" replace />} />
         <Route path="*" element={<HealthCard />} />
       </Routes>

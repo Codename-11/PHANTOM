@@ -361,3 +361,142 @@ export interface CampaignListResponse {
 export interface CampaignBackendsResponse {
   backends: BackendDescriptor[];
 }
+
+// ── Runs (from /api/runs and /api/runs/:id) ──────────────────────────
+//
+// Mirrors `normalizeRun` in server/memory/store.js. Fields are the raw
+// columns plus the parsed prompt_snapshot blob and the lazily-joined
+// scope summary. The server also augments /api/runs/:id with `events`
+// and `artifacts` arrays.
+
+export interface RunScopeSummary {
+  id: string;
+  name: string;
+  expires_at?: string | null;
+  archived_at?: string | null;
+}
+
+export interface RunRecord {
+  id: string;
+  conversation_id: string | null;
+  title: string | null;
+  goal: string | null;
+  status: RunStatus;
+  model: string | null;
+  provider_route: string | null;
+  scope_id: string | null;
+  risk_level: string | null;
+  summary: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  prompt_snapshot: Record<string, unknown> | null;
+  scope: RunScopeSummary | null;
+}
+
+// Trace event row — `normalizeTraceEvent` shape from store.js. Server
+// returns `output_preview` (snake_case) on the wire; we accept both
+// forms because some upstream renderers use camelCase.
+export interface TraceEvent {
+  id: string;
+  run_id: string;
+  parent_event_id: string | null;
+  seq: number;
+  type: string;
+  phase: string | null;
+  status: string | null;
+  tool_name: string | null;
+  input?: unknown;
+  output_ref: string | null;
+  output_preview: string | null;
+  outputPreview?: string | null;
+  metadata?: Record<string, unknown> | null;
+  started_at: string | null;
+  ended_at: string | null;
+  duration_ms: number | null;
+  created_at: string;
+}
+
+// /api/runs/:id/evidence — buildRunEvidence shape (already redacted).
+export interface EvidenceRunSummary {
+  id: string;
+  title: string | null;
+  goal: string | null;
+  status: RunStatus;
+  model: string | null;
+  provider_route: string | null;
+  conversation_id: string | null;
+  scope_id: string | null;
+  risk_level: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  summary: string | null;
+  notes: string | null;
+}
+
+export interface EvidenceScope {
+  id: string;
+  name?: string;
+  allowed_actions?: string[];
+  blocked_actions?: string[];
+  targets?: ScopeTargets;
+  expires_at?: string | null;
+}
+
+export interface EvidenceFinding {
+  id?: string;
+  title: string | null;
+  severity: string | null;
+  status: string | null;
+}
+
+export interface EvidenceArtifactRow {
+  id: string;
+  title: string | null;
+  type: string | null;
+  mime_type?: string | null;
+  created_at?: string | null;
+}
+
+export interface EvidenceSummary {
+  eventCount: number;
+  toolCalls: number;
+  blockedCount: number;
+  findingCount: number;
+  artifactCount: number;
+  errorCount: number;
+}
+
+export interface EvidenceBundle {
+  run: EvidenceRunSummary;
+  scope: EvidenceScope | null;
+  promptSnapshot: Record<string, unknown> | null;
+  artifacts: EvidenceArtifactRow[];
+  findings: EvidenceFinding[];
+  events: TraceEvent[] | null;
+  summary: EvidenceSummary;
+  generatedAt: string;
+}
+
+// /api/artifacts — public-shape rows from artifactToPublic().
+export interface ArtifactRecord {
+  id: string;
+  runId: string | null;
+  conversationId: string | null;
+  type: string | null;
+  title: string | null;
+  mimeType: string | null;
+  createdAt: string | null;
+  publishedAt: string | null;
+  contentUrl: string;
+  downloadUrl: string;
+  metadata?: Record<string, unknown>;
+}
+
+// Operator-friendly artifact filter buckets — maps to the existing
+// `type` column values in the database.
+export type ArtifactFilter = 'all' | 'reports' | 'evidence' | 'trace' | 'other';
+
+// Aliased re-export for the mega-plan deliverables — keeps the public
+// surface name `RunSummary` while reusing the existing EvidenceSummary
+// shape (event/tool/finding/artifact counts).
+export type RunSummary = EvidenceSummary;
