@@ -248,6 +248,136 @@ describe('API Routes Integration', () => {
     assert.strictEqual(res.status, 409);
   });
 
+  test('Toolpack profile CRUD: list/get/create/update/delete with validation', async () => {
+    // POST happy path
+    let res = await fetch(`${baseUrl}/profiles`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'api-test-profile',
+        description: 'integration-test profile',
+        toolIds: ['nmap', 'ffuf'],
+      }),
+    });
+    assert.strictEqual(res.status, 200);
+    const created = await res.json();
+    assert.ok(created.id);
+    assert.strictEqual(created.name, 'api-test-profile');
+    assert.deepStrictEqual(created.tool_ids, ['nmap', 'ffuf']);
+
+    // POST missing name → 400
+    res = await fetch(`${baseUrl}/profiles`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ toolIds: ['nmap'] }),
+    });
+    assert.strictEqual(res.status, 400);
+
+    // POST missing toolIds → 400
+    res = await fetch(`${baseUrl}/profiles`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'no-tools' }),
+    });
+    assert.strictEqual(res.status, 400);
+
+    // POST duplicate name → 400
+    res = await fetch(`${baseUrl}/profiles`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'api-test-profile', toolIds: ['nmap'] }),
+    });
+    assert.strictEqual(res.status, 400);
+
+    // GET list
+    res = await fetch(`${baseUrl}/profiles`);
+    assert.strictEqual(res.status, 200);
+    const list = await res.json();
+    assert.ok(list.some((p) => p.id === created.id));
+
+    // GET single
+    res = await fetch(`${baseUrl}/profiles/${created.id}`);
+    assert.strictEqual(res.status, 200);
+    const fetched = await res.json();
+    assert.strictEqual(fetched.id, created.id);
+
+    // GET unknown → 404
+    res = await fetch(`${baseUrl}/profiles/does-not-exist`);
+    assert.strictEqual(res.status, 404);
+
+    // PUT
+    res = await fetch(`${baseUrl}/profiles/${created.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: 'updated description', toolIds: ['nmap', 'sqlmap'] }),
+    });
+    assert.strictEqual(res.status, 200);
+    const updated = await res.json();
+    assert.strictEqual(updated.description, 'updated description');
+    assert.deepStrictEqual(updated.tool_ids, ['nmap', 'sqlmap']);
+
+    // PUT unknown → 404
+    res = await fetch(`${baseUrl}/profiles/does-not-exist`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: 'x' }),
+    });
+    assert.strictEqual(res.status, 404);
+
+    // GET dockerfile
+    res = await fetch(`${baseUrl}/profiles/${created.id}/dockerfile`);
+    assert.strictEqual(res.status, 200);
+    assert.match(res.headers.get('content-type') || '', /text\/plain/);
+    const fragment = await res.text();
+    assert.match(fragment, /# profile: api-test-profile/);
+    assert.match(fragment, /RUN \/tmp\/install-profile\.sh "api-test-profile"/);
+
+    // GET dockerfile unknown → 404
+    res = await fetch(`${baseUrl}/profiles/does-not-exist/dockerfile`);
+    assert.strictEqual(res.status, 404);
+
+    // POST install → enqueues into the existing install_requests queue
+    res = await fetch(`${baseUrl}/profiles/${created.id}/install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: 'route-test install' }),
+    });
+    assert.strictEqual(res.status, 200);
+    const installResp = await res.json();
+    assert.ok(installResp.request);
+    assert.strictEqual(installResp.request.status, 'pending', 'install must be pending — no execution yet');
+    assert.deepStrictEqual(installResp.request.toolIds, ['nmap', 'sqlmap']);
+    assert.strictEqual(installResp.profile.name, 'api-test-profile');
+    assert.match(installResp.request.note, /profile:api-test-profile.*route-test install/);
+
+    // The newly-pending request should appear in the existing approvals
+    // surface — proves we routed through the same queue.
+    res = await fetch(`${baseUrl}/installer/requests?status=pending`);
+    assert.strictEqual(res.status, 200);
+    const pending = await res.json();
+    assert.ok(pending.some((r) => r.id === installResp.request.id),
+      'profile install should surface in /api/installer/requests?status=pending');
+
+    // POST install unknown → 404
+    res = await fetch(`${baseUrl}/profiles/does-not-exist/install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.strictEqual(res.status, 404);
+
+    // DELETE
+    res = await fetch(`${baseUrl}/profiles/${created.id}`, { method: 'DELETE' });
+    assert.strictEqual(res.status, 200);
+
+    // DELETE unknown → 404
+    res = await fetch(`${baseUrl}/profiles/${created.id}`, { method: 'DELETE' });
+    assert.strictEqual(res.status, 404);
+
+    res = await fetch(`${baseUrl}/profiles/${created.id}`);
+    assert.strictEqual(res.status, 404);
+  });
+
   test('Scope and prompt APIs support governed run administration', async () => {
     let res = await fetch(`${baseUrl}/scopes`, {
       method: 'POST',

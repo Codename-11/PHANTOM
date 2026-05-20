@@ -20,6 +20,17 @@ import {
   toolIdsForTier,
   TIERS,
 } from '../tools/installer.js';
+import {
+  createProfile,
+  getProfile,
+  listProfiles,
+  updateProfile,
+  deleteProfile,
+} from '../profiles/profile-store.js';
+import {
+  renderProfileAsDockerfile,
+  resolveProfileAsInstallPlan,
+} from '../profiles/profile-resolver.js';
 import { spawn } from 'child_process';
 import { artifactToPublic } from '../artifacts/renderers.js';
 import { writeArtifact, exportEvidenceBundle } from '../artifacts/artifact-store.js';
@@ -310,6 +321,130 @@ function runStep(entry, timeoutMs) {
 // Test surface so the classification logic can be unit-tested without
 // spawning subprocesses. Not exported in the route's public API.
 export const _installerInternals = { classifyResult, elevatedCommandPreview };
+
+// ─── Toolpack profiles ───────────────────────────────────────────────────
+// CRUD for named bags of tool ids. A profile resolves two ways:
+//   • build-time → `GET /api/profiles/:id/dockerfile` returns a `RUN`
+//                  fragment that defers to scripts/install-profile.sh.
+//   • runtime    → `POST /api/profiles/:id/install` builds an install
+//                  plan and *enqueues* it through the existing
+//                  install_requests approvals queue. We do NOT execute
+//                  here — operators approve via the existing approval
+//                  surface (POST /api/installer/requests/:id/approve).
+
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseToolIdsBody(body) {
+  if (!isPlainObject(body)) return null;
+  if (!Array.isArray(body.toolIds)) return null;
+  const ids = body.toolIds
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  return ids;
+}
+
+router.get('/profiles', (req, res) => {
+  res.json(listProfiles());
+});
+
+router.get('/profiles/:id', (req, res) => {
+  const profile = getProfile(req.params.id);
+  if (!profile) return res.status(404).json({ error: 'Profile not found' });
+  res.json(profile);
+});
+
+router.post('/profiles', (req, res) => {
+  const body = req.body || {};
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  const toolIds = parseToolIdsBody(body);
+  if (toolIds === null) {
+    return res.status(400).json({ error: 'toolIds must be an array of strings' });
+  }
+  try {
+    res.json(createProfile({ name, description: body.description || '', toolIds }));
+  } catch (err) {
+    // Name-collision and validation errors surface as 400s — anything
+    // else escalates to a 500 so the operator sees the real failure.
+    if (/already exists|name is required/i.test(err.message)) {
+      return res.status(400).json({ error: err.message });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/profiles/:id', (req, res) => {
+  const body = req.body || {};
+  const patch = {};
+  if (body.name !== undefined) patch.name = body.name;
+  if (body.description !== undefined) patch.description = body.description;
+  if (body.toolIds !== undefined) {
+    const ids = parseToolIdsBody(body);
+    if (ids === null) {
+      return res.status(400).json({ error: 'toolIds must be an array of strings' });
+    }
+    patch.toolIds = ids;
+  }
+  try {
+    const updated = updateProfile(req.params.id, patch);
+    if (!updated) return res.status(404).json({ error: 'Profile not found' });
+    res.json(updated);
+  } catch (err) {
+    if (/already exists|name is required/i.test(err.message)) {
+      return res.status(400).json({ error: err.message });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/profiles/:id', (req, res) => {
+  const removed = deleteProfile(req.params.id);
+  if (!removed) return res.status(404).json({ error: 'Profile not found' });
+  res.json({ success: true });
+});
+
+router.get('/profiles/:id/dockerfile', (req, res) => {
+  try {
+    const fragment = renderProfileAsDockerfile(req.params.id);
+    res.type('text/plain').send(fragment);
+  } catch (err) {
+    if (err.code === 'PROFILE_NOT_FOUND') {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Enqueue a profile-driven install request through the *existing*
+// install_requests approvals queue (the same table the sec-ops
+// installer's /installer/request route uses). We never execute here —
+// the operator approves via POST /api/installer/requests/:id/approve.
+router.post('/profiles/:id/install', (req, res) => {
+  const profile = getProfile(req.params.id);
+  if (!profile) return res.status(404).json({ error: 'Profile not found' });
+  let plan;
+  try {
+    plan = resolveProfileAsInstallPlan(req.params.id);
+  } catch (err) {
+    if (err.code === 'PROFILE_NOT_FOUND') {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+    return res.status(500).json({ error: err.message });
+  }
+  const note = `profile:${profile.name}${req.body?.note ? ` — ${req.body.note}` : ''}`;
+  const request = createInstallRequest({
+    toolIds: profile.tool_ids,
+    plan,
+    note,
+  });
+  res.json({
+    request,
+    profile: { id: profile.id, name: profile.name },
+    summary: summarizePlan(plan),
+  });
+});
 
 // ─── Posture trending ────────────────────────────────────────────────────
 // Aggregates synthesis-card scores across recent runs so the Dash can show
