@@ -147,6 +147,11 @@ window.SettingsPage = {
         panels.forEach(panel => panel.classList.toggle('active', panel.dataset.settingsPanel === target));
         if (target === 'prompts') this.loadPromptAdmin();
         if (target === 'tools' || target === 'security') this.loadToolpacks();
+        // The Profiles subtab lives inside the Tools panel as its own
+        // stacked section (see frontend/index.html — third block under
+        // data-settings-panel="tools"). Loading on tab-activate keeps
+        // the list fresh without polling.
+        if (target === 'tools') window.ProfilesPanel?.load?.();
         if (target === 'general' || target === 'behavior' || target === 'advanced') this.renderStaticPanels();
       });
     });

@@ -1036,6 +1036,25 @@
                 <div id="installer-host" class="installer-host"></div>
                 <div id="installer-tiers" class="installer-tiers"></div>
                 <div id="installer-requests" class="installer-requests"></div>
+
+                <!-- Toolpack profiles · CRUD over named bags of tool ids.
+                     A profile resolves two ways: build-time (Dockerfile RUN
+                     fragment baked into the PHANTOM image) or runtime (an
+                     install request enqueued through the same approvals
+                     queue the sec-ops installer uses). -->
+                <div class="prompt-preview-header" style="margin-top:24px;">
+                  <div>
+                    <h3>Toolpack profiles</h3>
+                    <p>Named bags of tool ids. Export a Dockerfile fragment for image bake-in, or apply at runtime through the Approvals queue.</p>
+                  </div>
+                  <div class="profiles-header-actions">
+                    <button id="profiles-refresh-btn" class="btn btn-secondary btn-sm">Refresh</button>
+                    <button id="profiles-new-btn" class="btn btn-primary btn-sm">New profile</button>
+                  </div>
+                </div>
+                <div id="profiles-form" class="profiles-form-host"></div>
+                <div id="profiles-list" class="profiles-list"></div>
+                <p id="profiles-caption" class="profiles-caption empty-msg"></p>
               </section>
               <section class="settings-tab-panel" data-settings-panel="advanced">
                 <div id="settings-advanced-overview" class="settings-overview-panel">Loading advanced settings…</div>
@@ -1537,6 +1556,7 @@
   <script src="js/pages/runs-page.js"></script>
   <script src="js/pages/trending-panel.js"></script>
   <script src="js/pages/installer-panel.js"></script>
+  <script src="js/pages/profiles-panel.js"></script>
   <script src="js/graph/graph-layout.js"></script>
   <script src="js/graph/graph-presenter.js"></script>
   <script src="js/pages/graph-page.js"></script>
