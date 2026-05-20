@@ -1,0 +1,504 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://phantom.dev/schemas/toolpack.phantom.dev/v1.json",
+  "title": "PHANTOM Toolpack Manifest v1",
+  "description": "Schema for toolpack.phantom.dev/v1 manifests. Manifests DESCRIBE capability — they never execute it. Install recipes MUST be declarative arrays; shell-string / script-string recipes are rejected.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "identity",
+    "compatibility",
+    "trust",
+    "risk",
+    "install",
+    "tools",
+    "prompt",
+    "outputs",
+    "templates",
+    "docs",
+    "review",
+    "lifecycle"
+  ],
+  "properties": {
+    "schema": {
+      "description": "Manifest schema identifier. MUST be exactly 'toolpack.phantom.dev/v1' for this schema version.",
+      "type": "string",
+      "const": "toolpack.phantom.dev/v1"
+    },
+    "identity": { "$ref": "#/definitions/identity" },
+    "compatibility": { "$ref": "#/definitions/compatibility" },
+    "trust": { "$ref": "#/definitions/trust" },
+    "risk": { "$ref": "#/definitions/risk" },
+    "install": { "$ref": "#/definitions/install" },
+    "tools": { "$ref": "#/definitions/tools" },
+    "prompt": { "$ref": "#/definitions/prompt" },
+    "outputs": { "$ref": "#/definitions/outputs" },
+    "templates": { "$ref": "#/definitions/templates" },
+    "docs": { "$ref": "#/definitions/docs" },
+    "review": { "$ref": "#/definitions/review" },
+    "lifecycle": { "$ref": "#/definitions/lifecycle" }
+  },
+  "definitions": {
+    "actionClass": {
+      "description": "Action classes describe what kinds of operator-visible actions a toolpack is permitted to perform.",
+      "type": "string",
+      "enum": [
+        "recon",
+        "read/local",
+        "network-scan",
+        "exploit",
+        "destructive",
+        "credentialed",
+        "online-bruteforce",
+        "offline-password-audit",
+        "credential-stuffing",
+        "spraying"
+      ]
+    },
+    "riskClass": {
+      "description": "Risk classes annotate individual tools so policy gates can apply uniform rules.",
+      "type": "string",
+      "enum": [
+        "recon",
+        "read/local",
+        "network-scan",
+        "exploit",
+        "destructive",
+        "offline-password-audit",
+        "online-bruteforce"
+      ]
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "summary", "category", "version", "channel", "publisher", "license"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$"
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "minLength": 1 },
+        "category": { "type": "string", "minLength": 1 },
+        "version": { "$ref": "#/definitions/semver" },
+        "channel": { "type": "string", "enum": ["stable", "beta", "experimental", "builtin"] },
+        "publisher": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "name"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "name": { "type": "string", "minLength": 1 },
+            "url": { "type": "string" }
+          }
+        },
+        "license": { "type": "string", "minLength": 1 },
+        "homepage": { "type": "string" }
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phantom_min", "platforms"],
+      "properties": {
+        "phantom_min": { "$ref": "#/definitions/semver" },
+        "phantom_max": { "$ref": "#/definitions/semver" },
+        "platforms": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "enum": ["linux", "darwin", "windows", "docker"] }
+        },
+        "container_profiles": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "trust": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digest"],
+      "properties": {
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[A-Fa-f0-9]{64}$"
+        },
+        "signature": { "type": "string", "minLength": 1 },
+        "signed_by": { "type": "string", "minLength": 1 },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source": { "type": "string", "minLength": 1 },
+            "attestation_ref": { "type": "string", "minLength": 1 },
+            "build_ref": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_classes"],
+      "properties": {
+        "action_classes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/actionClass" }
+        },
+        "default_allowed": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/actionClass" }
+        },
+        "default_ask": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/actionClass" }
+        },
+        "default_deny": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/actionClass" }
+        },
+        "scope_required": { "type": "boolean" },
+        "target_required": { "type": "boolean" },
+        "rate_caps": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requests_per_second": { "type": "number", "minimum": 0 },
+            "concurrent": { "type": "integer", "minimum": 0 },
+            "max_runtime_seconds": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "network_egress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "allowed": { "type": "boolean" },
+            "destinations": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "credential_rules": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "allow_credential_use": { "type": "boolean" },
+            "allow_online_login": { "type": "boolean" },
+            "offline_only": { "type": "boolean" },
+            "passive_only": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "install": {
+      "description": "Declarative install recipes. SHELL-STRING / SCRIPT-STRING recipes are rejected.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recipes"],
+      "properties": {
+        "recipes": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/installRecipe" }
+        },
+        "privilege": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requires_root": { "type": "boolean" },
+            "requires_docker": { "type": "boolean" },
+            "capabilities": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "rollback": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "recipes": {
+              "type": "array",
+              "items": { "$ref": "#/definitions/installRecipe" }
+            },
+            "hints": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "installRecipe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "apt",
+            "apt-get",
+            "dnf",
+            "yum",
+            "pacman",
+            "apk",
+            "brew",
+            "pipx",
+            "pip",
+            "go-install",
+            "cargo-install",
+            "npm",
+            "docker-pull",
+            "git-clone",
+            "fetch-binary",
+            "noop"
+          ]
+        },
+        "packages": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "module": { "type": "string", "minLength": 1 },
+        "repo": { "type": "string", "minLength": 1 },
+        "ref": { "type": "string", "minLength": 1 },
+        "url": { "type": "string", "minLength": 1 },
+        "image": { "type": "string", "minLength": 1 },
+        "checksum": {
+          "type": "string",
+          "pattern": "^sha256:[A-Fa-f0-9]{64}$"
+        },
+        "dest": { "type": "string", "minLength": 1 },
+        "platforms": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["linux", "darwin", "windows", "docker"] }
+        },
+        "notes": { "type": "string" }
+      },
+      "not": {
+        "anyOf": [
+          { "required": ["shell"] },
+          { "required": ["script"] },
+          { "required": ["command"] },
+          { "required": ["run"] },
+          { "required": ["exec"] }
+        ]
+      }
+    },
+    "tools": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/tool" }
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "command", "risk_class"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "command": { "type": "string", "minLength": 1 },
+        "risk_class": { "$ref": "#/definitions/riskClass" },
+        "scope_required": { "type": "boolean" },
+        "target_required": { "type": "boolean" },
+        "gated": { "type": "boolean" },
+        "level": { "type": "string", "minLength": 1 },
+        "parser": { "type": "string", "minLength": 1 },
+        "expected_outputs": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "install_hint": { "type": "string" }
+      }
+    },
+    "prompt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["playbook"],
+      "properties": {
+        "playbook": { "type": "string", "minLength": 1 },
+        "fragments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "text"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "text": { "type": "string", "minLength": 1 },
+              "reviewed": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "parsers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "kind"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "kind": { "type": "string", "minLength": 1 },
+              "description": { "type": "string" }
+            }
+          }
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "title": { "type": "string" },
+              "severity_hint": {
+                "type": "string",
+                "enum": ["info", "low", "medium", "high", "critical"]
+              }
+            }
+          }
+        },
+        "reports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "format": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "templates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scopes": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/templateRef" }
+        },
+        "campaigns": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/templateRef" }
+        },
+        "reports": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/templateRef" }
+        },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/templateRef" }
+        }
+      }
+    },
+    "templateRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+    "docs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "readme": { "type": "string" },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "title"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "title": { "type": "string", "minLength": 1 },
+              "path": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["unreviewed", "in-review", "approved", "rejected"]
+        },
+        "reviewed_by": { "type": "string" },
+        "reviewed_at": { "type": "string" },
+        "flags": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "exploit": { "type": "boolean" },
+            "destructive": { "type": "boolean" },
+            "credentialed": { "type": "boolean" },
+            "network_egress": { "type": "boolean" },
+            "requires_secrets": { "type": "boolean" }
+          }
+        },
+        "notes": { "type": "string" }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["active", "deprecated", "revoked"]
+        },
+        "deprecation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "since": { "type": "string" },
+            "reason": { "type": "string" }
+          }
+        },
+        "revocation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "at": { "type": "string" },
+            "reason": { "type": "string" }
+          }
+        },
+        "replacement": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "min_version": { "$ref": "#/definitions/semver" }
+          }
+        }
+      }
+    }
+  }
+}

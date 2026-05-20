@@ -1,0 +1,97 @@
+{
+  "schema": "toolpack.phantom.dev/v1",
+  "identity": {
+    "id": "web-recon",
+    "name": "Web Recon",
+    "summary": "HTTP surface mapping, screenshots/crawling hints, and safe web enumeration for scoped web targets.",
+    "category": "web",
+    "version": "1.0.0",
+    "channel": "builtin",
+    "publisher": {
+      "id": "phantom-builtin",
+      "name": "PHANTOM Built-ins"
+    },
+    "license": "Apache-2.0"
+  },
+  "compatibility": {
+    "phantom_min": "1.0.0",
+    "platforms": ["linux", "docker"],
+    "container_profiles": ["base", "web"]
+  },
+  "trust": {
+    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000002",
+    "signed_by": "phantom-builtin",
+    "provenance": {
+      "source": "builtin",
+      "build_ref": "server/toolpacks/toolpack-registry.js"
+    }
+  },
+  "risk": {
+    "action_classes": ["recon", "network-scan"],
+    "default_allowed": ["recon"],
+    "default_ask": ["network-scan"],
+    "default_deny": ["exploit", "destructive", "credentialed", "online-bruteforce"],
+    "scope_required": true,
+    "credential_rules": {
+      "passive_only": false,
+      "allow_credential_use": false,
+      "allow_online_login": false
+    },
+    "network_egress": {
+      "allowed": true,
+      "destinations": ["scope-targets"]
+    },
+    "rate_caps": {
+      "requests_per_second": 25,
+      "concurrent": 10
+    }
+  },
+  "install": {
+    "recipes": [
+      { "kind": "go-install", "module": "github.com/projectdiscovery/httpx/cmd/httpx@latest" },
+      { "kind": "go-install", "module": "github.com/projectdiscovery/katana/cmd/katana@latest" },
+      { "kind": "go-install", "module": "github.com/lc/gau/v2/cmd/gau@latest" },
+      { "kind": "apt", "packages": ["ffuf"], "platforms": ["linux"] },
+      { "kind": "pipx", "packages": ["wafw00f"] }
+    ],
+    "privilege": { "requires_root": false }
+  },
+  "tools": [
+    { "name": "httpx", "command": "httpx", "risk_class": "network-scan", "scope_required": true, "parser": "httpx_json", "install_hint": "go install github.com/projectdiscovery/httpx/cmd/httpx@latest" },
+    { "name": "katana", "command": "katana", "risk_class": "network-scan", "scope_required": true, "parser": "urls", "install_hint": "go install github.com/projectdiscovery/katana/cmd/katana@latest" },
+    { "name": "gau", "command": "gau", "risk_class": "recon", "scope_required": true, "parser": "urls", "install_hint": "go install github.com/lc/gau/v2/cmd/gau@latest" },
+    { "name": "ffuf", "command": "ffuf", "risk_class": "network-scan", "scope_required": true, "parser": "ffuf_json", "install_hint": "sudo apt install ffuf" },
+    { "name": "wafw00f", "command": "wafw00f", "risk_class": "recon", "scope_required": true, "parser": "waf_detection", "install_hint": "pipx install wafw00f" }
+  ],
+  "prompt": {
+    "playbook": "Map scoped HTTP services, prefer HEAD/GET and low-rate enumeration, capture evidence, and avoid state-changing requests unless the scope explicitly allows them."
+  },
+  "outputs": {
+    "parsers": [
+      { "id": "httpx_json", "kind": "json" },
+      { "id": "urls", "kind": "lines" },
+      { "id": "ffuf_json", "kind": "json" },
+      { "id": "waf_detection", "kind": "text" }
+    ]
+  },
+  "templates": {
+    "scopes": [{ "id": "web-recon-default", "title": "Web Recon default scope" }]
+  },
+  "docs": {
+    "readme": "HTTP enumeration for scoped web targets only."
+  },
+  "review": {
+    "status": "approved",
+    "reviewed_by": "phantom-builtin",
+    "flags": {
+      "exploit": false,
+      "destructive": false,
+      "credentialed": false,
+      "network_egress": true,
+      "requires_secrets": false
+    }
+  },
+  "lifecycle": {
+    "status": "active"
+  }
+}

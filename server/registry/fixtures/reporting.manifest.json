@@ -1,0 +1,92 @@
+{
+  "schema": "toolpack.phantom.dev/v1",
+  "identity": {
+    "id": "reporting",
+    "name": "Reporting",
+    "summary": "Normalize evidence into findings, executive summaries, remediation plans, and before/after comparisons.",
+    "category": "reporting",
+    "version": "1.0.0",
+    "channel": "builtin",
+    "publisher": {
+      "id": "phantom-builtin",
+      "name": "PHANTOM Built-ins"
+    },
+    "license": "Apache-2.0"
+  },
+  "compatibility": {
+    "phantom_min": "1.0.0",
+    "platforms": ["linux", "darwin", "windows", "docker"],
+    "container_profiles": ["base"]
+  },
+  "trust": {
+    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000007",
+    "signed_by": "phantom-builtin",
+    "provenance": {
+      "source": "builtin",
+      "build_ref": "server/toolpacks/toolpack-registry.js"
+    }
+  },
+  "risk": {
+    "action_classes": ["read/local", "recon"],
+    "default_allowed": ["read/local", "recon"],
+    "default_deny": ["destructive"],
+    "scope_required": false,
+    "credential_rules": {
+      "passive_only": true,
+      "allow_credential_use": false,
+      "allow_online_login": false
+    },
+    "network_egress": {
+      "allowed": false
+    }
+  },
+  "install": {
+    "recipes": [
+      { "kind": "apt", "packages": ["pandoc", "jq"], "platforms": ["linux"] }
+    ],
+    "privilege": { "requires_root": false }
+  },
+  "tools": [
+    { "name": "pandoc", "command": "pandoc", "risk_class": "read/local", "scope_required": false, "parser": "document", "install_hint": "sudo apt install pandoc" },
+    { "name": "jq", "command": "jq", "risk_class": "read/local", "scope_required": false, "parser": "json", "install_hint": "sudo apt install jq" }
+  ],
+  "prompt": {
+    "playbook": "Turn observations into concise findings with evidence, severity rationale, remediation, affected assets, and before/after comparison notes. Redact secrets in all outputs."
+  },
+  "outputs": {
+    "parsers": [
+      { "id": "document", "kind": "document" },
+      { "id": "json", "kind": "json" }
+    ],
+    "reports": [
+      { "id": "executive-summary", "format": "markdown" },
+      { "id": "remediation-plan", "format": "markdown" }
+    ]
+  },
+  "templates": {
+    "reports": [
+      { "id": "exec-summary-default", "title": "Executive summary" },
+      { "id": "remediation-plan-default", "title": "Remediation plan" }
+    ],
+    "evidence": [
+      { "id": "before-after", "title": "Before/after evidence pair" }
+    ]
+  },
+  "docs": {
+    "readme": "Local reporting. No network egress."
+  },
+  "review": {
+    "status": "approved",
+    "reviewed_by": "phantom-builtin",
+    "flags": {
+      "exploit": false,
+      "destructive": false,
+      "credentialed": false,
+      "network_egress": false,
+      "requires_secrets": false
+    }
+  },
+  "lifecycle": {
+    "status": "active"
+  }
+}

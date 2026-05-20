@@ -1,0 +1,98 @@
+{
+  "schema": "toolpack.phantom.dev/v1",
+  "identity": {
+    "id": "passive-osint",
+    "name": "Passive OSINT",
+    "summary": "Public-source discovery that avoids direct probing unless a scoped URL is explicitly selected.",
+    "category": "osint",
+    "version": "1.0.0",
+    "channel": "builtin",
+    "publisher": {
+      "id": "phantom-builtin",
+      "name": "PHANTOM Built-ins",
+      "url": "https://phantom.dev/"
+    },
+    "license": "Apache-2.0",
+    "homepage": "https://phantom.dev/toolpacks/passive-osint"
+  },
+  "compatibility": {
+    "phantom_min": "1.0.0",
+    "platforms": ["linux", "docker"],
+    "container_profiles": ["base"]
+  },
+  "trust": {
+    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+    "signed_by": "phantom-builtin",
+    "provenance": {
+      "source": "builtin",
+      "build_ref": "server/toolpacks/toolpack-registry.js"
+    }
+  },
+  "risk": {
+    "action_classes": ["recon", "read/local"],
+    "default_allowed": ["recon", "read/local"],
+    "default_deny": ["network-scan", "exploit", "destructive", "credentialed", "online-bruteforce"],
+    "scope_required": false,
+    "credential_rules": {
+      "passive_only": true,
+      "allow_credential_use": false,
+      "allow_online_login": false
+    },
+    "network_egress": {
+      "allowed": true,
+      "destinations": ["public-internet-passive"]
+    }
+  },
+  "install": {
+    "recipes": [
+      { "kind": "apt", "packages": ["dnsutils", "whois", "libimage-exiftool-perl"], "platforms": ["linux"] },
+      { "kind": "go-install", "module": "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest" },
+      { "kind": "pipx", "packages": ["theHarvester"] }
+    ],
+    "privilege": {
+      "requires_root": false
+    },
+    "rollback": {
+      "hints": ["Remove apt packages with `apt remove dnsutils whois libimage-exiftool-perl`. Uninstall go binaries from $GOPATH/bin."]
+    }
+  },
+  "tools": [
+    { "name": "dig", "command": "dig", "risk_class": "recon", "scope_required": false, "parser": "dns_records", "install_hint": "sudo apt install dnsutils" },
+    { "name": "whois", "command": "whois", "risk_class": "recon", "scope_required": false, "parser": "whois_text", "install_hint": "sudo apt install whois" },
+    { "name": "subfinder", "command": "subfinder", "risk_class": "recon", "scope_required": true, "parser": "line_domains", "install_hint": "go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest" },
+    { "name": "theHarvester", "command": "theHarvester", "risk_class": "recon", "scope_required": true, "parser": "harvester_json", "install_hint": "pipx install theHarvester" },
+    { "name": "exiftool", "command": "exiftool", "risk_class": "read/local", "scope_required": false, "parser": "metadata_redacted", "install_hint": "sudo apt install libimage-exiftool-perl" }
+  ],
+  "prompt": {
+    "playbook": "Use passive public-source techniques first. Do not authenticate, spray, scrape private data, or contact out-of-scope infrastructure. Summarize sources and confidence."
+  },
+  "outputs": {
+    "parsers": [
+      { "id": "dns_records", "kind": "text", "description": "Parsed DNS record set." },
+      { "id": "whois_text", "kind": "text" },
+      { "id": "line_domains", "kind": "lines" },
+      { "id": "harvester_json", "kind": "json" },
+      { "id": "metadata_redacted", "kind": "json", "description": "EXIF metadata with secrets redacted." }
+    ]
+  },
+  "templates": {
+    "scopes": [{ "id": "passive-osint-default", "title": "Passive OSINT default scope" }]
+  },
+  "docs": {
+    "readme": "Public-source discovery only. No active probing."
+  },
+  "review": {
+    "status": "approved",
+    "reviewed_by": "phantom-builtin",
+    "flags": {
+      "exploit": false,
+      "destructive": false,
+      "credentialed": false,
+      "network_egress": true,
+      "requires_secrets": false
+    }
+  },
+  "lifecycle": {
+    "status": "active"
+  }
+}

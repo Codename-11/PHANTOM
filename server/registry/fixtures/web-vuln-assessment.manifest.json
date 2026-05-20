@@ -1,0 +1,97 @@
+{
+  "schema": "toolpack.phantom.dev/v1",
+  "identity": {
+    "id": "web-vuln-assessment",
+    "name": "Web Vulnerability Assessment",
+    "summary": "Safe web vulnerability assessment with template selection and evidence-first findings.",
+    "category": "vulnerability",
+    "version": "1.0.0",
+    "channel": "builtin",
+    "publisher": {
+      "id": "phantom-builtin",
+      "name": "PHANTOM Built-ins"
+    },
+    "license": "Apache-2.0"
+  },
+  "compatibility": {
+    "phantom_min": "1.0.0",
+    "platforms": ["linux", "docker"],
+    "container_profiles": ["base", "web"]
+  },
+  "trust": {
+    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000004",
+    "signed_by": "phantom-builtin",
+    "provenance": {
+      "source": "builtin",
+      "build_ref": "server/toolpacks/toolpack-registry.js"
+    }
+  },
+  "risk": {
+    "action_classes": ["recon", "network-scan", "exploit"],
+    "default_allowed": ["recon"],
+    "default_ask": ["network-scan"],
+    "default_deny": ["exploit", "destructive", "credentialed", "online-bruteforce"],
+    "scope_required": true,
+    "target_required": true,
+    "credential_rules": {
+      "allow_credential_use": false,
+      "allow_online_login": false
+    },
+    "network_egress": {
+      "allowed": true,
+      "destinations": ["scope-targets"]
+    },
+    "rate_caps": {
+      "requests_per_second": 25,
+      "concurrent": 10
+    }
+  },
+  "install": {
+    "recipes": [
+      { "kind": "go-install", "module": "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest" },
+      { "kind": "apt", "packages": ["nikto", "sqlmap"], "platforms": ["linux"] },
+      { "kind": "git-clone", "repo": "https://github.com/drwetter/testssl.sh", "ref": "main", "dest": "~/tools/testssl.sh" }
+    ],
+    "privilege": { "requires_root": false }
+  },
+  "tools": [
+    { "name": "nuclei", "command": "nuclei", "risk_class": "network-scan", "scope_required": true, "parser": "nuclei_json", "install_hint": "go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest" },
+    { "name": "nikto", "command": "nikto", "risk_class": "network-scan", "scope_required": true, "parser": "nikto_text", "install_hint": "sudo apt install nikto" },
+    { "name": "testssl.sh", "command": "testssl.sh", "risk_class": "network-scan", "scope_required": true, "parser": "tls_findings", "install_hint": "git clone https://github.com/drwetter/testssl.sh ~/tools/testssl.sh" },
+    { "name": "sqlmap", "command": "sqlmap", "risk_class": "exploit", "scope_required": true, "gated": true, "parser": "sqlmap_text", "install_hint": "sudo apt install sqlmap" }
+  ],
+  "prompt": {
+    "playbook": "Use safe templates by default. Treat exploit-class checks as gated: explain why they are needed and require explicit scope policy before execution."
+  },
+  "outputs": {
+    "parsers": [
+      { "id": "nuclei_json", "kind": "json" },
+      { "id": "nikto_text", "kind": "text" },
+      { "id": "tls_findings", "kind": "json" },
+      { "id": "sqlmap_text", "kind": "text" }
+    ],
+    "findings": [
+      { "id": "web-vuln-finding", "title": "Web vulnerability candidate", "severity_hint": "medium" }
+    ]
+  },
+  "templates": {
+    "campaigns": [{ "id": "web-vuln-default", "title": "Safe baseline web assessment" }]
+  },
+  "docs": {
+    "readme": "Safe web vulnerability assessment with gated exploit-class checks."
+  },
+  "review": {
+    "status": "approved",
+    "reviewed_by": "phantom-builtin",
+    "flags": {
+      "exploit": true,
+      "destructive": false,
+      "credentialed": false,
+      "network_egress": true,
+      "requires_secrets": false
+    }
+  },
+  "lifecycle": {
+    "status": "active"
+  }
+}

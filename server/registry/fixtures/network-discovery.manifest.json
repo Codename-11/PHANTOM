@@ -1,0 +1,96 @@
+{
+  "schema": "toolpack.phantom.dev/v1",
+  "identity": {
+    "id": "network-discovery",
+    "name": "Network Discovery",
+    "summary": "Host/service inventory for explicitly scoped IPs and CIDRs.",
+    "category": "network",
+    "version": "1.0.0",
+    "channel": "builtin",
+    "publisher": {
+      "id": "phantom-builtin",
+      "name": "PHANTOM Built-ins"
+    },
+    "license": "Apache-2.0"
+  },
+  "compatibility": {
+    "phantom_min": "1.0.0",
+    "platforms": ["linux", "docker"],
+    "container_profiles": ["base", "network"]
+  },
+  "trust": {
+    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000003",
+    "signed_by": "phantom-builtin",
+    "provenance": {
+      "source": "builtin",
+      "build_ref": "server/toolpacks/toolpack-registry.js"
+    }
+  },
+  "risk": {
+    "action_classes": ["recon", "network-scan"],
+    "default_allowed": ["recon"],
+    "default_ask": ["network-scan"],
+    "default_deny": ["exploit", "destructive", "credentialed", "online-bruteforce"],
+    "scope_required": true,
+    "target_required": true,
+    "credential_rules": {
+      "allow_credential_use": false,
+      "allow_online_login": false
+    },
+    "network_egress": {
+      "allowed": true,
+      "destinations": ["scope-targets"]
+    },
+    "rate_caps": {
+      "requests_per_second": 100,
+      "concurrent": 50
+    }
+  },
+  "install": {
+    "recipes": [
+      { "kind": "apt", "packages": ["nmap", "netcat-openbsd"], "platforms": ["linux"] },
+      { "kind": "go-install", "module": "github.com/projectdiscovery/naabu/v2/cmd/naabu@latest" },
+      { "kind": "cargo-install", "packages": ["rustscan"] }
+    ],
+    "privilege": {
+      "requires_root": false,
+      "capabilities": ["CAP_NET_RAW"]
+    }
+  },
+  "tools": [
+    { "name": "nmap", "command": "nmap", "risk_class": "network-scan", "scope_required": true, "parser": "nmap_xml_or_text", "install_hint": "sudo apt install nmap" },
+    { "name": "naabu", "command": "naabu", "risk_class": "network-scan", "scope_required": true, "parser": "ports", "install_hint": "go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest" },
+    { "name": "rustscan", "command": "rustscan", "risk_class": "network-scan", "scope_required": true, "parser": "ports", "install_hint": "cargo install rustscan" },
+    { "name": "nc", "command": "nc", "risk_class": "recon", "scope_required": true, "parser": "banner", "install_hint": "sudo apt install netcat-openbsd" }
+  ],
+  "prompt": {
+    "playbook": "Perform scoped, rate-conscious discovery. Favor service/version inventory and deltas; do not exploit, authenticate, or brute-force discovered services."
+  },
+  "outputs": {
+    "parsers": [
+      { "id": "nmap_xml_or_text", "kind": "xml-or-text" },
+      { "id": "ports", "kind": "lines" },
+      { "id": "banner", "kind": "text" }
+    ]
+  },
+  "templates": {
+    "scopes": [{ "id": "network-discovery-default", "title": "Network Discovery default scope" }]
+  },
+  "docs": {
+    "readme": "Service inventory for scoped IPs and CIDRs only."
+  },
+  "review": {
+    "status": "approved",
+    "reviewed_by": "phantom-builtin",
+    "flags": {
+      "exploit": false,
+      "destructive": false,
+      "credentialed": false,
+      "network_egress": true,
+      "requires_secrets": false
+    }
+  },
+  "lifecycle": {
+    "status": "active"
+  }
+}
