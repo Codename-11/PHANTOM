@@ -500,3 +500,146 @@ export type ArtifactFilter = 'all' | 'reports' | 'evidence' | 'trace' | 'other';
 // surface name `RunSummary` while reusing the existing EvidenceSummary
 // shape (event/tool/finding/artifact counts).
 export type RunSummary = EvidenceSummary;
+
+// ── Onboarding (A1 + A8.4 React port) ────────────────────────────────
+//
+// /api/onboarding/checklist returns the 5-item readiness checklist
+// derived in server/onboarding/onboarding-status.js.
+export interface OnboardingItems {
+  toolpacksInstalled: boolean;
+  hasAsset: boolean;
+  hasScope: boolean;
+  hasRun: boolean;
+  demoLoaded: boolean;
+}
+
+export interface OnboardingChecklist {
+  checklist: OnboardingItems;
+  complete: boolean;
+}
+
+// Each onboarding checklist row presented on the standalone page +
+// Dash widget. `id` matches a key on OnboardingItems.
+export interface OnboardingItem {
+  id: keyof OnboardingItems;
+  title: string;
+  help: string;
+  ctaLabel: string;
+  ctaRoute?: string;       // legacy hash route; React maps to /react/<route>
+  ctaAction?: 'load-demo'; // mutation-driven CTAs
+}
+
+// ── Approvals (A3 explained shape) ───────────────────────────────────
+
+export type ApprovalType = 'scope' | 'install' | 'registry' | 'elevated';
+export type ApprovalStatus = 'pending' | 'approved' | 'denied';
+
+// EXPLAINED shape produced by server/approvals/explain.js. The raw
+// upstream record is preserved verbatim under `rawDetails`.
+export interface ApprovalRecord {
+  id: string;
+  type: ApprovalType;
+  target: string;
+  riskClass: string;
+  actionClass: string;
+  policyReason: string;
+  expectedEffect: string;
+  sideEffects: string[];
+  rawDetails: Record<string, unknown> | unknown;
+  createdAt: string | null;
+  status: ApprovalStatus;
+  denialReason: string | null;
+}
+
+// Decision-audit row returned by /api/approvals (under `events`). Used
+// by the Dash "Policy decisions 24h" card.
+export interface ApprovalEvent {
+  id: string;
+  decision: 'granted' | 'denied' | 'allow-once' | 'override' | 'timeout' | string;
+  toolName: string | null;
+  risk: string | null;
+  scopeId: string | null;
+  scopeName: string | null;
+  reason: string | null;
+  operatorNote: string | null;
+  runId: string | null;
+  runTitle: string | null;
+  occurredAt: string;
+  args: unknown;
+  gate?: string;
+  policyMode?: string;
+}
+
+export interface ApprovalsListResponse {
+  count: number;
+  events: ApprovalEvent[];
+  explained: ApprovalRecord[];
+}
+
+// Pending install-request row returned by /api/installer/requests with
+// explained=1. Only the fields the Approvals page reads.
+export interface InstallRequest {
+  id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | string;
+  toolIds: string[];
+  plan: Array<{ id?: string; backend?: string; command?: string; args?: string[]; reason?: string }>;
+  requested_at: string | null;
+  denial_reason?: string | null;
+}
+
+export interface InstallRequestsResponse {
+  requests: InstallRequest[];
+  explained: ApprovalRecord[];
+}
+
+// ── Findings (A7 + A8.4 React port) ──────────────────────────────────
+
+export type FindingSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info' | string;
+export type FindingTriageStatus =
+  | 'new'
+  | 'acknowledged'
+  | 'in_progress'
+  | 'dismissed'
+  | 'closed';
+
+// `getFindings` row from server/assets/asset-store.js. `metadata` may
+// arrive as a JSON string from SQLite; consumers should pre-parse.
+export interface FindingRecord {
+  id: string;
+  title: string;
+  description: string | null;
+  severity: FindingSeverity;
+  status: string;
+  assetId: string | null;
+  runId: string | null;
+  recommendation: string | null;
+  evidence: unknown;
+  metadata: Record<string, unknown> | string | null;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  fixed_at: string | null;
+  triage_status?: FindingTriageStatus | null;
+  dismissal_note?: string | null;
+}
+
+// ── Dash hero (A5 next-action cascade, ported from dash-hero.js) ─────
+
+export type DashHeroTone = 'crit' | 'cy' | 'warn' | 'ok';
+
+export interface DashHeroAction {
+  eyebrow: string;
+  title: string;
+  body: string;
+  ctaLabel: string;
+  ctaRoute?: string;
+  ctaScroll?: string;
+  tone: DashHeroTone;
+}
+
+// localStorage payload for the "Continue where you left off" pill.
+export interface ContinueWhereLeftOff {
+  kind: 'conversation' | 'campaign' | 'run';
+  id: string;
+  label: string;
+  route?: string;
+}

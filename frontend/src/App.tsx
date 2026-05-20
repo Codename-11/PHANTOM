@@ -1,11 +1,11 @@
 // Root React component for the A8.x migration bundle.
 //
 // A8.0 shipped the /react/health placeholder; A8.1 added the Campaigns
-// surface as a side-by-side preview at /react/campaigns. A8.2 adds the
-// Settings and Scope surfaces at /react/settings and /react/scope. The
-// legacy `/settings` and `/scope` routes still serve the vanilla bundle
-// until a follow-up commit flips them over by adding entries to
-// REACT_PAGES in server/index.js.
+// surface; A8.2 added Settings + Scope; A8.3 added Runs + Graph +
+// Artifacts; A8.4 (this commit) adds Dash + Onboarding + Approvals +
+// Alerts. Each of these routes is a side-by-side preview — the legacy
+// vanilla `/dash`, `/approvals`, `/alerts`, etc. continue to render the
+// vanilla bundle until REACT_PAGES in server/index.js is updated.
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
 import CampaignsPage from './pages/Campaigns';
@@ -17,6 +17,10 @@ import ScopeCreateRoute from './pages/ScopeCreate';
 import RunsPage, { RunDetailRoute } from './pages/Runs';
 import GraphPage from './pages/Graph';
 import ArtifactsPage from './pages/Artifacts';
+import DashPage from './pages/Dash';
+import OnboardingPage from './pages/Onboarding';
+import ApprovalsPage, { ApprovalDetailRoute } from './pages/Approvals';
+import AlertsPage, { AlertDetailRoute } from './pages/Alerts';
 
 function HealthCard() {
   return (
@@ -34,13 +38,13 @@ function HealthCard() {
         </h1>
         <p className="text-sm text-muted-foreground">
           The React + Vite + Tailwind + shadcn/ui infrastructure is wired. Visit{' '}
-          <code className="font-mono">/react/campaigns</code> to preview the migrated
-          Campaigns surface; the legacy <code className="font-mono">/campaigns</code> route
-          continues to serve the vanilla bundle.
+          <code className="font-mono">/react/dash</code> for the migrated operations
+          surface; the legacy <code className="font-mono">/dash</code> route still
+          serves the vanilla bundle.
         </p>
         <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
           <span className="inline-block w-2 h-2 rounded-full bg-primary" aria-hidden="true" />
-          <span>Phase A8.1 · Campaigns preview</span>
+          <span>Phase A8.4 · Dash · Onboarding · Approvals · Alerts</span>
         </div>
       </section>
     </main>
@@ -52,6 +56,14 @@ export function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/react/health" element={<HealthCard />} />
+        <Route path="/react/dash" element={<DashPage />} />
+        <Route path="/react/onboarding" element={<OnboardingPage />} />
+        <Route path="/react/approvals" element={<ApprovalsPage />}>
+          <Route path=":id" element={<ApprovalDetailRoute />} />
+        </Route>
+        <Route path="/react/alerts" element={<AlertsPage />}>
+          <Route path=":id" element={<AlertDetailRoute />} />
+        </Route>
         <Route path="/react/campaigns" element={<CampaignsPage />}>
           <Route path="new" element={<CampaignCreateRoute />} />
           <Route path=":id" element={<CampaignDetailRoute />} />
@@ -67,7 +79,7 @@ export function App() {
         <Route path="/react/graph" element={<GraphPage />} />
         <Route path="/react/graph/:runId" element={<GraphPage />} />
         <Route path="/react/artifacts" element={<ArtifactsPage />} />
-        <Route path="/react" element={<Navigate to="/react/health" replace />} />
+        <Route path="/react" element={<Navigate to="/react/dash" replace />} />
         <Route path="*" element={<HealthCard />} />
       </Routes>
     </BrowserRouter>
