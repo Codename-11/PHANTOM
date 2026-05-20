@@ -59,6 +59,7 @@ import { getDiagnostics } from '../diagnostics/diagnostics.js';
 import { getOnboardingChecklist } from '../onboarding/onboarding-status.js';
 import { runSeed, clearDemo } from '../../scripts/seed.js';
 import { buildRunEvidence, renderEvidenceMarkdown } from '../evidence/evidence-builder.js';
+import { loadLocalManifests, getLocalManifest, getLocalManifestSummary } from '../registry/local-manifest-loader.js';
 import { evaluateToolAction, normalizeOperatorOverride, ACTION_CLASSES } from '../scope/policy.js';
 import { explain as explainApproval, requiresDenialReason } from '../approvals/explain.js';
 import { parseTargetInput, targetsToScopeFields } from '../scope/target-parser.js';
@@ -1695,6 +1696,69 @@ router.post('/sudo/validate', async (req, res) => {
 });
 
 // ─── System Info ───
+// ─── Registry (B1 — read-only surface) ───
+// Browse + preview routes for the LOCAL manifest catalog (no hosted
+// registry yet; that lands in B3). All routes are deny-by-default for
+// write paths — read-only operations only this phase.
+router.get('/registry/local', (req, res) => {
+  try {
+    const all = loadLocalManifests();
+    // Strip the full manifest content from the list response — operators
+    // browse by identity, then GET /api/registry/local/:id for the full
+    // record. Keeps the list payload small + cacheable.
+    res.json({
+      summary: getLocalManifestSummary(),
+      manifests: all.map((m) => ({
+        id: m.id,
+        version: m.version,
+        valid: m.valid,
+        errorCount: m.errors.length,
+        source: m.source,
+        digest: m.digest,
+        computedDigest: m.computedDigest,
+        identity: m.manifest?.identity || null,
+        risk: m.manifest?.risk || null,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/registry/local/:id', (req, res) => {
+  const m = getLocalManifest(req.params.id);
+  if (!m) return res.status(404).json({ error: 'manifest not found' });
+  res.json(m);
+});
+
+// Preview install — returns the declarative plan that would run if
+// the operator approved an install of this manifest. Pure data; no
+// execution. Future B2 patches will surface this in the registry UI
+// + thread it through the existing installer approval queue.
+router.post('/registry/local/:id/preview-install', (req, res) => {
+  const m = getLocalManifest(req.params.id);
+  if (!m) return res.status(404).json({ error: 'manifest not found' });
+  if (!m.valid) {
+    return res.status(400).json({ error: 'manifest is invalid; cannot preview install', errors: m.errors });
+  }
+  const install = m.manifest?.install || {};
+  const tools = m.manifest?.tools || [];
+  const risks = m.manifest?.risk?.action_classes || [];
+  res.json({
+    id: m.id,
+    version: m.version,
+    plan: {
+      recipes: install.recipes || [],
+      privileges: install.privileges || [],
+      rollback: install.rollback || null,
+    },
+    toolCount: tools.length,
+    riskClasses: risks,
+    digest: m.manifest?.trust?.digest || null,
+    note: 'Preview only — no execution. Operator approval still required (Approvals queue).',
+  });
+});
+
 // ─── Diagnostics / readiness (A0) ───
 // Bounded per-check timeout (≤500ms each); total budget 1500ms.
 // Secrets are redacted in the diagnostics module before they reach

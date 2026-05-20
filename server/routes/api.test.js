@@ -1023,3 +1023,80 @@ describe('Local-network discovery routes', () => {
     assert.strictEqual(body.skippedCount, 1);
   });
 });
+
+
+// ── B1 — Registry browse + preview routes ────────────────────────────────
+// Verify the read-only registry surface returns local manifests, surfaces
+// the validation summary, gates the preview-install path on schema
+// validity, and 404s unknown ids.
+
+describe('Registry routes (B1)', () => {
+  let serverR;
+  let baseUrlR;
+
+  before(async () => {
+    initDB(':memory:');
+    const app = express();
+    app.use(express.json());
+    app.use('/api', apiRouter);
+    await new Promise((resolve) => {
+      serverR = app.listen(0, () => {
+        baseUrlR = `http://localhost:${serverR.address().port}/api`;
+        resolve();
+      });
+    });
+  });
+
+  after(() => {
+    if (serverR) serverR.close();
+    closeDB();
+  });
+
+  test('GET /api/registry/local returns summary + list', async () => {
+    const res = await fetch(`${baseUrlR}/registry/local`);
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.ok(body.summary);
+    assert.ok(body.summary.total >= 7);
+    assert.strictEqual(body.summary.invalid, 0);
+    assert.ok(Array.isArray(body.manifests));
+    assert.ok(body.manifests.some((m) => m.id === 'web-recon'));
+    // List response strips full manifest content (kept light for the UI)
+    for (const m of body.manifests) {
+      assert.ok(m.id);
+      assert.ok(m.version);
+      assert.strictEqual(typeof m.valid, 'boolean');
+      assert.strictEqual(m.errorCount, 0);
+    }
+  });
+
+  test('GET /api/registry/local/:id returns the full record', async () => {
+    const res = await fetch(`${baseUrlR}/registry/local/web-recon`);
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.strictEqual(body.id, 'web-recon');
+    assert.strictEqual(body.valid, true);
+    assert.ok(body.manifest);
+    assert.strictEqual(body.manifest.identity.id, 'web-recon');
+  });
+
+  test('GET /api/registry/local/:id returns 404 for unknown id', async () => {
+    const res = await fetch(`${baseUrlR}/registry/local/does-not-exist`);
+    assert.strictEqual(res.status, 404);
+  });
+
+  test('POST /api/registry/local/:id/preview-install returns plan', async () => {
+    const res = await fetch(`${baseUrlR}/registry/local/web-recon/preview-install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.strictEqual(body.id, 'web-recon');
+    assert.ok(body.plan);
+    assert.ok(Array.isArray(body.plan.recipes));
+    assert.ok(Array.isArray(body.riskClasses));
+    assert.match(body.note, /No execution/i);
+  });
+});
