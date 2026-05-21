@@ -678,10 +678,15 @@ Artifacts sandboxed inline preview. Also landed: shared `AppShell`
 `Button loading`, `ListRow`, `motion-reduce` guards, and `--ok-2` /
 `--warn-2` status tokens. `npm run test:frontend` 143/143; tsc clean.
 
-**The structural deletion below is still NOT done** — the legacy
-`frontend/js/` modules + CSS sections remain as the `git revert` safety
-net until the React surfaces are browser-verified. That deletion is the
-remaining A8.5b commit.
+**A8.5b structural deletion — DONE (2026-05-21).** Chat + Registry (the
+last two unmigrated surfaces) were ported to React, then the entire
+legacy bundle was deleted: `frontend/index.html`, all of `frontend/js/`
+(51 files incl. `sec-ui-kit.test.js`), and `frontend/css/styles.css`
+(7944 lines → 0; the ≤4200 acceptance bar is moot). React is now served
+at root (vite base `/`), `server/index.js` serves `dist/react` with an
+SPA catch-all, `REACT_PAGES` + `/react/*` previews are gone, and
+`npm run dev` / `npm run build` / the Dockerfile all target React. See
+the 2026-05-21 DEVLOG entry.
 
 #### A8.5b residual deferrals (follow-ups, non-blocking)
 

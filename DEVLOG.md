@@ -1,5 +1,26 @@
 # PHANTOM DEVLOG
 
+## 2026-05-21 — A8.5b legacy removal: React is the only UI
+
+Completed A8.5b. The two remaining unmigrated surfaces were ported to React, then the entire legacy vanilla bundle was deleted and the dev/build pipeline cut over to React.
+
+**Chat → React.** `frontend/src/pages/Chat.tsx` + `lib/chat-socket.ts` (a `useChatSocket` hook speaking the exact `/ws` protocol from `server/index.js` — `conversation_created`/`response_start`/`thinking`/`chunk`/`tool_call`/`tool_progress`/`tool_result`/`approval_request`/`artifact_created`/`title_updated`/`response_end`/`error`/`pong`, outbound `chat`/`stop`/`approval_response`/`ping`, with the session-isolation guard). Inline approval cards (ask/allow-once, batch, keyboard y/n). Markdown via `lib/chat-markdown.ts` reusing `marked` + a slimmed `highlight.js` core (curated grammars, not the ~190-language full build) + `DOMPurify`. Chat is `React.lazy`-loaded so its markdown stack ships as a ~45 KB gz chunk loaded on demand; the main bundle stays ~138 KB gz.
+
+**Registry → React.** `frontend/src/pages/Registry.tsx` + `lib/registry.ts` mirroring the Campaigns list + detail-Sheet pattern, off `/api/registry/local[/:id][/preview-install]`. Validity + trust pills (signed only when declared digest == on-disk digest).
+
+**Legacy bundle deleted.** Removed `frontend/index.html`, all of `frontend/js/` (51 files: app/router/chat/markdown + every page module + their vm-sandbox `.test.js` + `sec-ui-kit.test.js`), and `frontend/css/styles.css` (7944 lines). Net −23.8k lines.
+
+**React served at root.** `vite.config.react.ts` base `/react/` → `/`. `server/index.js` now serves `dist/react` at root with an SPA catch-all for all non-API/ws/docs routes; the `REACT_PAGES` gate, the legacy static mount, and the `/react/*` preview handling are gone (503 if `dist/react` is unbuilt). `App.tsx` dropped the dead `/react/*` routes. AppShell nav flipped Chat + Registry to in-app `NavLink`s.
+
+**Pipeline cutover.** `package.json`: `dev` now runs the React Vite config (with `/api` + `/ws` proxies added to `vite.config.react.ts`); `build` = `build:react && build:docs`; removed `build:frontend` + `dev:react`. `Dockerfile`: `npm run build` covers react + docs. `scripts/run-tests.js` stopped walking the deleted `frontend/js`.
+
+**Validation.**
+- `npm run build:react` clean — 138 KB gz main + 45 KB gz lazy Chat chunk; assets emit at `/assets/*`.
+- `npm run test:frontend` 151/151; `npm test` (server) 391/391.
+- `npm run dev` verified serving React at root on BOTH the Vite dev server (`/`, `/dash`, `/campaigns` → 200, HMR client present) and the Express server (`/dash`, `/registry`, `/api/diagnostics` → 200, assets at `/assets/`).
+
+**Page header sizing standardized.** New `frontend/src/components/PageHeader.tsx` is the single source of truth for the eyebrow + title + description + actions row (title dialed `text-2xl` → `text-xl`); all 11 pages use it. DashHero (the "Get started" / "Finish setup" next-action card) tightened: title `text-xl` → `text-lg`, padding + accent border reduced.
+
 ## 2026-05-21 — React UI/UX audit + A8.5b parity-close + self-learning design
 
 A UI/UX/flow audit of the React bundle drove a shared-foundation commit plus the A8.5b parity-close, executed as a leader + 8-parallel-agent fleet (one agent per page, disjoint file ownership). Plus a read-only research stream that produced the self-learning design doc. `npm run test:frontend` went 117 → **143 passing**; `tsc -p tsconfig.frontend.json --noEmit` clean.
