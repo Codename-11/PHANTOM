@@ -94,13 +94,12 @@ RUN npm --prefix user-docs ci
 # ─── Source layer (changes frequently) ────────────────────────────────────────
 COPY . .
 
-# Build the SPA (vite build frontend), the VitePress docs site, AND the
-# React bundle (vite build --config vite.config.react.ts → dist/react/).
-# All three must succeed — server/index.js mounts /docs from
-# user-docs/.vitepress/dist when docs_enabled is on, and serves the
-# React bundle for any REACT_PAGES prefix when dist/react/index.html
-# exists. A8.5 cutover requires the React bundle to ship in the image.
-RUN npm run build && npm run build:react
+# Build the React SPA (→ dist/react/) and the VitePress docs site.
+# `npm run build` = build:react && build:docs. server/index.js serves the
+# React bundle at root for all non-API routes and mounts /docs from
+# user-docs/.vitepress/dist when docs_enabled is on. The legacy vanilla
+# bundle was removed in A8.5b, so dist/react/ is the only UI in the image.
+RUN npm run build
 
 # ─── Runtime ──────────────────────────────────────────────────────────────────
 # Persist SQLite + WAL/SHM on the phantom-db named volume mounted at /app/data

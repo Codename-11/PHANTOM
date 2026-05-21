@@ -10,7 +10,9 @@
 //     duplicating glob patterns three times.
 //
 // Modes:
-//   default → run every test file under server/ and frontend/js/
+//   default → run every test file under server/ (Node's test runner).
+//             The React bundle has its own runner: `npm run test:frontend`
+//             (Vitest). The legacy frontend/js suites were removed in A8.5b.
 //   --unit  → only unit + integration tests (excludes server/e2e/**)
 //   --e2e   → only the end-to-end smoke under server/e2e/**
 //   --watch → keep node --test running in watch mode (auto-reruns on save)
@@ -50,17 +52,15 @@ function walk(dir, found = []) {
 }
 
 const serverTests = walk(join(ROOT, 'server'));
-const frontendTests = walk(join(ROOT, 'frontend', 'js'));
 
 const isE2E = (path) => relative(ROOT, path).split(sep)[1] === 'e2e';
 
 let selected = [];
 if (all) {
-  selected = [...serverTests, ...frontendTests];
+  selected = [...serverTests];
 } else {
   if (wantUnit) {
     selected.push(...serverTests.filter(p => !isE2E(p)));
-    selected.push(...frontendTests);
   }
   if (wantE2E) {
     selected.push(...serverTests.filter(isE2E));
@@ -68,7 +68,7 @@ if (all) {
 }
 
 if (!selected.length) {
-  console.error('No test files matched. Looked under server/ and frontend/js/.');
+  console.error('No test files matched. Looked under server/.');
   process.exit(1);
 }
 

@@ -36,13 +36,6 @@ const ROOT = join(__dirname, '..');
 // frontend/js/ are NOT deleted in this commit so a git revert restores
 // the vanilla bundle cleanly if a regression surfaces. The CSS deletion
 // step lands in a follow-up A8.5b once parity-close commits land.
-const REACT_PAGES = new Set([
-  '/dash', '/onboarding',
-  '/campaigns', '/settings', '/scope',
-  '/runs', '/graph', '/artifacts',
-  '/approvals', '/alerts',
-  '/chat', '/registry',
-]);
 const reactDistPath = join(ROOT, 'dist', 'react');
 const reactIndexPath = join(reactDistPath, 'index.html');
 const reactBundleAvailable = existsSync(reactIndexPath);
@@ -97,45 +90,29 @@ if (docsEnabled && docsBuilt) {
   console.warn('[PHANTOM] user-docs enabled but not built. Run `npm run build:docs` to enable the /docs route.');
 }
 
-// Serve frontend
-const distPath = join(ROOT, 'frontend');
-if (existsSync(distPath)) {
-  // React bundle assets (dist/react/assets/*) ship under /react/ when the
-  // bundle exists. Mounting express.static here is a no-op when dist/react
-  // is missing, so this is safe to leave in even before `npm run build:react`
-  // has been invoked. The mount is unconditional w.r.t. REACT_PAGES because
-  // individual asset URLs are referenced by hash from the React HTML.
-  if (reactBundleAvailable) {
-    app.use('/react', express.static(reactDistPath, { fallthrough: true, maxAge: '1h' }));
-  }
-  app.use(express.static(distPath));
-  app.get('*', (req, res) => {
-    // Excluded prefixes: API, WebSocket upgrade, and the docs route (if
-    // mounted above — express.static handles it; the catch-all just
-    // shouldn't intercept what's already served).
+// Serve the React SPA — the only frontend bundle (the legacy vanilla
+// bundle was removed in A8.5b). dist/react/ is produced by
+// `npm run build:react`; assets emit at root (vite base '/'). The
+// catch-all hands the SPA shell to every non-API/ws/docs route so
+// client-side routing (/dash, /chat, …) survives a hard refresh.
+if (reactBundleAvailable) {
+  app.use(express.static(reactDistPath, { maxAge: '1h', index: false }));
+  app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/ws') || req.path.startsWith('/docs')) {
-      return;
+      return next();
     }
-    // Phase A8.1 — Any /react/* SPA route that isn't a static asset
-    // (assets/* land via the express.static mount above) hands back the
-    // React shell directly. This is the side-by-side preview surface so
-    // operators can hit /react/campaigns without REACT_PAGES being
-    // populated yet. Once a follow-up adds 'campaigns' to REACT_PAGES,
-    // the bare /campaigns path also flips over to the React bundle.
-    if (reactBundleAvailable && req.path.startsWith('/react/')) {
-      return res.sendFile(reactIndexPath);
+    return res.sendFile(reactIndexPath);
+  });
+} else {
+  // dist/react not built — fail loud instead of serving a blank page.
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/ws') || req.path.startsWith('/docs')) {
+      return next();
     }
-    // React routing: if the requested page lives in REACT_PAGES AND the
-    // React bundle has been built, hand the SPA shell to it. Otherwise
-    // fall through to the legacy vanilla bundle exactly as before.
-    if (reactBundleAvailable && REACT_PAGES.size > 0) {
-      for (const prefix of REACT_PAGES) {
-        if (req.path === prefix || req.path.startsWith(prefix + '/')) {
-          return res.sendFile(reactIndexPath);
-        }
-      }
-    }
-    res.sendFile(join(distPath, 'index.html'));
+    res
+      .status(503)
+      .type('text/plain')
+      .send('PHANTOM UI not built. Run `npm run build:react` (or `npm run build`).');
   });
 }
 

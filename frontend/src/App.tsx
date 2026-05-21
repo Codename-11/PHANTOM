@@ -43,18 +43,15 @@ function HealthCard() {
           PHANTOM SEC · React Bundle
         </p>
         <h1 className="text-2xl font-semibold text-primary mb-3">
-          PHANTOM React Bundle · Ready
+          Page not found
         </h1>
         <p className="text-sm text-muted-foreground">
-          The React + Vite + Tailwind + shadcn/ui infrastructure is wired. Visit{' '}
-          <code className="font-mono">/react/dash</code> for the migrated operations
-          surface; the legacy <code className="font-mono">/dash</code> route still
-          serves the vanilla bundle.
+          That route doesn&apos;t exist. Head back to{' '}
+          <a href="/dash" className="text-[var(--cy-2)] hover:underline">
+            Dash
+          </a>{' '}
+          for the operations surface.
         </p>
-        <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="inline-block w-2 h-2 rounded-full bg-primary" aria-hidden="true" />
-          <span>Phase A8.4 · Dash · Onboarding · Approvals · Alerts</span>
-        </div>
       </section>
     </main>
   );
@@ -67,11 +64,10 @@ export function App() {
         <AppShell>
           <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading…</div>}>
           <Routes>
-        {/* A8.5 cutover — every migrated surface now mounts at BOTH the
-            bare path (the operator default) AND the legacy /react/* path
-            (still available for explicit preview / debugging). server
-            /index.js REACT_PAGES is populated so the bare paths hand
-            this bundle the SPA shell. */}
+        {/* React is the only frontend bundle (A8.5b removed the legacy
+            vanilla bundle). Every surface mounts at its bare canonical
+            path; server/index.js serves this SPA shell for all non-API
+            routes. */}
         {[
           ['/dash', <DashPage />],
           ['/chat', <ChatPage />],
@@ -104,37 +100,6 @@ export function App() {
           <Route path=":id" element={<AlertDetailRoute />} />
         </Route>
         <Route path="/graph/:runId" element={<GraphPage />} />
-
-        {/* Legacy /react/* preview paths — kept alive so operators can
-            compare visual + behavior side-by-side during the parity-close
-            follow-up commits. */}
-        <Route path="/react/health" element={<HealthCard />} />
-        <Route path="/react/dash" element={<DashPage />} />
-        <Route path="/react/chat" element={<ChatPage />} />
-        <Route path="/react/registry" element={<RegistryPage />} />
-        <Route path="/react/onboarding" element={<OnboardingPage />} />
-        <Route path="/react/approvals" element={<ApprovalsPage />}>
-          <Route path=":id" element={<ApprovalDetailRoute />} />
-        </Route>
-        <Route path="/react/alerts" element={<AlertsPage />}>
-          <Route path=":id" element={<AlertDetailRoute />} />
-        </Route>
-        <Route path="/react/campaigns" element={<CampaignsPage />}>
-          <Route path="new" element={<CampaignCreateRoute />} />
-          <Route path=":id" element={<CampaignDetailRoute />} />
-        </Route>
-        <Route path="/react/settings" element={<SettingsPage />} />
-        <Route path="/react/scope" element={<ScopesPage />}>
-          <Route path="new" element={<ScopeCreateRoute />} />
-          <Route path=":id" element={<ScopeDetailRoute />} />
-        </Route>
-        <Route path="/react/runs" element={<RunsPage />}>
-          <Route path=":id" element={<RunDetailRoute />} />
-        </Route>
-        <Route path="/react/graph" element={<GraphPage />} />
-        <Route path="/react/graph/:runId" element={<GraphPage />} />
-        <Route path="/react/artifacts" element={<ArtifactsPage />} />
-        <Route path="/react" element={<Navigate to="/dash" replace />} />
 
             <Route path="*" element={<HealthCard />} />
           </Routes>

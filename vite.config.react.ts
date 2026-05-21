@@ -24,7 +24,10 @@ export default defineConfig(({ mode }) => {
   return {
   plugins: [react()],
   root: resolve(__dirname, 'frontend/src'),
-  base: '/react/',
+  // React is the canonical (only) UI now — served at root, not under a
+  // /react/ preview prefix. Assets emit to /assets/*; server/index.js
+  // serves dist/react at root with an SPA catch-all.
+  base: '/',
   resolve: {
     alias: {
       '@': resolve(__dirname, 'frontend/src'),
