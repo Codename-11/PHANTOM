@@ -23,6 +23,10 @@ function buildQuery(opts: ListOpts): string {
   return params.toString();
 }
 
+// Cap the inline text preview so a huge jsonl/markdown dump can't blow up
+// the DOM (mirrors the legacy 20k-char clamp in artifacts-page.js).
+export const TEXT_PREVIEW_LIMIT = 20000;
+
 export const artifactsApi = {
   list: async (opts: ListOpts = {}): Promise<ArtifactRecord[]> => {
     const data = await apiFetch<ArtifactRecord[]>(`/api/artifacts?${buildQuery(opts)}`);
@@ -32,6 +36,17 @@ export const artifactsApi = {
     const data = await apiFetch<ArtifactRecord>(`/api/artifacts/${encodeURIComponent(id)}`);
     if (!data) throw new Error('artifact not found');
     return data;
+  },
+  // Fetches the raw artifact body for the inline text/markdown/json preview.
+  // contentUrl serves the file with its own mime type; apiFetch returns the
+  // raw string for any non-JSON body, so we get text back either way. The
+  // result is clamped to TEXT_PREVIEW_LIMIT chars before it hits the DOM.
+  content: async (contentUrl: string): Promise<string> => {
+    const data = await apiFetch<unknown>(contentUrl);
+    const text = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+    return text.length > TEXT_PREVIEW_LIMIT
+      ? `${text.slice(0, TEXT_PREVIEW_LIMIT)}\n… truncated …`
+      : text;
   },
 };
 
@@ -48,6 +63,34 @@ export function useArtifact(id: string | null | undefined) {
     queryFn: () => artifactsApi.get(id!),
     enabled: Boolean(id),
   });
+}
+
+// Fetches the raw text body for an artifact so it can be shown in a <pre>.
+// Only enabled when `enabled` is true (i.e. the artifact previews as text)
+// so we don't pull binary/iframe content into memory as a string.
+export function useArtifactText(contentUrl: string | null | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ['artifacts', 'content', contentUrl],
+    queryFn: () => artifactsApi.content(contentUrl!),
+    enabled: Boolean(contentUrl) && enabled,
+  });
+}
+
+// ── Preview-kind classifier ───────────────────────────────────────────
+//
+// Decides how an artifact renders in the inline preview pane. `iframe`
+// (sandboxed) for html, `image` for image/* mime types, otherwise `text`
+// — text/markdown/json/jsonl all fetch the body and show it in a <pre>.
+// Anything we can't confidently render inline falls through to `text`,
+// which degrades to an Open-in-tab prompt if the fetch fails.
+export type ArtifactPreviewKind = 'iframe' | 'image' | 'text';
+
+export function previewKind(artifact: ArtifactRecord): ArtifactPreviewKind {
+  const type = (artifact.type || '').toLowerCase();
+  const mime = (artifact.mimeType || '').toLowerCase();
+  if (type === 'html' || mime === 'text/html' || mime === 'application/pdf') return 'iframe';
+  if (mime.startsWith('image/')) return 'image';
+  return 'text';
 }
 
 // ── Filter bucket → underlying `type` predicate ───────────────────────

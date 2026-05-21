@@ -1,6 +1,6 @@
 // ArtifactsPage — list renders + filter chip restricts visible rows.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { screen, waitFor, act, fireEvent } from '@testing-library/react';
+import { screen, waitFor, act, fireEvent, within } from '@testing-library/react';
 
 import { renderWithProviders } from '@/test/test-utils';
 import ArtifactsPage from './Artifacts';
@@ -66,9 +66,9 @@ describe('ArtifactsPage', () => {
     });
     expect(screen.getByText('Pentest report')).toBeInTheDocument();
     expect(screen.getByText('Evidence bundle')).toBeInTheDocument();
-    // Run id link points at the detail route on /react/runs/:id.
+    // Run id link points at the bare detail route /runs/:id.
     const runLinks = screen.getAllByRole('link', { name: /run-aaaa/i });
-    expect(runLinks[0]).toHaveAttribute('href', '/react/runs/run-aaaa1111');
+    expect(runLinks[0]).toHaveAttribute('href', '/runs/run-aaaa1111');
     // Filter chips show counts.
     const reportsChip = screen.getByRole('button', { name: /Reports/i });
     expect(reportsChip).toHaveAttribute('data-artifact-filter', 'reports');
@@ -93,7 +93,10 @@ describe('ArtifactsPage', () => {
     expect(screen.getByText('Local preview')).toBeInTheDocument();
 
     // Click "Evidence" chip — should hide the markdown + html rows.
-    const chip = screen.getByRole('button', { name: /Evidence/i });
+    // Scope by the chip's data attribute: "Evidence bundle" row titles are
+    // also buttons now (they open the preview), so a name regex collides.
+    const chipRow = screen.getByTestId('artifacts-filter-chips');
+    const chip = within(chipRow).getByRole('button', { name: /Evidence/i });
     await act(async () => {
       fireEvent.click(chip);
     });
@@ -105,7 +108,7 @@ describe('ArtifactsPage', () => {
     expect(screen.getByText('Evidence bundle')).toBeInTheDocument();
 
     // Click "Other" chip — only the html row should remain.
-    const otherChip = screen.getByRole('button', { name: /Other/i });
+    const otherChip = within(chipRow).getByRole('button', { name: /Other/i });
     await act(async () => {
       fireEvent.click(otherChip);
     });
@@ -136,6 +139,101 @@ describe('ArtifactsPage', () => {
       expect(screen.getByTestId('artifacts-empty-filtered')).toBeInTheDocument();
     });
     expect(screen.queryByText('Pentest report')).not.toBeInTheDocument();
+  });
+
+  // ── Inline preview pane (A8.5b parity-close) ────────────────────────
+  it('renders a SANDBOXED iframe when an html artifact is selected', async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse([
+        art({
+        id: 'art-html',
+        type: 'html',
+        title: 'Local preview',
+        mimeType: 'text/html',
+        contentUrl: '/api/artifacts/art-html/content',
+      }),
+      ]),
+    ) as unknown as typeof fetch;
+
+    renderWithProviders(<ArtifactsPage />, { route: '/react/artifacts' });
+
+    await waitFor(() => {
+      expect(screen.getByText('Local preview')).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('artifact-open-art-html'));
+    });
+
+    const frame = await screen.findByTestId('artifact-preview-iframe');
+    expect(frame).toHaveAttribute('src', '/api/artifacts/art-html/content');
+    // SECURITY: must be sandboxed and must NOT grant allow-same-origin.
+    const sandbox = frame.getAttribute('sandbox') || '';
+    expect(sandbox).toMatch(/allow-scripts/);
+    expect(sandbox).not.toMatch(/allow-same-origin/);
+  });
+
+  it('fetches and shows text for a markdown artifact in a <pre>', async () => {
+    const body = '# Pentest report\nfindings here';
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/content')) {
+        return new Response(body, {
+          status: 200,
+          headers: { 'content-type': 'text/markdown' },
+        });
+      }
+      return jsonResponse([
+        art({
+          id: 'art-md',
+          type: 'markdown',
+          title: 'Pentest report',
+          contentUrl: '/api/artifacts/art-md/content',
+        }),
+      ]);
+    }) as unknown as typeof fetch;
+
+    renderWithProviders(<ArtifactsPage />, { route: '/react/artifacts' });
+
+    await waitFor(() => {
+      expect(screen.getByText('Pentest report')).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('artifact-open-art-md'));
+    });
+
+    const pre = await screen.findByTestId('artifact-preview-text');
+    expect(pre).toHaveTextContent('findings here');
+    // Footer keeps the open-in-tab + download affordances.
+    expect(screen.getByRole('link', { name: /open in new tab/i })).toHaveAttribute(
+      'href',
+      '/api/artifacts/art-md/content',
+    );
+  });
+
+  it('renders an <img> for an image artifact', async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse([
+        art({
+          id: 'art-img',
+          type: 'other',
+          title: 'Graph snapshot',
+          mimeType: 'image/png',
+          contentUrl: '/api/artifacts/art-img/content',
+        }),
+      ]),
+    ) as unknown as typeof fetch;
+
+    renderWithProviders(<ArtifactsPage />, { route: '/react/artifacts' });
+
+    await waitFor(() => {
+      expect(screen.getByText('Graph snapshot')).toBeInTheDocument();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('artifact-open-art-img'));
+    });
+
+    const img = await screen.findByTestId('artifact-preview-image');
+    expect(img).toHaveAttribute('src', '/api/artifacts/art-img/content');
   });
 
   it('shows the error banner on a failed fetch', async () => {

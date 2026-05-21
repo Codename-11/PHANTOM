@@ -49,7 +49,7 @@ describe('ScopesPage', () => {
 
   it('renders the empty state when no scopes exist', async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse([])) as unknown as typeof fetch;
-    renderWithProviders(<ScopesPage />, { route: '/react/scope' });
+    renderWithProviders(<ScopesPage />, { route: '/scope' });
 
     expect(screen.getByRole('heading', { level: 1, name: /Scope/i })).toBeInTheDocument();
     await waitFor(() => {
@@ -66,7 +66,7 @@ describe('ScopesPage', () => {
       ]),
     ) as unknown as typeof fetch;
 
-    renderWithProviders(<ScopesPage />, { route: '/react/scope' });
+    renderWithProviders(<ScopesPage />, { route: '/scope' });
 
     await waitFor(() => {
       expect(screen.getByTestId('scopes-list')).toBeInTheDocument();
@@ -78,6 +78,8 @@ describe('ScopesPage', () => {
     // target counts surface in the meta line.
     expect(screen.getByText(/targets: 2/i)).toBeInTheDocument();
     expect(screen.getByText(/targets: 1/i)).toBeInTheDocument();
+    // Rows link to the bare /scope/:id path (no legacy /react prefix).
+    expect(screen.getByLabelText('Open LAB-INTERNAL')).toHaveAttribute('href', '/scope/s1');
   });
 
   it('renders the expired pill when expires_at is in the past', async () => {
@@ -86,7 +88,7 @@ describe('ScopesPage', () => {
       jsonResponse([makeScope({ expires_at: past })]),
     ) as unknown as typeof fetch;
 
-    renderWithProviders(<ScopesPage />, { route: '/react/scope' });
+    renderWithProviders(<ScopesPage />, { route: '/scope' });
     await waitFor(() => {
       expect(screen.getByText('expired')).toBeInTheDocument();
     });
@@ -97,7 +99,7 @@ describe('ScopesPage', () => {
       jsonResponse([makeScope({ archived_at: new Date().toISOString() })]),
     ) as unknown as typeof fetch;
 
-    renderWithProviders(<ScopesPage />, { route: '/react/scope' });
+    renderWithProviders(<ScopesPage />, { route: '/scope' });
     await waitFor(() => {
       expect(screen.getByText('archived')).toBeInTheDocument();
     });
@@ -108,7 +110,7 @@ describe('ScopesPage', () => {
       jsonResponse({ error: 'boom' }, 500),
     ) as unknown as typeof fetch;
 
-    renderWithProviders(<ScopesPage />, { route: '/react/scope' });
+    renderWithProviders(<ScopesPage />, { route: '/scope' });
     await waitFor(() => {
       expect(screen.getByRole('alert')).toBeInTheDocument();
     });

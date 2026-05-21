@@ -7,8 +7,14 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { makeQueryClient } from '@/test/test-utils';
+import { ToastProvider } from '@/components/ui/toast';
 import ApprovalsPage, { ApprovalDetailRoute } from './Approvals';
-import type { ApprovalRecord, InstallRequestsResponse } from '@/lib/types';
+import type {
+  ApprovalEvent,
+  ApprovalRecord,
+  ApprovalsListResponse,
+  InstallRequestsResponse,
+} from '@/lib/types';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -37,6 +43,50 @@ const explained: ApprovalRecord[] = [
   },
 ];
 
+const HISTORY_EVENTS: ApprovalEvent[] = [
+  {
+    id: 'evt-1',
+    decision: 'granted',
+    toolName: 'nmap',
+    risk: 'recon',
+    scopeId: 'scope-a',
+    scopeName: 'lab',
+    reason: 'operator approved scan',
+    operatorNote: 'Looks good for the lab range.',
+    runId: 'run-9',
+    runTitle: 'Recon sweep',
+    occurredAt: '2026-05-19T10:00:00Z',
+    args: null,
+  },
+  {
+    id: 'evt-2',
+    decision: 'denied',
+    toolName: 'hydra',
+    risk: 'online-bruteforce',
+    scopeId: 'scope-b',
+    scopeName: 'prod',
+    reason: 'no authorization',
+    operatorNote: 'Out of scope — denied.',
+    runId: 'run-10',
+    runTitle: 'Brute attempt',
+    occurredAt: '2026-05-18T08:00:00Z',
+    args: null,
+  },
+];
+
+const HISTORY: ApprovalsListResponse = {
+  count: HISTORY_EVENTS.length,
+  events: HISTORY_EVENTS,
+  explained: [],
+};
+
+const STATS = {
+  total: 5,
+  byDecision: { granted: 3, denied: 1, 'allow-once': 1, override: 0, timeout: 0 },
+  byRisk: { recon: 3, 'online-bruteforce': 2 },
+  series: [],
+};
+
 const RESP: InstallRequestsResponse = {
   requests: [
     {
@@ -61,8 +111,11 @@ function stubFetch(map: Record<string, unknown> = {}) {
       }
       return jsonResponse(map.pending ?? RESP);
     }
+    if (url.includes('/api/approvals/stats')) {
+      return jsonResponse(map.stats ?? STATS);
+    }
     if (url.includes('/api/approvals')) {
-      return jsonResponse(map.history ?? { count: 0, events: [], explained: [] });
+      return jsonResponse(map.history ?? HISTORY);
     }
     // Capture POST bodies for assertion.
     if (init?.method === 'POST') {
@@ -86,13 +139,15 @@ describe('ApprovalsPage', () => {
   function renderWithRoute(initial: string, qc: QueryClient = makeQueryClient()) {
     return render(
       <QueryClientProvider client={qc}>
-        <MemoryRouter initialEntries={[initial]}>
-          <Routes>
-            <Route path="/react/approvals" element={<ApprovalsPage />}>
-              <Route path=":id" element={<ApprovalDetailRoute />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
+        <ToastProvider>
+          <MemoryRouter initialEntries={[initial]}>
+            <Routes>
+              <Route path="/react/approvals" element={<ApprovalsPage />}>
+                <Route path=":id" element={<ApprovalDetailRoute />} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
       </QueryClientProvider>,
     );
   }
@@ -106,6 +161,45 @@ describe('ApprovalsPage', () => {
     expect(screen.getByText('packages:nmap')).toBeInTheDocument();
     // The risk + action chips render in UPPERCASE.
     expect(screen.getByText(/CREDENTIALED/)).toBeInTheDocument();
+  });
+
+  it('renders the KPI strip with decision counts + derived approve rate', async () => {
+    stubFetch();
+    renderWithRoute('/react/approvals');
+    await waitFor(() => {
+      expect(screen.getByTestId('approvals-kpi')).toBeInTheDocument();
+    });
+    // Pending tile reflects the live install queue (1 pending request).
+    expect(screen.getByTestId('approvals-kpi-pending')).toHaveTextContent('1');
+    // Granted = 3 from stats.
+    expect(screen.getByTestId('approvals-kpi-granted')).toHaveTextContent('3');
+    // Denied = 1.
+    expect(screen.getByTestId('approvals-kpi-denied')).toHaveTextContent('1');
+    // Approve rate = (granted + allow-once) / total = (3 + 1) / 5 = 80%.
+    expect(screen.getByTestId('approvals-kpi-rate')).toHaveTextContent('80%');
+  });
+
+  it('renders the decision-history feed of past decisions', async () => {
+    stubFetch();
+    renderWithRoute('/react/approvals');
+    await waitFor(() => {
+      expect(screen.getByTestId('approvals-history-list')).toBeInTheDocument();
+    });
+    const rows = screen.getAllByTestId('approvals-history-row');
+    expect(rows.length).toBe(2);
+    // Decision labels + operator notes render.
+    expect(screen.getByText(/APPROVED/)).toBeInTheDocument();
+    expect(screen.getByText(/DENIED/)).toBeInTheDocument();
+    expect(screen.getByText('Looks good for the lab range.')).toBeInTheDocument();
+    expect(screen.getByText('Out of scope — denied.')).toBeInTheDocument();
+  });
+
+  it('renders the history empty state when no decisions are recorded', async () => {
+    stubFetch({ history: { count: 0, events: [], explained: [] } });
+    renderWithRoute('/react/approvals');
+    await waitFor(() => {
+      expect(screen.getByTestId('approvals-history-empty')).toBeInTheDocument();
+    });
   });
 
   it('renders the empty state when there are no pending approvals', async () => {

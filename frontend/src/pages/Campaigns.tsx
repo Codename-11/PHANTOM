@@ -2,8 +2,8 @@
 // and the surrounding chrome in pages/campaigns-page.js.
 //
 // React Query owns the data; clicking a row navigates to
-// /react/campaigns/:id (which mounts CampaignDetail in a Sheet). The
-// page-header "+ New campaign" button navigates to /react/campaigns/new
+// /campaigns/:id (which mounts CampaignDetail in a Sheet). The
+// page-header "+ New campaign" button navigates to /campaigns/new
 // which mounts the CampaignCreate Dialog above the same list.
 import { Link, Outlet, useNavigate } from 'react-router-dom';
 
@@ -32,7 +32,7 @@ function CampaignRow({ campaign }: { campaign: Campaign }) {
   return (
     <li>
       <Link
-        to={`/react/campaigns/${campaign.id}`}
+        to={`/campaigns/${campaign.id}`}
         data-campaign-id={campaign.id}
         className="block rounded-md border border-border bg-card px-3.5 py-3 transition-colors hover:border-[var(--cy-2)] hover:bg-[var(--bg-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         aria-label={`Open ${campaign.title}`}
@@ -121,7 +121,7 @@ export function CampaignsPage() {
             <Button
               variant="primary"
               size="sm"
-              onClick={() => navigate('/react/campaigns/new')}
+              onClick={() => navigate('/campaigns/new')}
               data-testid="new-campaign-btn"
             >
               <span aria-hidden="true">+</span> New campaign

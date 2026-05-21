@@ -7,9 +7,22 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 
 import { renderWithProviders } from '@/test/test-utils';
+import { ToastProvider } from '@/components/ui/toast';
 import SettingsPage from './Settings';
 import { deriveProviderState } from '@/lib/settings';
 import type { AppSettings, DiagnosticsResult } from '@/lib/types';
+
+// SettingsPage now consumes useToast() on save, so every render needs a
+// ToastProvider in the tree. The shared renderWithProviders harness does
+// not include one; wrap here (page-scoped, within file ownership).
+function renderSettings(route = '/react/settings') {
+  return renderWithProviders(
+    <ToastProvider>
+      <SettingsPage />
+    </ToastProvider>,
+    { route },
+  );
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -40,12 +53,47 @@ const DIAG_OK: DiagnosticsResult = {
   generatedAt: new Date().toISOString(),
 };
 
+const PROFILES_OK = [
+  { id: 'p1', name: 'Recon-only', description: 'passive recon profile', mode: 'recon', is_default: true },
+];
+const FRAGMENTS_OK = [
+  { id: 'f1', profile_id: null, kind: 'custom', name: 'House rules', enabled: true, position: 100 },
+  { id: 'f2', profile_id: null, kind: 'policy', name: 'Legacy guard', enabled: false, position: 110 },
+];
+const SCOPES_OK = [
+  {
+    id: 's1',
+    name: 'Lab network',
+    targets: {},
+    allowed_actions: ['recon', 'network-scan'],
+    blocked_actions: ['exploit'],
+    action_modes: null,
+    expires_at: null,
+    archived_at: null,
+    created_at: new Date().toISOString(),
+    updated_at: null,
+    rules_of_engagement: '',
+    credential_refs: [],
+    notes: '',
+  },
+];
+const MCP_OK = [
+  { id: 'm1', name: 'fs-bridge', transport: 'stdio', command: 'mcp-fs', args: null, url: null },
+];
+const SKILLS_OK = [{ name: 'osint', description: 'open-source recon', files: ['skill.json', 'run.py'] }];
+
 function stubFetch(map: Record<string, unknown> = {}) {
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/api/settings')) return jsonResponse(map.settings ?? SETTINGS_OK);
+    // Order matters — match the more specific /api/settings? branches first.
     if (url.includes('/api/diagnostics')) return jsonResponse(map.diagnostics ?? DIAG_OK);
+    if (url.includes('/api/prompts/profiles')) return jsonResponse(map.profiles ?? PROFILES_OK);
+    if (url.includes('/api/prompts/fragments')) return jsonResponse(map.fragments ?? FRAGMENTS_OK);
+    if (url.includes('/api/scopes')) return jsonResponse(map.scopes ?? SCOPES_OK);
+    if (url.includes('/api/mcp/servers')) return jsonResponse(map.mcp ?? MCP_OK);
+    if (url.includes('/api/skills')) return jsonResponse(map.skills ?? SKILLS_OK);
     if (url.includes('/api/toolpacks')) return jsonResponse(map.toolpacks ?? []);
+    if (url.includes('/api/settings')) return jsonResponse(map.settings ?? SETTINGS_OK);
     return jsonResponse({}, 404);
   }) as unknown as typeof fetch;
 }
@@ -63,7 +111,7 @@ describe('SettingsPage', () => {
 
   it('renders the heading + provider state pill once settings load', async () => {
     stubFetch();
-    renderWithProviders(<SettingsPage />, { route: '/react/settings' });
+    renderSettings();
 
     expect(screen.getByRole('heading', { level: 1, name: /Settings/i })).toBeInTheDocument();
 
@@ -74,7 +122,7 @@ describe('SettingsPage', () => {
 
   it('renders the full tab strip with the canonical eight tabs', async () => {
     stubFetch();
-    renderWithProviders(<SettingsPage />, { route: '/react/settings' });
+    renderSettings();
 
     // Wait for the tabs container to mount.
     await waitFor(() => {
@@ -102,7 +150,7 @@ describe('SettingsPage', () => {
 
   it('renders the provider editor for the default tab', async () => {
     stubFetch();
-    renderWithProviders(<SettingsPage />, { route: '/react/settings' });
+    renderSettings();
 
     // Models is the default selected tab — the provider editor sits
     // inside its content panel and should mount on first paint.
@@ -118,7 +166,7 @@ describe('SettingsPage', () => {
     // most reliable way to toggle in jsdom. We focus the Diagnostics tab
     // and press Enter; Radix's keydown handler picks it up.
     stubFetch();
-    renderWithProviders(<SettingsPage />, { route: '/react/settings' });
+    renderSettings();
 
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: /Diagnostics/i })).toBeInTheDocument();
@@ -150,7 +198,7 @@ describe('SettingsPage', () => {
       return jsonResponse({}, 404);
     }) as unknown as typeof fetch;
 
-    renderWithProviders(<SettingsPage />, { route: '/react/settings' });
+    renderSettings();
     await waitFor(() => {
       expect(screen.getByTestId('settings-provider-form')).toBeInTheDocument();
     });
@@ -163,6 +211,65 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(screen.getByRole('alert')).toHaveTextContent(/provider unknown/i);
     });
+  });
+
+  // ── Newly-filled placeholder tabs (A8.5b parity-close) ────────────────
+  // Each tab switch mirrors the Diagnostics-tab pattern (focus + Enter +
+  // click fallback) since Radix tabs use pointer/keyboard events in jsdom.
+  async function activateTab(name: RegExp) {
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name })).toBeInTheDocument();
+    });
+    const tab = screen.getByRole('tab', { name });
+    tab.focus();
+    fireEvent.keyDown(tab, { key: 'Enter' });
+    fireEvent.keyUp(tab, { key: 'Enter' });
+    fireEvent.click(tab);
+    await waitFor(() => {
+      expect(tab).toHaveAttribute('aria-selected', 'true');
+    });
+  }
+
+  it('renders real prompt profiles + fragments on the Prompts tab', async () => {
+    stubFetch();
+    renderSettings();
+    await activateTab(/Prompts/i);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('prompts-panel')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('prompts-profiles-list')).toHaveTextContent('Recon-only');
+    const fragments = screen.getByTestId('prompts-fragments-list');
+    expect(fragments).toHaveTextContent('House rules');
+    expect(fragments).toHaveTextContent('Legacy guard');
+  });
+
+  it('renders configured scopes with allow/block posture on the Security tab', async () => {
+    stubFetch();
+    renderSettings();
+    await activateTab(/Security/i);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('security-panel')).toBeInTheDocument();
+    });
+    const list = screen.getByTestId('scopes-list');
+    expect(list).toHaveTextContent('Lab network');
+    expect(list).toHaveTextContent('+recon');
+    expect(list).toHaveTextContent('exploit');
+    // The deep link now uses a bare path, not /react/scope.
+    expect(screen.getByTestId('settings-open-scope')).toHaveAttribute('href', '/scope');
+  });
+
+  it('renders toolpacks, MCP servers, and skills on the Tools tab', async () => {
+    stubFetch();
+    renderSettings();
+    await activateTab(/Tools/i);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tools-panel')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('mcp-list')).toHaveTextContent('fs-bridge');
+    expect(screen.getByTestId('skills-list')).toHaveTextContent('osint');
   });
 });
 

@@ -3,18 +3,27 @@
 // server/approvals/explain.js, with raw JSON tucked inside a
 // <details> disclosure.
 //
+// A8.5b parity-close: ports the two features the React surface used to
+// defer to the legacy bundle —
+//   - KPI strip (ApprovalsKpiStrip) — decision counts from
+//     /api/approvals/stats.
+//   - Decision-history feed (ApprovalsHistory) — past approve/deny
+//     decisions from the /api/approvals events list. There is no
+//     dedicated history endpoint; the feed renders the audit events.
+//
 // Mutations:
 //   - Approve install   → POST /api/installer/requests/:id/approve
 //   - Deny install      → POST /api/installer/requests/:id/cancel
 //                         (denial_reason required for high|crit risk)
 //
-// The legacy /approvals page stays untouched until A8.5; this React
-// preview lives at /react/approvals as a side-by-side surface.
+// Served at bare /approvals + /approvals/:id (A8.5 cutover).
 
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useNavigate, useParams } from 'react-router-dom';
 
 import { ApprovalCard } from '@/components/ApprovalCard';
+import { ApprovalsHistory } from '@/components/ApprovalsHistory';
+import { ApprovalsKpiStrip } from '@/components/ApprovalsKpiStrip';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -33,6 +42,7 @@ import {
 } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
+import { useToast } from '@/components/ui/toast';
 import {
   requiresDenialReason,
   useApprovalAction,
@@ -61,9 +71,8 @@ function ApprovalsEmpty() {
         No pending approvals
       </p>
       <p className="text-[13px] text-[var(--fg-3)]">
-        High-risk actions land here for operator review. The Dash policy card and
-        the legacy <code className="font-mono">/approvals</code> route also surface the
-        full decision history.
+        High-risk actions land here for operator review. Past decisions are listed
+        in the decision-history feed below.
       </p>
     </div>
   );
@@ -73,6 +82,8 @@ export function ApprovalsPage() {
   const navigate = useNavigate();
   const { data, isLoading, isError, error, refetch, isFetching } = useApprovals();
   const list = data?.pending ?? [];
+  const stats = data?.stats ?? { total: 0, byDecision: {}, byRisk: {}, series: [] };
+  const historyEvents = data?.history?.events ?? [];
 
   return (
     <main className="min-h-screen bg-background text-foreground p-6 font-sans">
@@ -102,6 +113,10 @@ export function ApprovalsPage() {
           </div>
         </header>
 
+        {!isLoading && !isError ? (
+          <ApprovalsKpiStrip stats={stats} pendingCount={list.length} />
+        ) : null}
+
         <section aria-label="Approval queue" className="py-4">
           {isLoading ? (
             <ApprovalsListSkeleton />
@@ -123,7 +138,7 @@ export function ApprovalsPage() {
                 <li key={a.id}>
                   <ApprovalCard
                     approval={a}
-                    onClick={() => navigate(`/react/approvals/${a.id}`)}
+                    onClick={() => navigate(`/approvals/${a.id}`)}
                   />
                 </li>
               ))}
@@ -131,13 +146,15 @@ export function ApprovalsPage() {
           )}
         </section>
 
+        {!isLoading && !isError ? <ApprovalsHistory events={historyEvents} /> : null}
+
         <Outlet />
       </div>
     </main>
   );
 }
 
-// ── Detail Sheet (mounted at /react/approvals/:id) ────────────────────
+// ── Detail Sheet (mounted at /approvals/:id) ──────────────────────────
 
 function DetailSkeleton() {
   return (
@@ -198,7 +215,8 @@ function DenyDialog({ open, approval, onCancel, onConfirm, submitting }: DenyDia
           <Button
             variant="destructive"
             size="sm"
-            disabled={submitting || !canSubmit}
+            loading={submitting}
+            disabled={!canSubmit}
             onClick={() => void onConfirm(note.trim())}
             data-testid="deny-confirm-btn"
           >
@@ -216,12 +234,13 @@ export function ApprovalDetailRoute() {
   const [open, setOpen] = useState(true);
   const [denyOpen, setDenyOpen] = useState(false);
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const { toast } = useToast();
 
   const { data: approval, isLoading, isError, error } = useApprovalDetail(id);
   const { approve, deny } = useApprovalAction(id);
 
   useEffect(() => {
-    if (!open) navigate('/react/approvals', { replace: true });
+    if (!open) navigate('/approvals', { replace: true });
   }, [open, navigate]);
 
   async function handleApprove() {
@@ -229,9 +248,12 @@ export function ApprovalDetailRoute() {
     try {
       await approve.mutateAsync();
       setFeedback({ kind: 'ok', text: '✓ Install approved.' });
+      toast({ title: 'Install approved', description: 'Install commands are running.', variant: 'success' });
       setTimeout(() => setOpen(false), 600);
     } catch (err) {
-      setFeedback({ kind: 'err', text: `✗ ${(err as Error).message}` });
+      const text = (err as Error).message;
+      setFeedback({ kind: 'err', text: `✗ ${text}` });
+      toast({ title: 'Approve failed', description: text, variant: 'error' });
     }
   }
 
@@ -240,10 +262,13 @@ export function ApprovalDetailRoute() {
     try {
       await deny.mutateAsync(reason);
       setFeedback({ kind: 'ok', text: '✓ Denied.' });
+      toast({ title: 'Approval denied', variant: 'success' });
       setDenyOpen(false);
       setTimeout(() => setOpen(false), 600);
     } catch (err) {
-      setFeedback({ kind: 'err', text: `✗ ${(err as Error).message}` });
+      const text = (err as Error).message;
+      setFeedback({ kind: 'err', text: `✗ ${text}` });
+      toast({ title: 'Deny failed', description: text, variant: 'error' });
     }
   }
 
@@ -260,7 +285,7 @@ export function ApprovalDetailRoute() {
             </SheetDescription>
             <div className="mt-2">
               <Button variant="ghost" size="sm" asChild>
-                <Link to="/react/approvals">Back to list</Link>
+                <Link to="/approvals">Back to list</Link>
               </Button>
             </div>
           </SheetHeader>
@@ -284,7 +309,7 @@ export function ApprovalDetailRoute() {
                   role="status"
                   className={
                     feedback.kind === 'ok'
-                      ? 'text-xs text-[#66c293]'
+                      ? 'text-xs text-[var(--ok-2)]'
                       : 'text-xs text-destructive'
                   }
                 >
@@ -306,7 +331,8 @@ export function ApprovalDetailRoute() {
                     variant="primary"
                     size="sm"
                     onClick={() => void handleApprove()}
-                    disabled={approve.isPending || deny.isPending}
+                    loading={approve.isPending}
+                    disabled={deny.isPending}
                     data-testid="approval-approve-btn"
                   >
                     {approve.isPending ? 'Approving…' : 'Approve & install'}

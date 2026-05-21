@@ -7,16 +7,17 @@
 //   - PATCH /api/findings/:id/triage with { triageStatus, dismissalNote }
 //   - HTTP 400 + code dismissal_note_required for high|crit dismissal
 //
-// The legacy /alerts page stays untouched; this React preview lives at
-// /react/alerts.
+// This page now serves the bare /alerts path (post-A8.5 cutover).
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link, Outlet, useNavigate, useParams } from 'react-router-dom';
 
+import { ListRow } from '@/components/ListRow';
 import { SeverityBadge } from '@/components/SeverityBadge';
 import { TriageRail } from '@/components/TriageRail';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Sheet,
   SheetContent,
@@ -25,7 +26,16 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Tooltip } from '@/components/ui/tooltip';
+import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
+import {
+  exportFindings,
+  useAsset,
+  type ExportFormat,
+} from '@/lib/alerts-export';
 import {
   parseFindingMeta,
   severityRank,
@@ -44,6 +54,20 @@ type SevFilter = (typeof SEV_OPTS)[number];
 
 const STATUS_OPTS = ['all', 'new', 'acknowledged', 'in_progress', 'dismissed', 'closed'] as const;
 type StatusFilter = (typeof STATUS_OPTS)[number];
+
+const VIEW_OPTS = ['queue', 'grid', 'map'] as const;
+type ViewMode = (typeof VIEW_OPTS)[number];
+
+// Derives the scope/host grouping label for a finding. Shared by the
+// scope filter chips and the clustered "Map" view.
+function scopeLabel(f: FindingRecord): string {
+  const meta = parseFindingMeta(f);
+  return (
+    (meta.scope_name as string)
+    || (meta.scopeName as string)
+    || (typeof f.assetId === 'string' ? `asset:${f.assetId.slice(0, 8)}` : '—')
+  );
+}
 
 interface FilterChipProps {
   label: string;
@@ -107,7 +131,7 @@ function AlertsEmpty() {
       </p>
       <p className="text-[13px] text-[var(--fg-3)]">
         Adjust severity / triage status above, or load demo data via{' '}
-        <Link to="/react/onboarding" className="text-[var(--cy-2)] hover:underline">
+        <Link to="/onboarding" className="text-[var(--cy-2)] hover:underline">
           onboarding
         </Link>{' '}
         to see findings populated.
@@ -127,12 +151,11 @@ function FindingRow({ finding, scope, onOpen }: FindingRowProps) {
   const target = (meta.target as string) || (meta.host as string) || '—';
   const status = finding.triage_status || (finding.status as FindingTriageStatus) || 'new';
   return (
-    <button
-      type="button"
+    <ListRow
       onClick={onOpen}
       data-finding-id={finding.id}
       data-testid="alerts-row"
-      className="w-full text-left rounded-md border border-border bg-card px-3 py-2 transition-colors hover:border-[var(--cy-2)] hover:bg-[var(--bg-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="px-3 py-2"
     >
       <div className="flex items-center gap-2">
         <SeverityBadge severity={finding.severity} />
@@ -151,16 +174,19 @@ function FindingRow({ finding, scope, onOpen }: FindingRowProps) {
         <span>scope: {scope}</span>
         <span className="ml-auto">{timeAgo(finding.first_seen_at || finding.last_seen_at)} ago</span>
       </div>
-    </button>
+    </ListRow>
   );
 }
 
 export function AlertsPage() {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [sev, setSev] = useState<SevFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   // Scope filter is derived from the loaded data; chips toggle by name.
   const [scopeFilter, setScopeFilter] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [view, setView] = useState<ViewMode>('queue');
 
   const { data, isLoading, isError, error, refetch, isFetching } = useFindings({});
   const findings = data ?? [];
@@ -171,18 +197,15 @@ export function AlertsPage() {
   const scopeOptions = useMemo(() => {
     const labels = new Set<string>();
     for (const f of findings) {
-      const meta = parseFindingMeta(f);
-      const label =
-        (meta.scope_name as string)
-        || (meta.scopeName as string)
-        || (typeof f.assetId === 'string' ? `asset:${f.assetId.slice(0, 8)}` : null);
-      if (label) labels.add(label);
+      const label = scopeLabel(f);
+      if (label && label !== '—') labels.add(label);
     }
     return Array.from(labels).slice(0, 8);
   }, [findings]);
 
   const filtered = useMemo(() => {
     const minRank = sev === 'all' ? 0 : severityRank(sev);
+    const term = search.trim().toLowerCase();
     return findings
       .filter((f) => {
         if (severityRank(f.severity) < minRank) return false;
@@ -195,13 +218,17 @@ export function AlertsPage() {
           const st = f.triage_status || f.status;
           if (st !== statusFilter) return false;
         }
-        if (scopeFilter) {
+        if (scopeFilter && scopeLabel(f) !== scopeFilter) return false;
+        if (term) {
           const meta = parseFindingMeta(f);
-          const label =
-            (meta.scope_name as string)
-            || (meta.scopeName as string)
-            || (typeof f.assetId === 'string' ? `asset:${f.assetId.slice(0, 8)}` : null);
-          if (label !== scopeFilter) return false;
+          const hay = [
+            f.id, f.title, f.description, f.assetId, f.runId,
+            meta.rule, meta.cve, meta.cwe, meta.target, meta.host, meta.detector,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          if (!hay.includes(term)) return false;
         }
         return true;
       })
@@ -213,7 +240,41 @@ export function AlertsPage() {
         const tb = b.first_seen_at ? Date.parse(b.first_seen_at) : 0;
         return tb - ta;
       });
-  }, [findings, sev, statusFilter, scopeFilter]);
+  }, [findings, sev, statusFilter, scopeFilter, search]);
+
+  // Group the filtered findings by scope/host for the clustered "Map"
+  // view — a real map lib is out of scope, so we render labelled clusters.
+  const clusters = useMemo(() => {
+    const groups = new Map<string, FindingRecord[]>();
+    for (const f of filtered) {
+      const key = scopeLabel(f);
+      const arr = groups.get(key);
+      if (arr) arr.push(f);
+      else groups.set(key, [f]);
+    }
+    return Array.from(groups.entries()).sort((a, b) => b[1].length - a[1].length);
+  }, [filtered]);
+
+  function handleExport(format: ExportFormat) {
+    try {
+      const n = exportFindings(filtered, format);
+      toast({
+        title: `Exported ${n} finding${n === 1 ? '' : 's'}`,
+        description: `Downloaded as ${format.toUpperCase()}.`,
+        variant: 'success',
+      });
+    } catch (err) {
+      toast({
+        title: 'Export failed',
+        description: (err as Error)?.message ?? 'Could not build the export file.',
+        variant: 'error',
+      });
+    }
+  }
+
+  function openFinding(f: FindingRecord) {
+    navigate(`/alerts/${f.id}`);
+  }
 
   return (
     <main className="min-h-screen bg-background text-foreground p-6 font-sans">
@@ -231,17 +292,78 @@ export function AlertsPage() {
             </p>
           </div>
           <div className="flex gap-2 shrink-0">
+            <Tooltip content="Download the currently-filtered findings as CSV">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleExport('csv')}
+                disabled={filtered.length === 0}
+                data-testid="export-csv-btn"
+              >
+                ↓ CSV
+              </Button>
+            </Tooltip>
+            <Tooltip content="Download the currently-filtered findings as JSON">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleExport('json')}
+                disabled={filtered.length === 0}
+                data-testid="export-json-btn"
+              >
+                ↓ JSON
+              </Button>
+            </Tooltip>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => refetch()}
-              disabled={isFetching}
+              loading={isFetching}
               data-testid="refresh-alerts-btn"
             >
               ↻ Refresh
             </Button>
           </div>
         </header>
+
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <Input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search findings — title, id, host, CVE…"
+            aria-label="Search findings"
+            data-testid="alerts-search"
+            className="max-w-md"
+          />
+          <div className="ml-auto flex items-center gap-2">
+            <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted-foreground">
+              View:
+            </span>
+            <ToggleGroup
+              type="single"
+              size="sm"
+              value={view}
+              onValueChange={(v) => {
+                if (v) setView(v as ViewMode);
+              }}
+              data-testid="alerts-view-toggle"
+              aria-label="Findings view mode"
+            >
+              {VIEW_OPTS.map((v) => (
+                <ToggleGroupItem
+                  key={v}
+                  value={v}
+                  aria-label={`${v} view`}
+                  data-testid={`alerts-view-${v}`}
+                  className="capitalize"
+                >
+                  {v}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          </div>
+        </div>
 
         <section
           aria-label="Filters"
@@ -308,27 +430,48 @@ export function AlertsPage() {
             </div>
           ) : filtered.length === 0 ? (
             <AlertsEmpty />
+          ) : view === 'map' ? (
+            <div className="flex flex-col gap-3" data-testid="alerts-map">
+              {clusters.map(([label, rows]) => (
+                <section
+                  key={label}
+                  className="rounded-md border border-border bg-[var(--bg-1)] p-2"
+                  data-testid="alerts-cluster"
+                >
+                  <header className="flex items-center gap-2 px-1 pb-2">
+                    <span className="font-mono text-[11px] uppercase tracking-[0.06em] text-foreground">
+                      {label}
+                    </span>
+                    <Badge variant="outline" className="text-[10px]">
+                      {rows.length}
+                    </Badge>
+                  </header>
+                  <ul className="flex flex-col gap-1.5 list-none m-0 p-0">
+                    {rows.map((f) => (
+                      <li key={f.id}>
+                        <FindingRow finding={f} scope={label} onOpen={() => openFinding(f)} />
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
           ) : (
             <ul
-              className="flex flex-col gap-1.5 list-none m-0 p-0"
+              className={cn(
+                'list-none m-0 p-0',
+                view === 'grid'
+                  ? 'grid grid-cols-1 gap-1.5 sm:grid-cols-2 xl:grid-cols-3'
+                  : 'flex flex-col gap-1.5',
+              )}
               data-testid="alerts-list"
+              data-view={view}
             >
-              {filtered.map((f) => {
-                const meta = parseFindingMeta(f);
-                const scope =
-                  (meta.scope_name as string)
-                  || (meta.scopeName as string)
-                  || (typeof f.assetId === 'string' ? `asset:${f.assetId.slice(0, 8)}` : '—');
-                return (
-                  <li key={f.id}>
-                    <FindingRow
-                      finding={f}
-                      scope={scope}
-                      onOpen={() => navigate(`/react/alerts/${f.id}`)}
-                    />
-                  </li>
-                );
-              })}
+              {filtered.map((f) => (
+                <li key={f.id}>
+                  <FindingRow finding={f} scope={scopeLabel(f)} onOpen={() => openFinding(f)} />
+                </li>
+              ))}
             </ul>
           )}
         </section>
@@ -351,10 +494,67 @@ function DetailSkeleton() {
   );
 }
 
+// Asset tab — lazy-loads GET /api/assets/:id only once selected. The
+// `useAsset` query stays disabled until `enabled` flips true (this
+// component only mounts when the Asset tab is active), so we never fetch
+// asset detail for findings the operator never drills into.
+function AssetTab({ assetId }: { assetId: string | null }) {
+  const { data: asset, isLoading, isError, error } = useAsset(assetId, true);
+
+  if (!assetId) {
+    return (
+      <p className="text-sm text-muted-foreground" data-testid="alert-asset-empty">
+        No asset linked to this finding.
+      </p>
+    );
+  }
+  if (isLoading) {
+    return (
+      <div className="space-y-2" data-testid="alert-asset-loading">
+        <Skeleton className="h-4 w-40" />
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-4 w-2/3" />
+      </div>
+    );
+  }
+  if (isError || !asset) {
+    return (
+      <p className="text-sm text-destructive" data-testid="alert-asset-error">
+        Failed to load asset: {(error as Error)?.message ?? 'unknown error'}
+      </p>
+    );
+  }
+
+  const rows: Array<[string, string]> = [
+    ['name', String(asset.name || asset.identifier || '—')],
+    ['type', String(asset.type || '—')],
+    ['address', String(asset.address || asset.target || '—')],
+    ['criticality', String(asset.criticality || '—')],
+    ['environment', String(asset.environment || '—')],
+    ['scope', String(asset.scope_id || asset.scopeId || '—')],
+  ];
+  return (
+    <dl
+      className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1.5 text-[12px]"
+      data-testid="alert-asset-card"
+    >
+      {rows.map(([k, v]) => (
+        <Fragment key={k}>
+          <dt className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted-foreground self-center">
+            {k}
+          </dt>
+          <dd className="font-mono text-[11px] text-foreground break-words">{v}</dd>
+        </Fragment>
+      ))}
+    </dl>
+  );
+}
+
 export function AlertDetailRoute() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [open, setOpen] = useState(true);
+  const [tab, setTab] = useState<'detail' | 'asset'>('detail');
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   // Read the cached list and find by id. /api/findings/:id isn't a
@@ -365,7 +565,7 @@ export function AlertDetailRoute() {
   const triage = useTriage(id);
 
   useEffect(() => {
-    if (!open) navigate('/react/alerts', { replace: true });
+    if (!open) navigate('/alerts', { replace: true });
   }, [open, navigate]);
 
   async function handleTriage(triageStatus: FindingTriageStatus, dismissalNote: string | null) {
@@ -418,7 +618,24 @@ export function AlertDetailRoute() {
               </SheetDescription>
             </SheetHeader>
 
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+            <Tabs
+              value={tab}
+              onValueChange={(v) => setTab(v as 'detail' | 'asset')}
+              className="flex-1 flex flex-col min-h-0"
+            >
+              <TabsList className="shrink-0" data-testid="alert-detail-tabs">
+                <TabsTrigger value="detail" data-testid="alert-tab-detail">
+                  Detail
+                </TabsTrigger>
+                <TabsTrigger value="asset" data-testid="alert-tab-asset">
+                  Asset
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent
+                value="detail"
+                className="flex-1 overflow-y-auto px-4 py-4 space-y-3"
+              >
               {finding.description ? (
                 <section>
                   <h3 className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted-foreground mb-1">
@@ -450,7 +667,7 @@ export function AlertDetailRoute() {
                   <dd className="font-mono text-[11px]">
                     {finding.runId ? (
                       <Link
-                        to={`/react/runs/${finding.runId}`}
+                        to={`/runs/${finding.runId}`}
                         className="text-[var(--cy-2)] hover:underline"
                       >
                         {finding.runId.slice(0, 12)}
@@ -479,7 +696,17 @@ export function AlertDetailRoute() {
                   </pre>
                 </details>
               ) : null}
-            </div>
+              </TabsContent>
+
+              <TabsContent
+                value="asset"
+                className="flex-1 overflow-y-auto px-4 py-4"
+              >
+                {/* Mounted only here; the AssetTab fetch fires lazily on
+                    first selection and is cached by React Query after. */}
+                {tab === 'asset' ? <AssetTab assetId={finding.assetId} /> : null}
+              </TabsContent>
+            </Tabs>
 
             <div className="border-t border-border px-4 py-3 space-y-2">
               {feedback ? (
@@ -487,7 +714,7 @@ export function AlertDetailRoute() {
                   role="status"
                   className={
                     feedback.kind === 'ok'
-                      ? 'text-xs text-[#66c293]'
+                      ? 'text-xs text-[var(--ok-2)]'
                       : 'text-xs text-destructive'
                   }
                 >

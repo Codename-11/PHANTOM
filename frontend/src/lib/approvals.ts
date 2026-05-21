@@ -25,6 +25,23 @@ export function requiresDenialReason(riskClass: string | null | undefined): bool
   return HIGH_RISK_CLASSES.has(String(riskClass || '').toLowerCase());
 }
 
+// Aggregate decision stats returned by /api/approvals/stats. Defined
+// here (not lib/types.ts) because the Approvals page is the only React
+// consumer; mirrors the server/memory/store.js getApprovalStats shape.
+export interface ApprovalStats {
+  total: number;
+  byDecision: Record<string, number>;
+  byRisk: Record<string, number>;
+  series: Array<{ day: string; count: number }>;
+}
+
+const EMPTY_STATS: ApprovalStats = {
+  total: 0,
+  byDecision: {},
+  byRisk: {},
+  series: [],
+};
+
 export interface ApprovalsBundle {
   // Pending install requests with the explained shape attached.
   pending: ApprovalRecord[];
@@ -32,6 +49,8 @@ export interface ApprovalsBundle {
   rawById: Map<string, InstallRequest>;
   // Decision history (audit) — granted/denied/timeout/etc events.
   history: ApprovalsListResponse;
+  // Aggregate decision counts powering the KPI strip.
+  stats: ApprovalStats;
 }
 
 export const approvalsApi = {
@@ -52,6 +71,10 @@ export const approvalsApi = {
     const data = await apiFetch<ApprovalsListResponse>('/api/approvals?limit=200');
     return data ?? { count: 0, events: [], explained: [] };
   },
+  stats: async (): Promise<ApprovalStats> => {
+    const data = await apiFetch<ApprovalStats>('/api/approvals/stats');
+    return data ?? EMPTY_STATS;
+  },
   approveInstall: (id: string) =>
     apiFetch(`/api/installer/requests/${encodeURIComponent(id)}/approve`, {
       method: 'POST',
@@ -70,9 +93,10 @@ export function useApprovals() {
   return useQuery({
     queryKey: ['approvals', 'pending+history'],
     queryFn: async (): Promise<ApprovalsBundle> => {
-      const [pending, history] = await Promise.all([
+      const [pending, history, stats] = await Promise.all([
         approvalsApi.pending(),
         approvalsApi.history(),
+        approvalsApi.stats(),
       ]);
       const rawById = new Map<string, InstallRequest>();
       for (const r of pending.requests) rawById.set(r.id, r);
@@ -86,6 +110,7 @@ export function useApprovals() {
         pending: explained,
         rawById,
         history,
+        stats,
       };
     },
     refetchInterval: 30_000, // keep fresh — gate decisions land out-of-band

@@ -9,6 +9,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { makeQueryClient } from '@/test/test-utils';
+import { ToastProvider } from '@/components/ui/toast';
 import AlertsPage, { AlertDetailRoute } from './Alerts';
 import type { FindingRecord } from '@/lib/types';
 
@@ -66,6 +67,11 @@ function stubFetch(map: Record<string, unknown> = {}) {
       };
       return jsonResponse(map.triage ?? { id: 'f-low', triage_status: 'acknowledged' });
     }
+    if (url.includes('/api/assets/')) {
+      return jsonResponse(
+        map.asset ?? { id: 'asset-1', name: 'app-lab-01', type: 'host', address: '10.0.0.5' },
+      );
+    }
     if (url.includes('/api/findings')) {
       return jsonResponse(map.findings ?? findings);
     }
@@ -75,15 +81,17 @@ function stubFetch(map: Record<string, unknown> = {}) {
 
 function renderRoute(initial: string, qc: QueryClient = makeQueryClient()) {
   return render(
-    <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={[initial]}>
-        <Routes>
-          <Route path="/react/alerts" element={<AlertsPage />}>
-            <Route path=":id" element={<AlertDetailRoute />} />
-          </Route>
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <ToastProvider>
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={[initial]}>
+          <Routes>
+            <Route path="/alerts" element={<AlertsPage />}>
+              <Route path=":id" element={<AlertDetailRoute />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </ToastProvider>,
   );
 }
 
@@ -100,7 +108,7 @@ describe('AlertsPage', () => {
 
   it('renders the findings list with severity badges', async () => {
     stubFetch();
-    renderRoute('/react/alerts');
+    renderRoute('/alerts');
     await waitFor(() => {
       expect(screen.getByTestId('alerts-list')).toBeInTheDocument();
     });
@@ -113,7 +121,7 @@ describe('AlertsPage', () => {
 
   it('filter chip restricts the rows to the selected severity', async () => {
     stubFetch();
-    renderRoute('/react/alerts');
+    renderRoute('/alerts');
     await waitFor(() => {
       expect(screen.getByTestId('alerts-list')).toBeInTheDocument();
     });
@@ -127,7 +135,7 @@ describe('AlertsPage', () => {
 
   it('renders the triage rail in the detail Sheet and submits Ack', async () => {
     stubFetch();
-    renderRoute('/react/alerts/f-low');
+    renderRoute('/alerts/f-low');
     // Both the AlertsPage list and the inner AlertDetailRoute depend on
     // /api/findings; wait until the detail Sheet finishes loading.
     const rail = await screen.findByTestId('triage-rail', {}, { timeout: 3000 });
@@ -146,9 +154,82 @@ describe('AlertsPage', () => {
 
   it('renders the empty state when no findings match the filter', async () => {
     stubFetch({ findings: [] });
-    renderRoute('/react/alerts');
+    renderRoute('/alerts');
     await waitFor(() => {
       expect(screen.getByTestId('alerts-empty')).toBeInTheDocument();
     });
+  });
+
+  it('search input filters the findings client-side', async () => {
+    stubFetch();
+    renderRoute('/alerts');
+    await waitFor(() => {
+      expect(screen.getByTestId('alerts-list')).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByTestId('alerts-search'), { target: { value: 'ssrf' } });
+    await waitFor(() => {
+      expect(screen.queryByText(/TLS allows TLS1\.1/)).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/SSRF on \/api\/proxy/)).toBeInTheDocument();
+  });
+
+  it('switching to grid view sets data-view=grid; map view clusters by scope', async () => {
+    stubFetch();
+    renderRoute('/alerts');
+    await waitFor(() => {
+      expect(screen.getByTestId('alerts-list')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('alerts-view-grid'));
+    await waitFor(() => {
+      expect(screen.getByTestId('alerts-list')).toHaveAttribute('data-view', 'grid');
+    });
+    fireEvent.click(screen.getByTestId('alerts-view-map'));
+    await waitFor(() => {
+      expect(screen.getByTestId('alerts-map')).toBeInTheDocument();
+    });
+    // Two distinct assets → two clusters.
+    expect(screen.getAllByTestId('alerts-cluster').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('export buttons trigger a download and a success toast', async () => {
+    const createUrl = vi.fn(() => 'blob:mock');
+    const revokeUrl = vi.fn();
+    (URL as unknown as { createObjectURL: unknown }).createObjectURL = createUrl;
+    (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = revokeUrl;
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {});
+
+    stubFetch();
+    renderRoute('/alerts');
+    await waitFor(() => {
+      expect(screen.getByTestId('alerts-list')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('export-csv-btn'));
+    await waitFor(() => {
+      expect(createUrl).toHaveBeenCalled();
+      expect(clickSpy).toHaveBeenCalled();
+      expect(screen.getByTestId('toast')).toHaveAttribute('data-variant', 'success');
+    });
+    clickSpy.mockRestore();
+  });
+
+  it('Asset tab lazily fetches asset detail only when selected', async () => {
+    stubFetch();
+    renderRoute('/alerts/f-crit');
+    await screen.findByTestId('triage-rail', {}, { timeout: 3000 });
+    // No asset fetch before the tab is opened.
+    const assetCalls = () =>
+      (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter(
+        (c) => String(c[0]).includes('/api/assets/'),
+      );
+    expect(assetCalls().length).toBe(0);
+    const assetTab = screen.getByTestId('alert-tab-asset');
+    fireEvent.mouseDown(assetTab);
+    fireEvent.click(assetTab);
+    const card = await screen.findByTestId('alert-asset-card', {}, { timeout: 3000 });
+    expect(card).toBeInTheDocument();
+    expect(assetCalls().length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('app-lab-01')).toBeInTheDocument();
   });
 });

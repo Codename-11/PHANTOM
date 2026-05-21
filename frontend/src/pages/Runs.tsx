@@ -3,15 +3,16 @@
 //
 // Layout mirrors CampaignsPage: a recents list on the left, with a
 // Sheet drawer that slides in from the right when the operator clicks
-// a row (mounted via the /react/runs/:id nested route). The legacy
-// /runs page stays untouched until A8.5 deletes the vanilla bundle.
+// a row (mounted via the /runs/:id nested route).
 //
-// Defers a few legacy responsibilities to follow-up phases:
-//   - Replay scrubber UI                — A8.5
-//   - Live SSE refresh                  — A8.5 (Sheet still re-reads on
-//                                          query invalidation)
-//   - Messages reconstruction           — A8.5 (Trace tab renders the
-//                                          raw event timeline instead)
+// A8.5b parity-close ported the two features that previously deferred to
+// legacy:
+//   - Replay scrubber UI    — RunReplayScrubber over useRunEvents (Trace tab)
+//   - LLM-enriched synthesis — RunSynthesisCard over GET /api/runs/:id/synthesis
+//
+// Still deferred:
+//   - Live SSE refresh — Sheet re-reads on query invalidation only
+//   - Messages reconstruction — Trace tab renders the raw event timeline
 
 import { useState, useEffect } from 'react';
 import { Link, Outlet, useNavigate, useParams } from 'react-router-dom';
@@ -28,8 +29,12 @@ import {
 } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useToast } from '@/components/ui/toast';
+import { ListRow } from '@/components/ListRow';
 import { RunPill } from '@/components/RunPill';
 import { TraceTimeline } from '@/components/TraceTimeline';
+import { RunReplayScrubber } from '@/components/RunReplayScrubber';
+import { RunSynthesisCard } from '@/components/RunSynthesisCard';
 import {
   useRun,
   useRunEvents,
@@ -37,6 +42,7 @@ import {
   useRuns,
   useExportEvidence,
 } from '@/lib/runs';
+import { useRunSynthesis, type SynthesisNextStep } from '@/lib/runs-synthesis';
 import type {
   ArtifactRecord,
   EvidenceBundle,
@@ -62,12 +68,12 @@ function RunRow({ run }: { run: RunRecord }) {
   const title = run.title || run.goal || 'Untitled run';
   return (
     <li>
-      <Link
-        to={`/react/runs/${run.id}`}
-        data-run-id={run.id}
-        className="block rounded-md border border-border bg-card px-3.5 py-3 transition-colors hover:border-[var(--cy-2)] hover:bg-[var(--bg-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        aria-label={`Open ${title}`}
-      >
+      <ListRow asChild>
+        <Link
+          to={`/runs/${run.id}`}
+          data-run-id={run.id}
+          aria-label={`Open ${title}`}
+        >
         <div className="flex items-center gap-2.5 mb-1">
           <RunPill status={run.status} />
           <span className="font-semibold text-foreground truncate">{title}</span>
@@ -80,7 +86,8 @@ function RunRow({ run }: { run: RunRecord }) {
           <span>{run.scope?.name || 'no scope'}</span>
           <span className="truncate">{run.id.slice(0, 8)}</span>
         </div>
-      </Link>
+        </Link>
+      </ListRow>
     </li>
   );
 }
@@ -145,7 +152,7 @@ export function RunsPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => navigate('/react/graph')}
+              onClick={() => navigate('/graph')}
               data-testid="open-graph-btn"
             >
               Open graph
@@ -184,6 +191,21 @@ export function RunsPage() {
 // ── Detail Sheet (mounted at /react/runs/:id) ─────────────────────────
 
 function SynthesisPane({ run }: { run: RunRecord }) {
+  const navigate = useNavigate();
+  const { data: synthesis, isLoading, isError, error } = useRunSynthesis(run.id);
+
+  // Next-step actions route back to existing surfaces. Anything we can't
+  // service locally falls through to the trace tab via the deep link.
+  const onAction = (action: NonNullable<SynthesisNextStep['action']>) => {
+    if (action === 'edit-scope') {
+      navigate('/scope');
+    } else if (action === 'review-trace' || action === 'review-approvals') {
+      navigate(`/graph/${run.id}`);
+    } else {
+      navigate(`/graph/${run.id}`);
+    }
+  };
+
   return (
     <div className="space-y-3 py-3">
       <dl className="grid grid-cols-[110px_1fr] gap-x-3.5 gap-y-1.5 text-[12px]">
@@ -218,20 +240,32 @@ function SynthesisPane({ run }: { run: RunRecord }) {
         </dt>
         <dd className="font-mono text-[11px] text-[var(--fg-2)]">{run.ended_at || '—'}</dd>
       </dl>
-      {run.summary ? (
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-sm text-foreground whitespace-pre-wrap break-words">
-              {run.summary}
-            </p>
-          </CardContent>
-        </Card>
+
+      {isLoading ? (
+        <div className="space-y-2" data-testid="synthesis-loading">
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-32 w-full" />
+        </div>
+      ) : isError || !synthesis ? (
+        <div className="space-y-2">
+          <div
+            role="alert"
+            className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+          >
+            Failed to build synthesis: {(error as Error)?.message ?? 'unknown error'}
+          </div>
+          {run.summary ? (
+            <Card>
+              <CardContent className="pt-4">
+                <p className="text-sm text-foreground whitespace-pre-wrap break-words">
+                  {run.summary}
+                </p>
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
       ) : (
-        <p className="text-[12px] text-muted-foreground">
-          No summary recorded yet. Legacy <code className="font-mono">/runs</code>{' '}
-          hosts the full LLM-enriched synthesis card; this preview surfaces the
-          stored summary only.
-        </p>
+        <RunSynthesisCard synthesis={synthesis} onAction={onAction} />
       )}
     </div>
   );
@@ -255,7 +289,23 @@ function TracePane({ runId }: { runId: string }) {
       </div>
     );
   }
-  return <TraceTimeline events={events ?? []} />;
+  const list = events ?? [];
+  return (
+    <div className="space-y-4">
+      <section aria-label="Replay scrubber">
+        <h3 className="mb-2 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+          Replay
+        </h3>
+        <RunReplayScrubber events={list} />
+      </section>
+      <section aria-label="Trace timeline">
+        <h3 className="mb-2 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+          Full timeline
+        </h3>
+        <TraceTimeline events={list} />
+      </section>
+    </div>
+  );
 }
 
 function ArtifactsPane({ artifacts }: { artifacts: ArtifactRecord[] }) {
@@ -306,11 +356,11 @@ function EvidenceKpi({ label, value, status }: { label: string; value: number; s
     status === 'crit'
       ? 'text-destructive'
       : status === 'warn'
-      ? 'text-[#d8b15a]'
+      ? 'text-[var(--warn-2)]'
       : status === 'high'
-      ? 'text-[#d8b15a]'
+      ? 'text-[var(--warn-2)]'
       : status === 'ok'
-      ? 'text-[#66c293]'
+      ? 'text-[var(--ok-2)]'
       : 'text-[var(--cy-1)]';
   return (
     <div className="flex flex-col items-center justify-center rounded-md border border-border bg-[var(--bg-3)] px-2 py-2.5">
@@ -360,7 +410,7 @@ interface EvidencePaneProps {
 
 function EvidencePane({ runId, bundle, isLoading, isError, error }: EvidencePaneProps) {
   const exporter = useExportEvidence(runId);
-  const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  const { toast } = useToast();
 
   if (isLoading) {
     return (
@@ -380,15 +430,19 @@ function EvidencePane({ runId, bundle, isLoading, isError, error }: EvidencePane
 
   const s = bundle.summary;
   const onExport = async (format: 'markdown' | 'json') => {
-    setFeedback(null);
     try {
       const art = await exporter.mutateAsync(format);
-      setFeedback({
-        kind: 'success',
-        text: `✓ exported ${art.title || art.id} (${art.id.slice(0, 8)})`,
+      toast({
+        title: 'Evidence exported',
+        description: `${art.title || art.id} (${art.id.slice(0, 8)})`,
+        variant: 'success',
       });
     } catch (err) {
-      setFeedback({ kind: 'error', text: `✗ ${(err as Error).message}` });
+      toast({
+        title: 'Export failed',
+        description: (err as Error).message,
+        variant: 'error',
+      });
     }
   };
 
@@ -430,7 +484,7 @@ function EvidencePane({ runId, bundle, isLoading, isError, error }: EvidencePane
             <dd className="flex flex-wrap gap-1">
               {(bundle.scope.allowed_actions || []).length
                 ? bundle.scope.allowed_actions!.map((a) => (
-                    <Badge key={a} className="border-[#66c293] text-[#66c293] bg-transparent">
+                    <Badge key={a} className="border-[var(--ok-2)] text-[var(--ok-2)] bg-transparent">
                       {a}
                     </Badge>
                   ))
@@ -516,7 +570,7 @@ function EvidencePane({ runId, bundle, isLoading, isError, error }: EvidencePane
               variant="primary"
               size="sm"
               onClick={() => void onExport('markdown')}
-              disabled={exporter.isPending}
+              loading={exporter.isPending}
               data-evid-action="export-md"
             >
               {exporter.isPending ? 'Exporting…' : 'Export Markdown'}
@@ -525,24 +579,12 @@ function EvidencePane({ runId, bundle, isLoading, isError, error }: EvidencePane
               variant="ghost"
               size="sm"
               onClick={() => void onExport('json')}
-              disabled={exporter.isPending}
+              loading={exporter.isPending}
               data-evid-action="export-json"
             >
               {exporter.isPending ? 'Exporting…' : 'Export JSON'}
             </Button>
           </div>
-          {feedback ? (
-            <div
-              role="status"
-              className={
-                feedback.kind === 'success'
-                  ? 'text-xs text-[#66c293]'
-                  : 'text-xs text-destructive'
-              }
-            >
-              {feedback.text}
-            </div>
-          ) : null}
           <p className="font-mono text-[10px] text-muted-foreground">
             generated {bundle.generatedAt} · secrets redacted
           </p>
@@ -573,7 +615,7 @@ export function RunDetailRoute() {
 
   useEffect(() => {
     if (!open) {
-      navigate('/react/runs', { replace: true });
+      navigate('/runs', { replace: true });
     }
   }, [open, navigate]);
 
@@ -607,7 +649,7 @@ export function RunDetailRoute() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => navigate(`/react/graph/${run.id}`)}
+                  onClick={() => navigate(`/graph/${run.id}`)}
                   data-run-action="graph"
                 >
                   Open graph

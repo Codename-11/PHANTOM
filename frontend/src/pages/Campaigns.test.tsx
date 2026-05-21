@@ -77,9 +77,9 @@ describe('CampaignsPage', () => {
     expect(screen.getByText(/web-recon, reporting/)).toBeInTheDocument();
     expect(screen.getByText(/runs cap: 5/)).toBeInTheDocument();
     expect(screen.getByText(/attempts\/goal: 2/)).toBeInTheDocument();
-    // Row link uses the React detail route.
+    // Row link uses the bare canonical detail route.
     const link = screen.getByRole('link', { name: /Open Map AdminPortal/i });
-    expect(link).toHaveAttribute('href', '/react/campaigns/c1');
+    expect(link).toHaveAttribute('href', '/campaigns/c1');
   });
 
   it('truncates very long objectives with an ellipsis', async () => {

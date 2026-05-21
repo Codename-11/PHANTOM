@@ -36,7 +36,7 @@ function StatusIcon({ checked }: { checked: boolean }) {
   if (checked) {
     return (
       <span
-        className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#66c293] bg-[#66c293]/15 text-[#66c293]"
+        className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[var(--ok-2)] bg-[var(--ok-2)]/15 text-[var(--ok-2)]"
         aria-label="Done"
         data-testid="onb-item-done"
       >
@@ -56,8 +56,8 @@ function StatusIcon({ checked }: { checked: boolean }) {
 }
 
 function reactRoute(route: string | undefined): string {
-  if (!route) return '/react/dash';
-  return `/react/${route}`;
+  if (!route) return '/dash';
+  return `/${route}`;
 }
 
 interface RowProps {
@@ -78,7 +78,7 @@ function ChecklistRow({ item, checked, onLoadDemo, busy }: RowProps) {
         </div>
         <div className="shrink-0">
           {checked ? (
-            <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-[#66c293]">
+            <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-[var(--ok-2)]">
               Done
             </span>
           ) : item.ctaAction === 'load-demo' ? (
@@ -198,7 +198,7 @@ export function OnboardingPage() {
               ↻ Refresh
             </Button>
             <Button variant="ghost" size="sm" asChild>
-              <Link to="/react/dash">Back to Dash</Link>
+              <Link to="/dash">Back to Dash</Link>
             </Button>
           </div>
         </header>
@@ -268,7 +268,7 @@ export function OnboardingPage() {
                     role="status"
                     className={
                       feedback.kind === 'ok'
-                        ? 'ml-auto text-xs text-[#66c293]'
+                        ? 'ml-auto text-xs text-[var(--ok-2)]'
                         : 'ml-auto text-xs text-destructive'
                     }
                   >

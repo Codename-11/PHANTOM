@@ -15,37 +15,60 @@
 import { Link } from 'react-router-dom';
 
 import { DashHero } from '@/components/DashHero';
+import { DashRiskChart } from '@/components/DashRiskChart';
+import { DashSparkline } from '@/components/DashSparkline';
 import { RunPill } from '@/components/RunPill';
 import { SeverityBadge } from '@/components/SeverityBadge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useToast } from '@/components/ui/toast';
 import {
   deriveAction,
   readContinueWhereLeftOff,
   useDashState,
   type DashState,
 } from '@/lib/dash';
+import { ratingColorVar, useDashCharts, type PostureTrend } from '@/lib/dashCharts';
 import { parseFindingMeta } from '@/lib/findings';
 import type { ApprovalEvent } from '@/lib/types';
 
 // ── KPIs ──────────────────────────────────────────────────────────────
 
+type KpiTone = 'neutral' | 'warn' | 'crit' | 'ok' | 'cy';
+
 interface KpiProps {
   label: string;
   value: number | string;
   delta?: string;
-  tone?: 'neutral' | 'warn' | 'crit' | 'ok' | 'cy';
+  tone?: KpiTone;
+  // Optional inline trend line (0..100 series, oldest → newest). Rendered
+  // bottom-right via DashSparkline. Colored to match the tile tone.
+  spark?: number[];
+  sparkColor?: string;
+  sparkLabel?: string;
 }
 
-function Kpi({ label, value, delta, tone = 'neutral' }: KpiProps) {
-  const color =
-    tone === 'crit' ? 'text-destructive'
-    : tone === 'warn' ? 'text-[#d8b15a]'
-    : tone === 'ok' ? 'text-[#66c293]'
-    : tone === 'cy' ? 'text-[var(--cy-1)]'
-    : 'text-foreground';
+const TONE_TEXT: Record<KpiTone, string> = {
+  crit: 'text-destructive',
+  warn: 'text-[var(--warn-2)]',
+  ok: 'text-[var(--ok-2)]',
+  cy: 'text-[var(--cy-1)]',
+  neutral: 'text-foreground',
+};
+
+const TONE_SPARK: Record<KpiTone, string> = {
+  crit: 'var(--danger)',
+  warn: 'var(--warn-2)',
+  ok: 'var(--ok-2)',
+  cy: 'var(--cy-1)',
+  neutral: 'var(--muted-foreground)',
+};
+
+function Kpi({ label, value, delta, tone = 'neutral', spark, sparkColor, sparkLabel }: KpiProps) {
+  const color = TONE_TEXT[tone];
+  const hasSpark = Array.isArray(spark) && spark.length > 1;
   return (
     <Card className="flex flex-col">
       <CardHeader className="pb-1">
@@ -54,16 +77,31 @@ function Kpi({ label, value, delta, tone = 'neutral' }: KpiProps) {
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-0">
-        <p className={`font-mono text-2xl leading-none ${color}`}>{value}</p>
-        {delta ? (
-          <p className="mt-1 font-mono text-[10px] text-muted-foreground">{delta}</p>
-        ) : null}
+        <div className="flex items-end justify-between gap-2">
+          <div className="min-w-0">
+            <p className={`font-mono text-2xl leading-none ${color}`}>{value}</p>
+            {delta ? (
+              <p className="mt-1 font-mono text-[10px] text-muted-foreground">{delta}</p>
+            ) : null}
+          </div>
+          {hasSpark ? (
+            <DashSparkline
+              values={spark}
+              endRatingColor={sparkColor ?? TONE_SPARK[tone]}
+              baseline={false}
+              width={64}
+              height={26}
+              className="shrink-0 opacity-90"
+              ariaLabel={sparkLabel ?? `${label} trend`}
+            />
+          ) : null}
+        </div>
       </CardContent>
     </Card>
   );
 }
 
-function KpiStrip({ state }: { state: DashState }) {
+function KpiStrip({ state, posture }: { state: DashState; posture: PostureTrend | null }) {
   const activeCampaigns = state.campaigns.filter((c) =>
     ['running', 'paused', 'needs_approval'].includes(c.status),
   ).length;
@@ -77,10 +115,17 @@ function KpiStrip({ state }: { state: DashState }) {
     return Number.isFinite(t) && t > todayCutoff;
   }).length;
 
+  // Posture score trend (per terminal run, oldest → newest) drives the
+  // inline sparkline on the Runs tile. Colored by the latest run's rating.
+  const postureScores = (posture?.sparkline ?? []).map((p) => p.score);
+  const latestRating = posture?.sparkline?.[posture.sparkline.length - 1]?.rating;
+  const postureSparkColor = ratingColorVar(latestRating);
+  const postureDelta = posture?.delta;
+
   return (
     <section
       aria-label="Dash KPIs"
-      className="grid grid-cols-2 sm:grid-cols-4 gap-3"
+      className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3"
       data-testid="dash-kpis"
     >
       <Kpi
@@ -100,6 +145,19 @@ function KpiStrip({ state }: { state: DashState }) {
         value={openFindings}
         tone={critFindings > 0 ? 'crit' : openFindings > 0 ? 'warn' : 'ok'}
         delta={critFindings ? `${critFindings} critical` : 'no critical'}
+      />
+      <Kpi
+        label="Posture trend"
+        value={posture?.current ?? '—'}
+        tone={latestRating === 'weak' ? 'crit' : latestRating === 'fair' ? 'warn' : 'ok'}
+        delta={
+          postureDelta == null
+            ? `${posture?.runsConsidered ?? 0} runs scored`
+            : `${postureDelta > 0 ? '▲' : postureDelta < 0 ? '▼' : '±'} ${Math.abs(postureDelta)} vs baseline`
+        }
+        spark={postureScores}
+        sparkColor={postureSparkColor}
+        sparkLabel={`Posture score over the last ${postureScores.length} runs`}
       />
       <Kpi
         label="Runs today"
@@ -129,7 +187,7 @@ function LiveRunsCard({ state }: { state: DashState }) {
             {recent.map((r) => (
               <li key={r.id}>
                 <Link
-                  to={`/react/runs/${r.id}`}
+                  to={`/runs/${r.id}`}
                   className="flex items-center gap-2 rounded-md border border-border bg-[var(--bg-1)] px-2.5 py-1.5 text-[12px] hover:border-[var(--cy-2)] hover:bg-[var(--bg-3)]"
                 >
                   <RunPill status={r.status} />
@@ -176,7 +234,7 @@ function AlertsCard({ state }: { state: DashState }) {
               return (
                 <li key={f.id}>
                   <Link
-                    to="/react/alerts"
+                    to="/alerts"
                     className="flex items-center gap-2 rounded-md border border-border bg-[var(--bg-1)] px-2.5 py-1.5 text-[12px] hover:border-[var(--cy-2)] hover:bg-[var(--bg-3)]"
                   >
                     <SeverityBadge severity={f.severity} />
@@ -231,7 +289,7 @@ function PolicyCard({ state }: { state: DashState }) {
         <dl className="grid grid-cols-2 gap-2 text-[12px]">
           <div className="rounded-md border border-border bg-[var(--bg-1)] px-2 py-1.5">
             <dt className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted-foreground">Granted</dt>
-            <dd className="font-mono text-base text-[#66c293]">{counts.granted}</dd>
+            <dd className="font-mono text-base text-[var(--ok-2)]">{counts.granted}</dd>
           </div>
           <div className="rounded-md border border-border bg-[var(--bg-1)] px-2 py-1.5">
             <dt className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted-foreground">Denied</dt>
@@ -243,11 +301,11 @@ function PolicyCard({ state }: { state: DashState }) {
           </div>
           <div className="rounded-md border border-border bg-[var(--bg-1)] px-2 py-1.5">
             <dt className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted-foreground">Override</dt>
-            <dd className="font-mono text-base text-[#d8b15a]">{counts.override}</dd>
+            <dd className="font-mono text-base text-[var(--warn-2)]">{counts.override}</dd>
           </div>
         </dl>
         <Button variant="ghost" size="sm" asChild className="mt-3 w-full">
-          <Link to="/react/approvals">Open approvals</Link>
+          <Link to="/approvals">Open approvals</Link>
         </Button>
       </CardContent>
     </Card>
@@ -276,6 +334,17 @@ function DashSkeleton() {
 
 export function DashPage() {
   const { data, isLoading, isError, error, refetch, isFetching } = useDashState();
+  const charts = useDashCharts();
+  const { toast } = useToast();
+
+  const handleRefresh = async () => {
+    try {
+      await Promise.all([refetch(), charts.refetch()]);
+      toast({ title: 'Dash refreshed', variant: 'success' });
+    } catch {
+      toast({ title: 'Refresh failed', variant: 'error' });
+    }
+  };
 
   return (
     <main className="min-h-screen bg-background text-foreground p-6 font-sans">
@@ -296,14 +365,14 @@ export function DashPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => refetch()}
-              disabled={isFetching}
+              onClick={handleRefresh}
+              loading={isFetching || charts.isFetching}
               data-testid="refresh-dash-btn"
             >
               ↻ Refresh
             </Button>
             <Button variant="ghost" size="sm" asChild>
-              <Link to="/react/onboarding">Onboarding</Link>
+              <Link to="/onboarding">Onboarding</Link>
             </Button>
           </div>
         </header>
@@ -329,7 +398,7 @@ export function DashPage() {
               continueCard={readContinueWhereLeftOff()}
             />
 
-            <KpiStrip state={data} />
+            <KpiStrip state={data} posture={charts.data?.posture ?? null} />
 
             <section
               id="cockpit"
@@ -342,6 +411,20 @@ export function DashPage() {
               <PolicyCard state={data} />
             </section>
 
+            <Card data-testid="dash-governance-card">
+              <CardHeader>
+                <CardTitle>Governance activity</CardTitle>
+                <CardDescription>
+                  14-day approval volume and risk-class breakdown
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <DashRiskChart
+                  stats={charts.data?.approvalStats ?? { total: 0, byDecision: {}, byRisk: {}, series: [] }}
+                />
+              </CardContent>
+            </Card>
+
             {data.checklist && !data.checklist.complete ? (
               <section
                 id="onboarding-checklist"
@@ -353,7 +436,7 @@ export function DashPage() {
                   PHANTOM setup isn't complete yet.
                 </p>
                 <Button variant="primary" size="sm" asChild className="ml-auto">
-                  <Link to="/react/onboarding">Open checklist</Link>
+                  <Link to="/onboarding">Open checklist</Link>
                 </Button>
               </section>
             ) : null}

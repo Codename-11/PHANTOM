@@ -1,6 +1,9 @@
 // Artifacts — list view of every artifact stored by PHANTOM. React
-// translation of frontend/js/pages/artifacts-page.js list view (the
-// preview pane stays on the legacy /artifacts page for now).
+// translation of frontend/js/pages/artifacts-page.js, now including the
+// inline preview pane (A8.5b parity-close): clicking a row opens a
+// right-hand Sheet that renders the artifact in-page — a sandboxed
+// <iframe> for html/pdf, an <img> for images, and a fetched <pre> for
+// text/markdown/json/jsonl. Open-in-new-tab + Download stay available.
 //
 // The filter chip row groups artifact `type` values into five
 // operator-friendly buckets (All / Reports / Evidence / Trace / Other)
@@ -13,9 +16,11 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import { ArtifactPreview } from '@/components/ArtifactPreview';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip } from '@/components/ui/tooltip';
 import { ARTIFACT_FILTERS, matchesArtifactFilter, useArtifacts } from '@/lib/artifacts';
 import type { ArtifactFilter, ArtifactRecord } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -60,7 +65,15 @@ function ArtifactsEmpty({ filtered }: { filtered: boolean }) {
   );
 }
 
-function ArtifactsTable({ artifacts }: { artifacts: ArtifactRecord[] }) {
+function ArtifactsTable({
+  artifacts,
+  selectedId,
+  onSelect,
+}: {
+  artifacts: ArtifactRecord[];
+  selectedId: string | null;
+  onSelect: (a: ArtifactRecord) => void;
+}) {
   return (
     <table className="w-full text-[12px]" data-testid="artifacts-table">
       <thead>
@@ -76,14 +89,21 @@ function ArtifactsTable({ artifacts }: { artifacts: ArtifactRecord[] }) {
         {artifacts.map((a) => (
           <tr
             key={a.id}
-            className="border-b border-border/60 hover:bg-[var(--bg-3)]"
+            className={cn(
+              'cursor-pointer border-b border-border/60 hover:bg-[var(--bg-3)]',
+              selectedId === a.id && 'bg-[var(--bg-3)]',
+            )}
             data-artifact-id={a.id}
             data-artifact-type={a.type || ''}
+            aria-selected={selectedId === a.id}
+            onClick={() => onSelect(a)}
           >
             <td className="py-2 pr-3">
-              <span className="font-mono text-[11px] text-[var(--fg-2)]">
-                {a.id.slice(0, 8)}
-              </span>
+              <Tooltip content={a.id}>
+                <span className="font-mono text-[11px] text-[var(--fg-2)]">
+                  {a.id.slice(0, 8)}
+                </span>
+              </Tooltip>
             </td>
             <td className="py-2 pr-3">
               <Badge variant="outline" className="font-mono">
@@ -91,19 +111,23 @@ function ArtifactsTable({ artifacts }: { artifacts: ArtifactRecord[] }) {
               </Badge>
             </td>
             <td className="py-2 pr-3 text-foreground">
-              <a
-                href={a.contentUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:underline"
+              <button
+                type="button"
+                data-testid={`artifact-open-${a.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelect(a);
+                }}
+                className="text-left hover:underline"
               >
                 {a.title || '(untitled)'}
-              </a>
+              </button>
             </td>
             <td className="py-2 pr-3">
               {a.runId ? (
                 <Link
-                  to={`/react/runs/${a.runId}`}
+                  to={`/runs/${a.runId}`}
+                  onClick={(e) => e.stopPropagation()}
                   className="font-mono text-[11px] text-[var(--cy-2)] hover:underline"
                 >
                   {a.runId.slice(0, 8)}
@@ -165,6 +189,7 @@ function FilterChips({
 
 export function ArtifactsPage() {
   const [filter, setFilter] = useState<ArtifactFilter>('all');
+  const [selected, setSelected] = useState<ArtifactRecord | null>(null);
   const { data, isLoading, isError, error, refetch, isFetching } = useArtifacts();
   const list = data ?? [];
 
@@ -202,8 +227,8 @@ export function ArtifactsPage() {
             <p className="text-sm text-muted-foreground max-w-2xl">
               Every report, evidence bundle, graph snapshot, and preview that PHANTOM
               generates lands here. Use the filter chips to focus on a specific
-              bucket; the legacy <code className="font-mono">/artifacts</code> page
-              still hosts the inline preview pane.
+              bucket, then select a row to preview it in-page — content renders in a
+              sandboxed pane.
             </p>
           </div>
           <div className="flex gap-2 shrink-0">
@@ -239,11 +264,23 @@ export function ArtifactsPage() {
             <ArtifactsEmpty filtered={true} />
           ) : (
             <div className="rounded-md border border-border bg-card">
-              <ArtifactsTable artifacts={filtered} />
+              <ArtifactsTable
+                artifacts={filtered}
+                selectedId={selected?.id ?? null}
+                onSelect={setSelected}
+              />
             </div>
           )}
         </section>
       </div>
+
+      <ArtifactPreview
+        artifact={selected}
+        open={selected !== null}
+        onOpenChange={(next) => {
+          if (!next) setSelected(null);
+        }}
+      />
     </main>
   );
 }

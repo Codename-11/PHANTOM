@@ -2,8 +2,8 @@
 // campaign-presenter.js (Overview / Goals / Runs / Evidence) into a
 // Radix-Sheet + shadcn-Tabs surface.
 //
-// Mounts as a nested route under /react/campaigns/:id; closing the
-// Sheet navigates back to /react/campaigns so the list stays visible.
+// Mounts as a nested route under /campaigns/:id; closing the
+// Sheet navigates back to /campaigns so the list stays visible.
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -104,7 +104,7 @@ function OverviewPane({ replay }: { replay: CampaignReplay }) {
           {allowed.map((r) => (
             <Badge
               key={`a-${r}`}
-              className="border-[#66c293] text-[#66c293] bg-transparent"
+              className="border-[var(--ok-2)] text-[var(--ok-2)] bg-transparent"
             >
               {r}
             </Badge>
@@ -262,7 +262,7 @@ function EvidencePane({ onReport, onEvidence, feedback, pending }: EvidencePaneP
             role="status"
             className={
               feedback.kind === 'success'
-                ? 'text-xs text-[#66c293]'
+                ? 'text-xs text-[var(--ok-2)]'
                 : 'text-xs text-destructive'
             }
           >
@@ -345,7 +345,7 @@ export function CampaignDetailRoute() {
   // sheet pops back to the list URL so the legacy route stays clean.
   useEffect(() => {
     if (!open) {
-      navigate('/react/campaigns', { replace: true });
+      navigate('/campaigns', { replace: true });
     }
   }, [open, navigate]);
 

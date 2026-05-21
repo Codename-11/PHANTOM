@@ -1,51 +1,44 @@
-// Graph — chrome-only React surface. The canvas painter (graph-layout.js
-// + graph-presenter.js) stays on the legacy /graph page until A8.5
-// migrates it as part of the renderer port; this React page just hosts
-// the toolbar Card, a "open in legacy graph viewer" link, and a stub
-// area that surfaces node/edge counts for the selected run.
+// Graph — read-only React surface for run topology + artifact lineage.
 //
-// Reads `runId` from either the URL parameter (/react/graph/:runId) or
-// the `?runId=` query string so a deep-link from the Runs surface works
+// A8.5b v1: renders a static SVG node-link diagram (GraphCanvas) from
+// the existing /api/runs/:id/graph endpoint using a deterministic
+// layered layout. The FULL interactive canvas (drag physics, pan,
+// replay, blocked filter) remains DEFERRED per the mega-plan and lives
+// on the legacy /graph page — the "open in legacy graph viewer" link is
+// the escape hatch to it.
+//
+// Reads `runId` from either the URL parameter (/graph/:runId) or the
+// `?runId=` query string so a deep-link from the Runs surface works
 // either way.
 
+import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { apiFetch } from '@/lib/api';
+import { Tooltip } from '@/components/ui/tooltip';
+import { useToast } from '@/components/ui/toast';
 import { useRunEvents } from '@/lib/runs';
 import { useArtifacts } from '@/lib/artifacts';
+import { useRunGraph } from '@/lib/graph';
+import { GraphCanvas } from '@/components/GraphCanvas';
 
-interface RunGraphResponse {
-  nodes: Array<{ id: string; label?: string; kind?: string }>;
-  edges: Array<{ from: string; to: string; label?: string }>;
-}
-
-function useRunGraph(runId: string | null | undefined) {
-  return useQuery({
-    queryKey: ['runs', 'graph', runId],
-    queryFn: async () => {
-      const data = await apiFetch<RunGraphResponse>(
-        `/api/runs/${encodeURIComponent(runId!)}/graph`,
-      );
-      return data ?? { nodes: [], edges: [] };
-    },
-    enabled: Boolean(runId),
-  });
-}
+const ZOOM_STEP = 0.2;
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 2;
 
 export function GraphPage() {
   const params = useParams<{ runId?: string }>();
   const [search] = useSearchParams();
   // Prefer the path-param form, fall back to ?runId=.
   const runId = params.runId || search.get('runId') || null;
+  const { toast } = useToast();
+  const [zoom, setZoom] = useState(1);
 
-  // Pre-fetch /api/runs/:id/events + /api/artifacts so the data is warm
-  // for the renderer migration in A8.5. We deliberately read them here
-  // even though we don't render them yet — that's the mega-plan ask.
+  // Pre-fetch events + artifacts so the count badges stay warm alongside
+  // the graph; the renderer itself reads the derived graph endpoint.
   const eventsQuery = useRunEvents(runId);
   const artifactsQuery = useArtifacts(runId ? { runId } : {});
   const graphQuery = useRunGraph(runId);
@@ -53,6 +46,10 @@ export function GraphPage() {
   const legacyHref = runId ? `/graph?runId=${encodeURIComponent(runId)}` : '/graph';
   const nodes = graphQuery.data?.nodes ?? [];
   const edges = graphQuery.data?.edges ?? [];
+
+  function zoomBy(delta: number) {
+    setZoom((z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round((z + delta) * 100) / 100)));
+  }
 
   return (
     <main className="min-h-screen bg-background text-foreground p-6 font-sans">
@@ -64,14 +61,14 @@ export function GraphPage() {
             </p>
             <h1 className="text-2xl font-semibold text-foreground mb-1">Graph</h1>
             <p className="text-sm text-muted-foreground max-w-2xl">
-              The interactive canvas renderer stays on the legacy <code className="font-mono">/graph</code>{' '}
-              page for this phase. This React surface shows the run context plus
-              node/edge counts and links out to the full viewer.
+              A read-only node-link view of the selected run. For the full
+              interactive canvas (zoom, pan, replay, blocked filter) open the
+              legacy <code className="font-mono">/graph</code> viewer.
             </p>
           </div>
           <div className="flex gap-2 shrink-0">
             <Button variant="ghost" size="sm" asChild>
-              <Link to="/react/runs" data-testid="back-to-runs-btn">
+              <Link to="/runs" data-testid="back-to-runs-btn">
                 ← Runs
               </Link>
             </Button>
@@ -89,13 +86,13 @@ export function GraphPage() {
             <CardDescription>
               {runId
                 ? `Bound to run ${runId.slice(0, 12)}…`
-                : 'No run selected — pass ?runId=<id> or follow a link from /react/runs.'}
+                : 'No run selected — pass ?runId=<id> or follow a link from /runs.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {runId ? (
               <>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="outline" className="font-mono">run: {runId.slice(0, 8)}</Badge>
                   {graphQuery.isLoading ? (
                     <Skeleton className="h-6 w-32" />
@@ -131,7 +128,7 @@ export function GraphPage() {
               </>
             ) : (
               <div className="rounded-md border border-dashed border-border bg-[var(--bg-2)] p-4 text-sm text-muted-foreground">
-                Pick a run on <Link to="/react/runs" className="text-[var(--cy-2)] hover:underline">/react/runs</Link>{' '}
+                Pick a run on <Link to="/runs" className="text-[var(--cy-2)] hover:underline">/runs</Link>{' '}
                 and click <strong className="text-foreground">Open graph</strong> on the detail
                 sheet to come back here with a run id attached.
               </div>
@@ -139,26 +136,66 @@ export function GraphPage() {
           </CardContent>
         </Card>
 
-        <Card data-testid="graph-canvas-placeholder">
-          <CardHeader>
-            <CardTitle>Canvas renderer</CardTitle>
-            <CardDescription>Deferred to phase A8.5</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="rounded-md border border-dashed border-border bg-[var(--bg-2)] p-8 text-center">
-              <p className="font-mono uppercase tracking-[0.08em] text-[11px] text-muted-foreground mb-2">
-                Coming soon
-              </p>
-              <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                The interactive node/edge canvas (zoom, pan, fit, replay, blocked
-                filter) migrates as part of the renderer port. Until then, the
-                legacy <code className="font-mono">/graph</code> page hosts the full viewer —
-                the toolbar link above opens it with the same{' '}
-                <code className="font-mono">runId</code> attached.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        {runId ? (
+          <Card data-testid="graph-canvas-card">
+            <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+              <div>
+                <CardTitle>Topology</CardTitle>
+                <CardDescription>
+                  Layered by node type · colors map to type and policy status
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Tooltip content="Zoom out">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => zoomBy(-ZOOM_STEP)}
+                    disabled={zoom <= ZOOM_MIN}
+                    data-testid="graph-zoom-out"
+                    aria-label="Zoom out"
+                  >
+                    −
+                  </Button>
+                </Tooltip>
+                <span className="font-mono text-[11px] text-muted-foreground w-12 text-center">
+                  {Math.round(zoom * 100)}%
+                </span>
+                <Tooltip content="Zoom in">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => zoomBy(ZOOM_STEP)}
+                    disabled={zoom >= ZOOM_MAX}
+                    data-testid="graph-zoom-in"
+                    aria-label="Zoom in"
+                  >
+                    +
+                  </Button>
+                </Tooltip>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  loading={graphQuery.isFetching}
+                  onClick={() => {
+                    graphQuery.refetch();
+                    toast({ title: 'Refreshing graph…' });
+                  }}
+                  data-testid="graph-refresh"
+                >
+                  Refresh
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {graphQuery.isLoading ? (
+                <Skeleton className="h-64 w-full" />
+              ) : (
+                <GraphCanvas nodes={nodes} edges={edges} zoom={zoom} />
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
     </main>
   );

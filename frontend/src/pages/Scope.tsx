@@ -58,7 +58,7 @@ function ScopeRow({ scope }: { scope: ScopeRecord }) {
   return (
     <li>
       <Link
-        to={`/react/scope/${scope.id}`}
+        to={`/scope/${scope.id}`}
         data-scope-id={scope.id}
         className="block rounded-md border border-border bg-card px-3.5 py-3 transition-colors hover:border-[var(--cy-2)] hover:bg-[var(--bg-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         aria-label={`Open ${scope.name}`}
@@ -114,7 +114,7 @@ export function ScopesPage() {
             <Button
               variant="primary"
               size="sm"
-              onClick={() => navigate('/react/scope/new')}
+              onClick={() => navigate('/scope/new')}
               data-testid="new-scope-btn"
             >
               <span aria-hidden="true">+</span> New scope
@@ -149,7 +149,7 @@ export function ScopesPage() {
   );
 }
 
-// ── Detail Sheet (mounted at /react/scope/:id) ────────────────────────
+// ── Detail Sheet (mounted at /scope/:id) ──────────────────────────────
 
 function TargetList({ label, items }: { label: string; items: string[] | undefined }) {
   if (!items?.length) return null;
@@ -204,7 +204,7 @@ function ScopeDetailBody({ scope }: { scope: ScopeRecord }) {
             <span className="font-mono text-[11px] text-muted-foreground">— default policy —</span>
           ) : (
             (scope.allowed_actions || []).map((a) => (
-              <Badge key={`a-${a}`} className="border-[#66c293] text-[#66c293] bg-transparent">
+              <Badge key={`a-${a}`} className="border-[var(--ok-2)] text-[var(--ok-2)] bg-transparent">
                 {a}
               </Badge>
             ))
@@ -259,7 +259,7 @@ export function ScopeDetailRoute() {
   const { data, isLoading, isError, error } = useScope(id);
 
   useEffect(() => {
-    if (!open) navigate('/react/scope', { replace: true });
+    if (!open) navigate('/scope', { replace: true });
   }, [open, navigate]);
 
   return (

@@ -558,7 +558,7 @@ export function CampaignCreateRoute() {
   const validation = useMemo(() => validateFormState(state), [state]);
 
   useEffect(() => {
-    if (!open) navigate('/react/campaigns', { replace: true });
+    if (!open) navigate('/campaigns', { replace: true });
   }, [open, navigate]);
 
   const handleSubmit = async () => {
@@ -572,7 +572,7 @@ export function CampaignCreateRoute() {
     try {
       const created = await create.mutateAsync(toCreatePayload(state));
       setOpen(false);
-      navigate(`/react/campaigns/${created.id}`, { replace: true });
+      navigate(`/campaigns/${created.id}`, { replace: true });
     } catch (err) {
       setErrorBanner(`✗ ${(err as Error).message}`);
     }

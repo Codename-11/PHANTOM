@@ -7,6 +7,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { apiFetch } from './api';
+import type { RoeTemplate, ScopeAssetOption } from './scopeBuilder';
 import type {
   ParseTargetsResponse,
   ScopeRecord,
@@ -25,6 +26,11 @@ export interface CreateScopeBody {
   };
   allowedActions: string[];
   blockedActions: string[];
+  // Canonical three-state matrix. The server derives nothing from it that it
+  // can't also derive from allowedActions/blockedActions, but storing it
+  // preserves the 'ask' tier (which neither CSV array can represent).
+  actionModes?: Record<string, 'auto' | 'ask' | 'deny'> | null;
+  rulesOfEngagement?: string;
   notes?: string;
   expiresAt?: string | null;
 }
@@ -50,6 +56,20 @@ export const scopesApi = {
     );
     if (Array.isArray(data)) return data;
     return data?.templates ?? [];
+  },
+  roeTemplates: async (): Promise<RoeTemplate[]> => {
+    const data = await apiFetch<{ templates?: RoeTemplate[] } | RoeTemplate[]>(
+      '/api/scopes/roe-templates',
+    );
+    if (Array.isArray(data)) return data;
+    return data?.templates ?? [];
+  },
+  assets: async (): Promise<ScopeAssetOption[]> => {
+    const data = await apiFetch<ScopeAssetOption[] | { assets?: ScopeAssetOption[] }>(
+      '/api/assets?limit=100',
+    );
+    if (Array.isArray(data)) return data;
+    return data?.assets ?? [];
   },
   parseTargets: async (input: string): Promise<ParseTargetsResponse> => {
     const data = await apiFetch<ParseTargetsResponse>(
@@ -84,6 +104,32 @@ export function useScope(id: string | undefined) {
     queryKey: ['scope', id],
     queryFn: () => scopesApi.get(id as string),
     enabled: !!id,
+  });
+}
+
+// Reference data for the full builder. These are static-ish catalogues, so
+// they cache aggressively and never auto-refetch on focus.
+export function useScopeTemplates() {
+  return useQuery<ScopeTemplate[], Error>({
+    queryKey: ['scope-templates'],
+    queryFn: scopesApi.templates,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useRoeTemplates() {
+  return useQuery<RoeTemplate[], Error>({
+    queryKey: ['scope-roe-templates'],
+    queryFn: scopesApi.roeTemplates,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useScopeAssets() {
+  return useQuery<ScopeAssetOption[], Error>({
+    queryKey: ['scope-assets'],
+    queryFn: scopesApi.assets,
+    staleTime: 60_000,
   });
 }
 

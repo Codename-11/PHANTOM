@@ -17,6 +17,8 @@ import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useToast } from '@/components/ui/toast';
+import { Tooltip } from '@/components/ui/tooltip';
 import {
   deriveProviderState,
   deriveToolpackAvailability,
@@ -26,10 +28,19 @@ import {
   useUpdateSettings,
   type ToolpackAvailability,
 } from '@/lib/settings';
+import {
+  usePromptProfiles,
+  usePromptFragments,
+  useMcpServers,
+  useSkills,
+  type PromptFragmentRow,
+} from '@/lib/settingsPanels';
+import { useScopes, deriveScopeStatus } from '@/lib/scopes';
 import type {
   AppSettings,
   DiagnosticsCheck,
   ProviderState,
+  ScopeRecord,
   SettingsPatch,
   Toolpack,
 } from '@/lib/types';
@@ -222,11 +233,11 @@ function ProviderEditor({ settings, onSave, saving, error, saved }: ProviderEdit
       </div>
 
       <div className="flex items-center gap-3">
-        <Button type="submit" variant="primary" size="sm" disabled={saving}>
+        <Button type="submit" variant="primary" size="sm" loading={saving}>
           {saving ? 'Saving…' : 'Save settings'}
         </Button>
         {saved ? (
-          <span className="text-xs text-[#66c293]" role="status">
+          <span className="text-xs text-[var(--ok-2)]" role="status">
             Saved.
           </span>
         ) : null}
@@ -412,49 +423,373 @@ function ToolpacksPanel() {
   );
 }
 
-// ── Misc placeholder panels ────────────────────────────────────────────
-// These mirror the legacy IA visually but defer their non-trivial
-// implementation to A8.3+ (Prompts admin) and A8.5 (Advanced cleanup).
+// MCP servers + Skills round out the Tools / MCP / Skills tab. Both are
+// read-only inventories here — registration/upload still happens via the
+// dedicated surfaces. Backed by GET /api/mcp/servers + GET /api/skills.
 
-function PromptsPanel() {
+function McpServersPanel() {
+  const { data, isLoading, isError, error } = useMcpServers();
+
+  if (isLoading) {
+    return <Skeleton className="h-16 w-full" data-testid="mcp-loading" />;
+  }
+  if (isError) {
+    return (
+      <div role="alert" className="text-sm text-destructive">
+        Failed to load MCP servers: {(error as Error)?.message ?? 'unknown error'}
+      </div>
+    );
+  }
+  const list = data ?? [];
+  if (!list.length) {
+    return (
+      <p className="text-sm text-muted-foreground" data-testid="mcp-empty">
+        No MCP servers registered.
+      </p>
+    );
+  }
   return (
-    <Card>
-      <CardContent className="pt-4">
-        <p className="font-mono uppercase tracking-[0.08em] text-[10px] text-muted-foreground mb-2">
-          Prompt admin
-        </p>
-        <p className="text-sm text-muted-foreground">
-          Profile + fragment management lands in a follow-up commit
-          (A8.3). The legacy <code className="font-mono">/settings</code> tab still
-          renders the full editor.
-        </p>
-      </CardContent>
-    </Card>
+    <ul className="space-y-2 list-none m-0 p-0" data-testid="mcp-list">
+      {list.map((m) => (
+        <li
+          key={m.id}
+          className="rounded-md border border-border bg-card px-3 py-2.5"
+          data-mcp-id={m.id}
+        >
+          <div className="flex items-center gap-2 mb-0.5">
+            <span className="font-semibold text-foreground">{m.name}</span>
+            <Badge variant="outline" className="ml-auto font-mono">
+              {m.transport ?? 'stdio'}
+            </Badge>
+          </div>
+          <p className="font-mono text-[11px] text-muted-foreground break-all">
+            {m.url || m.command || '—'}
+          </p>
+        </li>
+      ))}
+    </ul>
   );
 }
 
-function SecurityScopePanel() {
+function SkillsPanel() {
+  const { data, isLoading, isError, error } = useSkills();
+
+  if (isLoading) {
+    return <Skeleton className="h-16 w-full" data-testid="skills-loading" />;
+  }
+  if (isError) {
+    return (
+      <div role="alert" className="text-sm text-destructive">
+        Failed to load skills: {(error as Error)?.message ?? 'unknown error'}
+      </div>
+    );
+  }
+  const list = data ?? [];
+  if (!list.length) {
+    return (
+      <p className="text-sm text-muted-foreground" data-testid="skills-empty">
+        No skills installed.
+      </p>
+    );
+  }
   return (
-    <Card>
-      <CardContent className="pt-4 space-y-2">
-        <p className="font-mono uppercase tracking-[0.08em] text-[10px] text-muted-foreground">
-          Security &amp; scope
-        </p>
-        <p className="text-sm text-muted-foreground">
-          Risky tools are blocked before execution unless the selected scope policy
-          allows the risk class and every extracted target is in scope.
-        </p>
-        <p className="text-sm">
-          <Link
-            to="/react/scope"
-            className="text-[var(--cy-1)] underline-offset-2 hover:underline"
-            data-testid="settings-open-scope"
-          >
-            Open the scope builder →
-          </Link>
-        </p>
-      </CardContent>
-    </Card>
+    <ul className="space-y-2 list-none m-0 p-0" data-testid="skills-list">
+      {list.map((s) => (
+        <li
+          key={s.name}
+          className="rounded-md border border-border bg-card px-3 py-2.5"
+          data-skill-name={s.name}
+        >
+          <div className="flex items-center gap-2 mb-0.5">
+            <span className="font-semibold text-foreground">{s.name}</span>
+            {s.files?.length ? (
+              <Badge variant="outline" className="ml-auto font-mono">
+                {s.files.length} files
+              </Badge>
+            ) : null}
+          </div>
+          {s.description ? (
+            <p className="text-[12px] text-muted-foreground">{s.description}</p>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// Combined Tools / MCP / Skills surface — three stacked read-only
+// inventories matching the tab label.
+function ToolsMcpSkillsPanel() {
+  return (
+    <div className="space-y-4" data-testid="tools-panel">
+      <Card>
+        <CardContent className="pt-4 space-y-3">
+          <p className="font-mono uppercase tracking-[0.08em] text-[10px] text-muted-foreground">
+            Toolpacks
+          </p>
+          <ToolpacksPanel />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="pt-4 space-y-3">
+          <p className="font-mono uppercase tracking-[0.08em] text-[10px] text-muted-foreground">
+            MCP servers
+          </p>
+          <McpServersPanel />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="pt-4 space-y-3">
+          <p className="font-mono uppercase tracking-[0.08em] text-[10px] text-muted-foreground">
+            Skills
+          </p>
+          <SkillsPanel />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── Prompts tab ─────────────────────────────────────────────────────────
+// Read-only view of the prompt profiles + global fragments managed by the
+// prompt-store. Backed by GET /api/prompts/profiles + /api/prompts/fragments.
+// Authoring (create/edit profiles + fragments) still lives in the dedicated
+// prompt admin surface; this tab inventories what's configured and deep-links
+// out for edits.
+
+function PromptsPanel() {
+  const profilesQ = usePromptProfiles();
+  const fragmentsQ = usePromptFragments();
+
+  if (profilesQ.isLoading || fragmentsQ.isLoading) {
+    return (
+      <div className="space-y-2" data-testid="prompts-loading">
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-16 w-full" />
+        ))}
+      </div>
+    );
+  }
+  if (profilesQ.isError || fragmentsQ.isError) {
+    return (
+      <div role="alert" className="text-sm text-destructive">
+        Failed to load prompts:{' '}
+        {((profilesQ.error ?? fragmentsQ.error) as Error)?.message ?? 'unknown error'}
+      </div>
+    );
+  }
+
+  const profiles = profilesQ.data ?? [];
+  const fragments = fragmentsQ.data ?? [];
+
+  return (
+    <div className="space-y-4" data-testid="prompts-panel">
+      <Card>
+        <CardContent className="pt-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <p className="font-mono uppercase tracking-[0.08em] text-[10px] text-muted-foreground">
+              Prompt profiles
+            </p>
+            <Tooltip content="Profiles bundle a base mode + fragments that shape the system prompt.">
+              <span className="font-mono text-[10px] text-muted-foreground cursor-help" tabIndex={0}>
+                (?)
+              </span>
+            </Tooltip>
+            <Badge variant="outline" className="ml-auto font-mono">
+              {profiles.length}
+            </Badge>
+          </div>
+          {profiles.length === 0 ? (
+            <p className="text-sm text-muted-foreground" data-testid="prompts-profiles-empty">
+              No custom profiles — the built-in system default is in effect.
+            </p>
+          ) : (
+            <ul className="space-y-2 list-none m-0 p-0" data-testid="prompts-profiles-list">
+              {profiles.map((p) => (
+                <li
+                  key={p.id}
+                  className="rounded-md border border-border bg-card px-3 py-2.5"
+                  data-profile-id={p.id}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-semibold text-foreground">{p.name}</span>
+                    {p.mode ? (
+                      <Badge variant="outline" className="font-mono">
+                        {p.mode}
+                      </Badge>
+                    ) : null}
+                    {p.is_default ? (
+                      <Badge variant="completed" className="ml-auto">
+                        default
+                      </Badge>
+                    ) : null}
+                  </div>
+                  {p.description ? (
+                    <p className="text-[12px] text-muted-foreground">{p.description}</p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <p className="font-mono uppercase tracking-[0.08em] text-[10px] text-muted-foreground">
+              Prompt fragments
+            </p>
+            <Badge variant="outline" className="ml-auto font-mono">
+              {fragments.length}
+            </Badge>
+          </div>
+          {fragments.length === 0 ? (
+            <p className="text-sm text-muted-foreground" data-testid="prompts-fragments-empty">
+              No fragments defined.
+            </p>
+          ) : (
+            <ul className="space-y-1.5 list-none m-0 p-0" data-testid="prompts-fragments-list">
+              {fragments.map((f: PromptFragmentRow) => (
+                <li
+                  key={f.id}
+                  className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2"
+                  data-fragment-id={f.id}
+                  data-enabled={f.enabled ? 'true' : 'false'}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'h-2 w-2 rounded-full shrink-0',
+                      f.enabled ? 'bg-[var(--ok)]' : 'bg-muted-foreground',
+                    )}
+                  />
+                  <span className="text-sm text-foreground">{f.name}</span>
+                  <Badge variant="outline" className="font-mono">
+                    {f.kind}
+                  </Badge>
+                  {!f.enabled ? (
+                    <span className="ml-auto text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+                      disabled
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── Security & Scope tab ──────────────────────────────────────────────--
+// Inventories configured scopes (GET /api/scopes) and explains the
+// allow/block policy posture. Scope creation/editing lives in the scope
+// builder — this tab deep-links there with bare /scope paths.
+
+const SCOPE_STATUS_BADGE: Record<
+  string,
+  { label: string; variant: 'completed' | 'needs_approval' | 'failed' | 'queued' }
+> = {
+  active: { label: 'active', variant: 'completed' },
+  expired: { label: 'expired', variant: 'needs_approval' },
+  archived: { label: 'archived', variant: 'queued' },
+};
+
+function SecurityScopePanel() {
+  const scopesQ = useScopes();
+
+  return (
+    <div className="space-y-4" data-testid="security-panel">
+      <Card>
+        <CardContent className="pt-4 space-y-2">
+          <p className="font-mono uppercase tracking-[0.08em] text-[10px] text-muted-foreground">
+            Policy posture
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Risky tools are blocked before execution unless the selected scope policy
+            allows the risk class and every extracted target is in scope.
+          </p>
+          <p className="text-sm">
+            <Link
+              to="/scope"
+              className="text-[var(--cy-1)] underline-offset-2 hover:underline"
+              data-testid="settings-open-scope"
+            >
+              Open the scope builder →
+            </Link>
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <p className="font-mono uppercase tracking-[0.08em] text-[10px] text-muted-foreground">
+              Configured scopes
+            </p>
+            {!scopesQ.isLoading && !scopesQ.isError ? (
+              <Badge variant="outline" className="ml-auto font-mono">
+                {(scopesQ.data ?? []).length}
+              </Badge>
+            ) : null}
+          </div>
+
+          {scopesQ.isLoading ? (
+            <div className="space-y-2" data-testid="scopes-loading">
+              {[0, 1].map((i) => (
+                <Skeleton key={i} className="h-14 w-full" />
+              ))}
+            </div>
+          ) : scopesQ.isError ? (
+            <div role="alert" className="text-sm text-destructive">
+              Failed to load scopes: {(scopesQ.error as Error)?.message ?? 'unknown error'}
+            </div>
+          ) : (scopesQ.data ?? []).length === 0 ? (
+            <p className="text-sm text-muted-foreground" data-testid="scopes-empty">
+              No scopes defined yet. Risky actions stay blocked until a scope is created.
+            </p>
+          ) : (
+            <ul className="space-y-2 list-none m-0 p-0" data-testid="scopes-list">
+              {(scopesQ.data ?? []).map((s: ScopeRecord) => {
+                const status = deriveScopeStatus(s);
+                const badge =
+                  SCOPE_STATUS_BADGE[status] ??
+                  ({ label: status, variant: 'queued' as const });
+                return (
+                  <li
+                    key={s.id}
+                    className="rounded-md border border-border bg-card px-3 py-2.5"
+                    data-scope-id={s.id}
+                    data-scope-status={status}
+                  >
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="font-semibold text-foreground">{s.name}</span>
+                      <Badge variant={badge.variant} className="ml-auto">
+                        {badge.label}
+                      </Badge>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {(s.allowed_actions ?? []).map((a) => (
+                        <Badge key={`a-${a}`} variant="completed" className="font-mono">
+                          +{a}
+                        </Badge>
+                      ))}
+                      {(s.blocked_actions ?? []).map((b) => (
+                        <Badge key={`b-${b}`} variant="failed" className="font-mono">
+                          −{b}
+                        </Badge>
+                      ))}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -512,6 +847,7 @@ export function SettingsPage() {
   const settingsQ = useSettings();
   const diagQ = useDiagnostics();
   const updateSettings = useUpdateSettings();
+  const { toast } = useToast();
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -526,11 +862,14 @@ export function SettingsPage() {
     try {
       await updateSettings.mutateAsync(patch);
       setSaved(true);
+      toast({ title: 'Settings saved', variant: 'success' });
       // Hide the saved banner after a brief grace period so the next
       // edit + save still flashes the affirmative.
       window.setTimeout(() => setSaved(false), 2500);
     } catch (err) {
-      setSaveError((err as Error).message);
+      const message = (err as Error).message;
+      setSaveError(message);
+      toast({ title: 'Save failed', description: message, variant: 'error' });
     }
   };
 
@@ -627,7 +966,7 @@ export function SettingsPage() {
               <SecurityScopePanel />
             </TabsContent>
             <TabsContent value="tools">
-              <ToolpacksPanel />
+              <ToolsMcpSkillsPanel />
             </TabsContent>
             <TabsContent value="diagnostics">
               <DiagnosticsPanel />
