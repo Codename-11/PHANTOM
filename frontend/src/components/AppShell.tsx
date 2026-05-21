@@ -21,7 +21,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: '/dash', label: 'Dash', glyph: 'DSH', react: true },
-  { to: '/chat', label: 'Chat', glyph: 'CMD', react: false },
+  { to: '/chat', label: 'Chat', glyph: 'CMD', react: true },
   { to: '/runs', label: 'Runs', glyph: 'RUN', react: true },
   { to: '/graph', label: 'Graph', glyph: 'MAP', react: true },
   { to: '/alerts', label: 'Alerts', glyph: 'ALR', react: true },
@@ -29,7 +29,7 @@ const NAV: NavItem[] = [
   { to: '/approvals', label: 'Approvals', glyph: 'APV', react: true },
   { to: '/scope', label: 'Assets / Scope', glyph: 'SCP', react: true },
   { to: '/campaigns', label: 'Campaigns', glyph: 'CMP', react: true },
-  { to: '/registry', label: 'Registry', glyph: 'REG', react: false },
+  { to: '/registry', label: 'Registry', glyph: 'REG', react: true },
   { to: '/settings', label: 'Settings', glyph: 'CFG', react: true },
 ];
 

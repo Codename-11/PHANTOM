@@ -6,6 +6,7 @@
 // Alerts. Each of these routes is a side-by-side preview — the legacy
 // vanilla `/dash`, `/approvals`, `/alerts`, etc. continue to render the
 // vanilla bundle until REACT_PAGES in server/index.js is updated.
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
 import { AppShell } from './components/AppShell';
@@ -23,6 +24,12 @@ import DashPage from './pages/Dash';
 import OnboardingPage from './pages/Onboarding';
 import ApprovalsPage, { ApprovalDetailRoute } from './pages/Approvals';
 import AlertsPage, { AlertDetailRoute } from './pages/Alerts';
+import RegistryPage from './pages/Registry';
+
+// Chat lazy-loads: its markdown stack (marked + highlight.js + DOMPurify)
+// is ~heavy and only needed when the operator opens /chat, so it ships as
+// a separate chunk instead of bloating the initial bundle.
+const ChatPage = lazy(() => import('./pages/Chat'));
 
 function HealthCard() {
   return (
@@ -58,6 +65,7 @@ export function App() {
     <BrowserRouter>
       <ToastProvider>
         <AppShell>
+          <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading…</div>}>
           <Routes>
         {/* A8.5 cutover — every migrated surface now mounts at BOTH the
             bare path (the operator default) AND the legacy /react/* path
@@ -66,6 +74,8 @@ export function App() {
             this bundle the SPA shell. */}
         {[
           ['/dash', <DashPage />],
+          ['/chat', <ChatPage />],
+          ['/registry', <RegistryPage />],
           ['/onboarding', <OnboardingPage />],
           ['/settings', <SettingsPage />],
           ['/graph', <GraphPage />],
@@ -100,6 +110,8 @@ export function App() {
             follow-up commits. */}
         <Route path="/react/health" element={<HealthCard />} />
         <Route path="/react/dash" element={<DashPage />} />
+        <Route path="/react/chat" element={<ChatPage />} />
+        <Route path="/react/registry" element={<RegistryPage />} />
         <Route path="/react/onboarding" element={<OnboardingPage />} />
         <Route path="/react/approvals" element={<ApprovalsPage />}>
           <Route path=":id" element={<ApprovalDetailRoute />} />
@@ -126,6 +138,7 @@ export function App() {
 
             <Route path="*" element={<HealthCard />} />
           </Routes>
+          </Suspense>
         </AppShell>
       </ToastProvider>
     </BrowserRouter>

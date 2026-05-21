@@ -5,7 +5,7 @@
 // legacy build at frontend/dist/ stays untouched. server/index.js gates
 // when (if at all) it serves the React bundle via the REACT_PAGES set.
 
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from 'tailwindcss';
 import autoprefixer from 'autoprefixer';
@@ -14,13 +14,32 @@ import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  // Source the API server port the same way vite.config.js does so the
+  // dev proxy stays in sync with the Express server. PHANTOM_API_PORT is
+  // preferred; PORT is honored as a fallback; 1337 is the historical
+  // default.
+  const env = loadEnv(mode, process.cwd(), '');
+  const apiPort = Number(env.PHANTOM_API_PORT || env.PORT) || 1337;
+  return {
   plugins: [react()],
   root: resolve(__dirname, 'frontend/src'),
   base: '/react/',
   resolve: {
     alias: {
       '@': resolve(__dirname, 'frontend/src'),
+    },
+  },
+  // Dev server proxy: forward API + WebSocket to the Express server so the
+  // React bundle (now the canonical UI) works under `npm run dev`. Without
+  // this, /api and /ws would hit Vite and fail. Set VITE_DISABLE_HMR=1 for
+  // headless sandboxes that can't sustain the HMR WebSocket.
+  server: {
+    host: true,
+    hmr: env.VITE_DISABLE_HMR ? false : undefined,
+    proxy: {
+      '/api': { target: `http://localhost:${apiPort}`, changeOrigin: true },
+      '/ws': { target: `ws://localhost:${apiPort}`, ws: true },
     },
   },
   // PostCSS plugins are inlined here so they pick up the repo-root
@@ -51,4 +70,5 @@ export default defineConfig({
     setupFiles: ['./test/setup.ts'],
     css: false,
   },
+  };
 });

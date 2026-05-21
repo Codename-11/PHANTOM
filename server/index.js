@@ -41,6 +41,7 @@ const REACT_PAGES = new Set([
   '/campaigns', '/settings', '/scope',
   '/runs', '/graph', '/artifacts',
   '/approvals', '/alerts',
+  '/chat', '/registry',
 ]);
 const reactDistPath = join(ROOT, 'dist', 'react');
 const reactIndexPath = join(reactDistPath, 'index.html');
