@@ -3,7 +3,7 @@
 // GraphCanvas SVG renders nodes/edges when graph data is present.
 import type { ReactNode } from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { Route, Routes } from 'react-router-dom';
 
 import { renderWithProviders } from '@/test/test-utils';
@@ -95,6 +95,205 @@ describe('GraphPage', () => {
       'href',
       '/graph?runId=run-aaaa1111',
     );
+
+    // Kit graph chrome: toolbar (search + view switch + toggles), the
+    // bottom-left legend overlay, and the bottom-right zoom widget pill.
+    expect(screen.getByTestId('graph-toolbar')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-search')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-blocked-toggle')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-legend')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-zoom-widget')).toBeInTheDocument();
+    expect(within(screen.getByTestId('graph-legend')).getByText('blocked')).toBeInTheDocument();
+
+    // Orthogonal edges render as <path> with the graph-edge testid.
+    expect(screen.getAllByTestId('graph-edge').length).toBe(2);
+  });
+
+  it('selects a node and populates the inspector drawer', async () => {
+    globalThis.fetch = vi.fn(async (url) => {
+      const u = String(url);
+      if (u.startsWith('/api/runs/run-cccc3333/graph')) {
+        return jsonResponse({
+          nodes: [
+            { id: 'run:r1', type: 'run', label: 'recon run', status: 'completed' },
+            {
+              id: 'tool:t1',
+              type: 'tool',
+              label: 'nmap',
+              status: 'completed',
+              metadata: { command: 'nmap -sV 10.0.0.1', output: 'PORT 443 open' },
+            },
+          ],
+          edges: [{ id: 'e1', type: 'called', source: 'run:r1', target: 'tool:t1' }],
+        });
+      }
+      return jsonResponse([]);
+    }) as unknown as typeof fetch;
+
+    renderWithProviders(
+      withToast(
+        <Routes>
+          <Route path="/graph/:runId" element={<GraphPage />} />
+        </Routes>,
+      ),
+      { route: '/graph/run-cccc3333' },
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('graph-canvas')).toBeInTheDocument();
+    });
+
+    // Inspector starts empty.
+    expect(screen.getByText(/No node selected/i)).toBeInTheDocument();
+
+    // Click the nmap tool node → inspector populates with its command.
+    const toolNode = screen
+      .getAllByTestId('graph-node')
+      .find((g) => g.getAttribute('data-node-type') === 'tool')!;
+    fireEvent.click(toolNode);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('graph-inspector-title')).toHaveTextContent('nmap');
+    });
+    expect(screen.getByText(/nmap -sV 10.0.0.1/)).toBeInTheDocument();
+    expect(screen.getByText(/PORT 443 open/)).toBeInTheDocument();
+  });
+
+  it('hides blocked edges when the show-blocked toggle is turned off', async () => {
+    globalThis.fetch = vi.fn(async (url) => {
+      const u = String(url);
+      if (u.startsWith('/api/runs/run-dddd4444/graph')) {
+        return jsonResponse({
+          nodes: [
+            { id: 'run:r1', type: 'run', label: 'run', status: 'running' },
+            { id: 'tool:t1', type: 'tool', label: 'allowed', status: 'completed' },
+            { id: 'cmd:c1', type: 'command', label: 'blocked-cmd', status: 'blocked' },
+          ],
+          edges: [
+            { id: 'e1', type: 'called', source: 'run:r1', target: 'tool:t1' },
+            { id: 'e2', type: 'blocked_by_policy', source: 'run:r1', target: 'cmd:c1' },
+          ],
+        });
+      }
+      return jsonResponse([]);
+    }) as unknown as typeof fetch;
+
+    renderWithProviders(
+      withToast(
+        <Routes>
+          <Route path="/graph/:runId" element={<GraphPage />} />
+        </Routes>,
+      ),
+      { route: '/graph/run-dddd4444' },
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('graph-edge').length).toBe(2);
+    });
+
+    // Toggling show-blocked off removes the policy-blocked edge.
+    fireEvent.click(screen.getByTestId('graph-blocked-toggle'));
+    await waitFor(() => {
+      expect(screen.getAllByTestId('graph-edge').length).toBe(1);
+    });
+  });
+
+  it('dims non-matching nodes when the toolbar search is used', async () => {
+    globalThis.fetch = vi.fn(async (url) => {
+      const u = String(url);
+      if (u.startsWith('/api/runs/run-search1/graph')) {
+        return jsonResponse({
+          nodes: [
+            { id: 'run:r1', type: 'run', label: 'recon run', status: 'completed' },
+            { id: 'tool:t1', type: 'tool', label: 'nmap', status: 'completed' },
+            { id: 'host:h1', type: 'host', label: '10.0.0.1', status: 'observed' },
+          ],
+          edges: [{ id: 'e1', type: 'called', source: 'run:r1', target: 'tool:t1' }],
+        });
+      }
+      return jsonResponse([]);
+    }) as unknown as typeof fetch;
+
+    renderWithProviders(
+      withToast(
+        <Routes>
+          <Route path="/graph/:runId" element={<GraphPage />} />
+        </Routes>,
+      ),
+      { route: '/graph/run-search1' },
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('graph-node')).toHaveLength(3);
+    });
+    // No search → nothing dimmed.
+    expect(
+      screen.getAllByTestId('graph-node').some((g) => g.getAttribute('data-node-dimmed') === 'true'),
+    ).toBe(false);
+
+    // Type a query matching only the nmap tool node.
+    fireEvent.change(screen.getByTestId('graph-search'), { target: { value: 'nmap' } });
+
+    await waitFor(() => {
+      const dimmed = screen
+        .getAllByTestId('graph-node')
+        .filter((g) => g.getAttribute('data-node-dimmed') === 'true');
+      // run + host dimmed; the matching nmap node stays at full opacity.
+      expect(dimmed).toHaveLength(2);
+    });
+    const lit = screen
+      .getAllByTestId('graph-node')
+      .filter((g) => !g.getAttribute('data-node-dimmed'));
+    expect(lit).toHaveLength(1);
+    expect(lit[0]?.getAttribute('data-node-type')).toBe('tool');
+  });
+
+  it('filters node types when switching to the Topology view', async () => {
+    globalThis.fetch = vi.fn(async (url) => {
+      const u = String(url);
+      if (u.startsWith('/api/runs/run-view1/graph')) {
+        return jsonResponse({
+          nodes: [
+            { id: 'run:r1', type: 'run', label: 'recon run', status: 'completed' },
+            { id: 'tool:t1', type: 'tool', label: 'nmap', status: 'completed' },
+            { id: 'host:h1', type: 'host', label: '10.0.0.1', status: 'observed' },
+            { id: 'port:p1', type: 'port', label: '443/tcp', status: 'observed' },
+          ],
+          edges: [
+            { id: 'e1', type: 'called', source: 'run:r1', target: 'tool:t1' },
+            { id: 'e2', type: 'observed', source: 'tool:t1', target: 'host:h1' },
+            { id: 'e3', type: 'observed', source: 'host:h1', target: 'port:p1' },
+          ],
+        });
+      }
+      return jsonResponse([]);
+    }) as unknown as typeof fetch;
+
+    renderWithProviders(
+      withToast(
+        <Routes>
+          <Route path="/graph/:runId" element={<GraphPage />} />
+        </Routes>,
+      ),
+      { route: '/graph/run-view1' },
+    );
+
+    // Run view (default) renders every node type.
+    await waitFor(() => {
+      expect(screen.getAllByTestId('graph-node')).toHaveLength(4);
+    });
+
+    // Switch to Topology → run + tool node types are dropped from layout.
+    fireEvent.click(screen.getByRole('button', { name: 'Topology' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('graph-node')).toHaveLength(2);
+    });
+    const types = screen
+      .getAllByTestId('graph-node')
+      .map((g) => g.getAttribute('data-node-type'))
+      .sort();
+    expect(types).toEqual(['host', 'port']);
   });
 
   it('reads the runId from a ?runId= query param when no path param is present', async () => {

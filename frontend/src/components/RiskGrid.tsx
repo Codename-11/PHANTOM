@@ -5,6 +5,11 @@
 // 'locked · deny' tag.
 //
 // onChange receives the new allowed set; the parent owns the state.
+//
+// Presentation: the kit's allow/deny action-class matrix. Each row carries a
+// `.badge` severity tag (token-driven, not ad-hoc Tailwind borders); locked
+// rows (exploit, destructive) render with the governance `.badge.policy`
+// "locked · deny" tag and a tinted left edge so they read as policy-pinned.
 import { useId } from 'react';
 
 import { Checkbox } from './ui/checkbox';
@@ -17,11 +22,12 @@ interface RiskGridProps {
   className?: string;
 }
 
-const SEVERITY_TICK: Record<RiskClass['risk'], string> = {
-  low: 'bg-[var(--ok)]',
-  med: 'bg-[var(--warn)]',
-  high: 'bg-[var(--warn-2)]',
-  crit: 'bg-destructive',
+// Map our 4 risk levels onto the kit's severity `.badge` variants.
+const RISK_BADGE: Record<RiskClass['risk'], string> = {
+  low: 'badge low',
+  med: 'badge med',
+  high: 'badge high',
+  crit: 'badge crit',
 };
 
 export function RiskGrid({ allowed, onChange, className }: RiskGridProps) {
@@ -53,9 +59,9 @@ export function RiskGrid({ allowed, onChange, className }: RiskGridProps) {
             key={r.id}
             htmlFor={cbId}
             className={cn(
-              'flex items-center gap-2 rounded-md border border-[var(--line-1)] bg-[var(--bg-2)] px-2.5 py-1.5 transition-colors text-sm',
-              checked && 'border-[var(--cy-2)] bg-[var(--cy-3)]/20',
-              locked && 'opacity-60 cursor-not-allowed line-through',
+              'flex items-center gap-2 rounded-[var(--r-3)] border border-[var(--line-1)] bg-[var(--bg-2)] px-2.5 py-1.5 transition-colors text-sm',
+              checked && 'border-[var(--line-cy)] bg-[var(--cy-tint)]',
+              locked && 'cursor-not-allowed border-[var(--policy-line)] bg-[var(--policy-bg)]',
               !locked && 'cursor-pointer hover:border-[var(--line-3)]',
             )}
             data-risk-id={r.id}
@@ -71,23 +77,26 @@ export function RiskGrid({ allowed, onChange, className }: RiskGridProps) {
               aria-label={r.label}
             />
             <span
-              aria-hidden="true"
-              className={cn('h-2 w-2 rounded-full', SEVERITY_TICK[r.risk])}
-              data-risk-tick={r.risk}
-            />
-            <span className="font-mono text-xs text-foreground">{r.label}</span>
-            {r.warn ? (
+              className={cn(
+                'font-mono text-xs',
+                locked ? 'text-[var(--fg-3)] line-through' : 'text-foreground',
+              )}
+            >
+              {r.label}
+            </span>
+            <span className={RISK_BADGE[r.risk]} data-risk-tick={r.risk}>
+              {r.risk}
+            </span>
+            {r.warn && !locked ? (
               <span
-                className="ml-auto font-mono text-[10px] text-[var(--warn-2)] uppercase tracking-wider"
+                className="ml-auto badge med"
                 title="Requires explicit operator approval"
               >
                 approval-only
               </span>
             ) : null}
             {locked ? (
-              <span className="ml-auto font-mono text-[10px] text-[var(--fg-3)] uppercase tracking-wider">
-                locked · deny
-              </span>
+              <span className="ml-auto badge policy">locked · deny</span>
             ) : null}
           </label>
         );

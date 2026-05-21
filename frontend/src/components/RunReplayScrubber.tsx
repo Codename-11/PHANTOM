@@ -40,7 +40,9 @@ function isBlocked(event: TraceEvent): boolean {
 }
 
 function severityClass(event: TraceEvent): string {
-  if (isBlocked(event)) return 'bg-[var(--warn-2)]';
+  // Blocked = governance → purple (--policy), matching the trace timeline's
+  // `.evt.blocked` node, not a warm severity color.
+  if (isBlocked(event)) return 'bg-[var(--policy)]';
   if (event.status === 'failed' || event.type === 'tool.call.failed' || event.type === 'run.failed') {
     return 'bg-destructive';
   }
@@ -191,7 +193,7 @@ export function RunReplayScrubber({ events }: RunReplayScrubberProps) {
             <span
               aria-hidden="true"
               data-testid="replay-blocked-mark"
-              className="absolute top-1/2 h-3 w-0.5 -translate-y-1/2 bg-[var(--warn-2)]"
+              className="absolute top-1/2 h-3 w-0.5 -translate-y-1/2 bg-[var(--policy)]"
               style={{ left: `${blockedPct}%` }}
             />
           </Tooltip>

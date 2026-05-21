@@ -12,6 +12,8 @@ import { Link, NavLink, useLocation } from 'react-router-dom';
 
 import { cn } from '@/lib/utils';
 
+import { PhantomMark } from './PhantomMark';
+
 interface NavItem {
   to: string;
   label: string;
@@ -93,7 +95,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         aria-label="Primary navigation"
       >
         <div className="flex items-center gap-2 border-b border-border px-4 py-3.5">
-          <span className="h-2 w-2 rounded-full bg-primary" aria-hidden="true" />
+          <PhantomMark size={26} />
           <span className="font-mono text-sm font-semibold tracking-[0.12em] text-foreground">
             PHANTOM
           </span>

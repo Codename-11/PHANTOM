@@ -10,6 +10,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
 import { AppShell } from './components/AppShell';
+import { SplashScreen } from './components/SplashScreen';
 import { ToastProvider } from './components/ui/toast';
 import CampaignsPage from './pages/Campaigns';
 import CampaignDetailRoute from './pages/CampaignDetail';
@@ -25,6 +26,7 @@ import OnboardingPage from './pages/Onboarding';
 import ApprovalsPage, { ApprovalDetailRoute } from './pages/Approvals';
 import AlertsPage, { AlertDetailRoute } from './pages/Alerts';
 import RegistryPage from './pages/Registry';
+import AssetProfilePage from './pages/AssetProfile';
 
 // Chat lazy-loads: its markdown stack (marked + highlight.js + DOMPurify)
 // is ~heavy and only needed when the operator opens /chat, so it ships as
@@ -62,7 +64,7 @@ export function App() {
     <BrowserRouter>
       <ToastProvider>
         <AppShell>
-          <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading…</div>}>
+          <Suspense fallback={<SplashScreen />}>
           <Routes>
         {/* React is the only frontend bundle (A8.5b removed the legacy
             vanilla bundle). Every surface mounts at its bare canonical
@@ -81,6 +83,8 @@ export function App() {
         ))}
 
         <Route path="/" element={<Navigate to="/dash" replace />} />
+
+        <Route path="/assets/:id" element={<AssetProfilePage />} />
 
         <Route path="/campaigns" element={<CampaignsPage />}>
           <Route path="new" element={<CampaignCreateRoute />} />

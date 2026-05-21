@@ -90,7 +90,56 @@ export const scopesApi = {
     if (!data) throw new Error('create scope returned no body');
     return data;
   },
+  // Run the REAL policy evaluator against an unsaved scope draft. Backed by
+  // POST /api/scopes/evaluate-draft, which feeds the draft into the same
+  // evaluateToolAction() that gates live runs. Returns the full evaluation
+  // ({ allowed, mode, explicit, reason, risk, gate, ... }).
+  dryRunPolicy: async (input: {
+    scope: {
+      name: string;
+      targets: ScopeDraftTargets;
+      allowedActions: string[];
+      blockedActions: string[];
+      expiresAt?: string | null;
+    };
+    toolName: string;
+    args?: Record<string, unknown>;
+    operatorOverride?: unknown;
+  }): Promise<PolicyEvaluation> => {
+    const data = await apiFetch<PolicyEvaluation>('/api/scopes/evaluate-draft', {
+      method: 'POST',
+      body: JSON.stringify({
+        scope: input.scope,
+        toolName: input.toolName,
+        args: input.args ?? {},
+        operatorOverride: input.operatorOverride ?? null,
+      }),
+    });
+    if (!data) throw new Error('evaluate-draft returned no body');
+    return data;
+  },
 };
+
+// Subset of ScopeTargets the evaluate-draft endpoint reads.
+export interface ScopeDraftTargets {
+  hosts?: string[];
+  domains?: string[];
+  cidrs?: string[];
+  urls?: string[];
+  assetIds?: string[];
+}
+
+// Return shape of evaluateToolAction() in server/scope/policy.js.
+export interface PolicyEvaluation {
+  allowed: boolean;
+  mode: 'auto' | 'ask' | 'deny';
+  explicit: boolean;
+  reason: string;
+  risk: string;
+  targets?: string[];
+  policyMode?: string;
+  gate: 'action' | 'time' | 'rate' | 'target' | 'expiry' | null;
+}
 
 export function useScopes() {
   return useQuery<ScopeRecord[], Error>({

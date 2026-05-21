@@ -9,13 +9,14 @@
 //
 // This page now serves the bare /alerts path (post-A8.5 cutover).
 
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, Outlet, useNavigate, useParams } from 'react-router-dom';
 
 import { ListRow } from '@/components/ListRow';
 import { SeverityBadge } from '@/components/SeverityBadge';
 import { TriageRail } from '@/components/TriageRail';
 import { PageHeader } from '@/components/PageHeader';
+import { Kv, SevTick, type Severity } from '@/components/ui/kit';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,6 +33,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip } from '@/components/ui/tooltip';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
+import { severityClass } from '@/lib/findings';
 import {
   exportFindings,
   useAsset,
@@ -40,12 +42,16 @@ import {
 import {
   parseFindingMeta,
   severityRank,
+  useFindingHistory,
   useFindings,
   useTriage,
 } from '@/lib/findings';
+import { useRunEvents } from '@/lib/runs';
 import type {
+  FindingHistoryEvent,
   FindingRecord,
   FindingTriageStatus,
+  TraceEvent,
 } from '@/lib/types';
 
 // ── Filters ───────────────────────────────────────────────────────────
@@ -107,6 +113,45 @@ function timeAgo(ts: string | null | undefined): string {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h`;
   return `${Math.floor(h / 24)}d`;
+}
+
+// Triage status → color token. Untriaged ("new") reads crit, active work
+// reads high, resolved states fall to muted — mirrors the kit's status cell.
+function statusColor(status: string): string {
+  if (status === 'new') return 'var(--sev-crit)';
+  if (status === 'in_progress' || status === 'acknowledged') return 'var(--sev-high)';
+  return 'var(--fg-3)';
+}
+
+// Pull the kit's per-row columns out of a finding's metadata, gracefully
+// degrading to the raw record fields when the optional meta keys are absent.
+interface FindingCols {
+  status: FindingTriageStatus;
+  asset: string;
+  rule: string;
+  hostPort: string;
+  cve: string;
+}
+
+function findingCols(finding: FindingRecord): FindingCols {
+  const meta = parseFindingMeta(finding);
+  const status =
+    finding.triage_status || (finding.status as FindingTriageStatus) || 'new';
+  const host = (meta.host as string) || (meta.target as string) || '';
+  const port = meta.port != null ? String(meta.port) : '';
+  const hostPort = host ? (port && port !== '—' ? `${host}:${port}` : host) : '—';
+  return {
+    status,
+    asset:
+      (meta.asset as string)
+      || (finding.assetId ? finding.assetId.slice(0, 8) : '—'),
+    rule:
+      (meta.rule as string)
+      || (meta.detector as string)
+      || '—',
+    hostPort,
+    cve: (meta.cve as string) || (meta.cwe as string) || '',
+  };
 }
 
 // ── Page ──────────────────────────────────────────────────────────────
@@ -179,8 +224,69 @@ function FindingRow({ finding, scope, onOpen }: FindingRowProps) {
   );
 }
 
+// Dense `.tbl` row — the kit's alert-queue anatomy: sev-tick · mono-cyan
+// ID · severity badge · finding · asset · rule · host:port · status · age
+// · hover-revealed row actions. Selected row gets the cyan inset.
+interface FindingTableRowProps {
+  finding: FindingRecord;
+  selected: boolean;
+  onOpen: () => void;
+}
+
+function FindingTableRow({ finding, selected, onOpen }: FindingTableRowProps) {
+  const cols = findingCols(finding);
+  const sev = severityClass(finding.severity) as Severity;
+  return (
+    <tr
+      className={selected ? 'selected' : undefined}
+      onClick={onOpen}
+      data-finding-id={finding.id}
+      data-testid="alerts-row"
+      style={{ cursor: 'pointer' }}
+    >
+      <td style={{ padding: 0 }}>
+        <SevTick s={sev} />
+      </td>
+      <td className="mono">
+        <span style={{ color: 'var(--cy-1)' }}>{finding.id.slice(0, 8)}</span>
+      </td>
+      <td>
+        <SeverityBadge severity={finding.severity} />
+      </td>
+      <td>
+        <span className="truncate-1" style={{ display: 'inline-block', maxWidth: 320 }}>
+          {finding.title || '(untitled)'}
+        </span>
+      </td>
+      <td className="mono muted">{cols.asset}</td>
+      <td className="mono muted">{cols.rule}</td>
+      <td className="mono muted">{cols.hostPort}</td>
+      <td>
+        <span className="caption" style={{ color: statusColor(cols.status) }}>
+          {cols.status}
+        </span>
+      </td>
+      <td className="ts">{timeAgo(finding.first_seen_at || finding.last_seen_at)}</td>
+      <td>
+        <button
+          type="button"
+          className="btn btn-sm btn-ghost row-actions"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen();
+          }}
+          aria-label={`Open finding ${finding.id.slice(0, 8)}`}
+        >
+          ⋯
+        </button>
+      </td>
+    </tr>
+  );
+}
+
 export function AlertsPage() {
   const navigate = useNavigate();
+  const { id: selectedId } = useParams<{ id: string }>();
   const { toast } = useToast();
   const [sev, setSev] = useState<SevFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -452,16 +558,11 @@ export function AlertsPage() {
                 </section>
               ))}
             </div>
-          ) : (
+          ) : view === 'grid' ? (
             <ul
-              className={cn(
-                'list-none m-0 p-0',
-                view === 'grid'
-                  ? 'grid grid-cols-1 gap-1.5 sm:grid-cols-2 xl:grid-cols-3'
-                  : 'flex flex-col gap-1.5',
-              )}
+              className="list-none m-0 p-0 grid grid-cols-1 gap-1.5 sm:grid-cols-2 xl:grid-cols-3"
               data-testid="alerts-list"
-              data-view={view}
+              data-view="grid"
             >
               {filtered.map((f) => (
                 <li key={f.id}>
@@ -469,6 +570,39 @@ export function AlertsPage() {
                 </li>
               ))}
             </ul>
+          ) : (
+            <div
+              className="rounded-md border border-border bg-[var(--bg-1)] overflow-auto"
+              data-testid="alerts-list"
+              data-view="queue"
+            >
+              <table className="tbl zebra dense">
+                <thead>
+                  <tr>
+                    <th style={{ width: 3, padding: 0 }} aria-label="severity" />
+                    <th style={{ width: 80 }}>ID</th>
+                    <th style={{ width: 70 }}>SEV</th>
+                    <th>FINDING</th>
+                    <th style={{ width: 140 }}>ASSET</th>
+                    <th style={{ width: 140 }}>RULE</th>
+                    <th style={{ width: 130 }}>HOST:PORT</th>
+                    <th style={{ width: 90 }}>STATUS</th>
+                    <th style={{ width: 56 }}>AGE</th>
+                    <th style={{ width: 32 }} aria-label="actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((f) => (
+                    <FindingTableRow
+                      key={f.id}
+                      finding={f}
+                      selected={f.id === selectedId}
+                      onOpen={() => openFinding(f)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </section>
 
@@ -546,11 +680,379 @@ function AssetTab({ assetId }: { assetId: string | null }) {
   );
 }
 
+type DetailTab = 'evidence' | 'asset' | 'trace' | 'history';
+
+// Section caption — the kit's mono uppercase label that introduces each
+// drawer block (EVIDENCE / PROOF-OF-CONCEPT / POLICY DECISION / …).
+function DrawerCaption({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn('caption', className)}>{children}</div>;
+}
+
+// Map a history event kind to a kit `.evt` left-border color token so the
+// timeline reads in the kit palette (detected=cyan, fixed=ok, triage=med).
+const HISTORY_EVT_COLOR: Record<FindingHistoryEvent['kind'], string> = {
+  detected: 'var(--cy-1)',
+  trace: 'var(--fg-3)',
+  updated: 'var(--fg-3)',
+  fixed: 'var(--sev-ok)',
+  triage: 'var(--sev-med)',
+};
+
+// History tab — fetches the real lifecycle from GET /api/findings/:id/history
+// (server reconstructs it from the finding's timestamps + triage state +
+// the originating run's trace_events). Renders the kit `.evt`/timeline.
+function HistoryTab({ finding }: { finding: FindingRecord }) {
+  const { data, isLoading, isError, error } = useFindingHistory(finding.id);
+
+  return (
+    <div>
+      <DrawerCaption>HISTORY</DrawerCaption>
+      <div className="timeline" style={{ marginTop: 10 }} data-testid="alert-history">
+        {isLoading ? (
+          <div className="space-y-2" data-testid="alert-history-loading">
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+        ) : isError ? (
+          <p className="text-sm text-destructive" data-testid="alert-history-error">
+            Failed to load history: {(error as Error)?.message ?? 'unknown error'}
+          </p>
+        ) : !data || data.events.length === 0 ? (
+          <p className="text-sm text-muted-foreground" data-testid="alert-history-empty">
+            No history recorded.
+          </p>
+        ) : (
+          data.events.map((e, i) => (
+            <div
+              className="evt"
+              key={`${e.kind}-${e.seq ?? i}`}
+              data-kind={e.kind}
+              data-origin={e.isOrigin || undefined}
+              style={{ borderLeft: `2px solid ${HISTORY_EVT_COLOR[e.kind]}` }}
+            >
+              <div className="hdr">
+                <span className="kind">{e.kind}</span>
+                <span className="name">{e.label}</span>
+                <span className="ts">{e.at || '—'}</span>
+              </div>
+              {e.detail ? (
+                <div
+                  className="mono"
+                  style={{ fontSize: 11, color: 'var(--fg-2)', marginTop: 2, wordBreak: 'break-word' }}
+                >
+                  {e.detail}
+                  {e.dismissalNote ? ` · ${e.dismissalNote}` : ''}
+                </div>
+              ) : null}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Compact trace-event row in the kit `.evt` anatomy: kind chip · tool/type
+// name · status · timestamp.
+function TraceEventRow({ ev }: { ev: TraceEvent }) {
+  const ok = ev.status === 'completed' || ev.status === 'ok';
+  const failed = ev.status === 'failed' || ev.status === 'error';
+  const cls = failed ? 'evt blocked' : ok ? 'evt ok' : 'evt';
+  const preview = ev.output_preview || ev.outputPreview || '';
+  return (
+    <div className={cls} data-event-type={ev.type} data-seq={ev.seq}>
+      <div className="hdr">
+        <span className="kind">{ev.phase || ev.type.split('.')[0]}</span>
+        <span className="name">{ev.tool_name || ev.type}</span>
+        {ev.status ? <span className="caption">· {ev.status}</span> : null}
+        <span className="ts">{ev.started_at || ev.created_at || ''}</span>
+      </div>
+      {preview ? (
+        <div
+          className="mono"
+          style={{ fontSize: 11, color: 'var(--fg-2)', marginTop: 2, wordBreak: 'break-word' }}
+        >
+          {preview.length > 200 ? `${preview.slice(0, 200)}…` : preview}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// Trace tab — fetches the originating run's events via useRunEvents
+// (backed by /api/runs/:id/events) and renders them as a compact kit
+// timeline. Keeps the "no run linked" empty state when runId is null.
+function TraceTab({ finding }: { finding: FindingRecord }) {
+  const { data: events, isLoading, isError, error } = useRunEvents(finding.runId);
+
+  return (
+    <div>
+      <DrawerCaption>TRACE</DrawerCaption>
+      <div style={{ marginTop: 10 }}>
+        {!finding.runId ? (
+          <p className="text-sm text-muted-foreground" data-testid="alert-trace-empty">
+            No run linked — this finding has no recorded trace.
+          </p>
+        ) : isLoading ? (
+          <div className="space-y-2" data-testid="alert-trace-loading">
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+        ) : isError ? (
+          <p className="text-sm text-destructive" data-testid="alert-trace-error">
+            Failed to load trace: {(error as Error)?.message ?? 'unknown error'}
+          </p>
+        ) : !events || events.length === 0 ? (
+          <p className="text-sm text-muted-foreground" data-testid="alert-trace-empty-events">
+            Run{' '}
+            <Link to={`/runs/${finding.runId}`} className="link mono">
+              {finding.runId.slice(0, 12)}
+            </Link>{' '}
+            has no recorded trace events.
+          </p>
+        ) : (
+          <>
+            <p className="text-[11px] text-muted-foreground mb-2">
+              {events.length} event{events.length === 1 ? '' : 's'} from run{' '}
+              <Link to={`/runs/${finding.runId}`} className="link mono">
+                {finding.runId.slice(0, 12)}
+              </Link>
+            </p>
+            <div className="timeline" data-testid="alert-trace-events">
+              {events.map((ev) => (
+                <TraceEventRow key={ev.id} ev={ev} />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface FindingDrawerProps {
+  finding: FindingRecord;
+  tab: DetailTab;
+  onTab: (t: DetailTab) => void;
+  feedback: { kind: 'ok' | 'err'; text: string } | null;
+  onTriage: (status: FindingTriageStatus, note: string | null) => void | Promise<void>;
+  triaging: boolean;
+}
+
+// The detail drawer, styled to the kit's `.drawer` anatomy inside the
+// Sheet container: header (sev-tick + badge + mono id + status + title),
+// tabbed body (Evidence / Asset / Trace / History), footer triage rail.
+function FindingDrawer({ finding, tab, onTab, feedback, onTriage, triaging }: FindingDrawerProps) {
+  const sev = severityClass(finding.severity) as Severity;
+  const cols = findingCols(finding);
+  const meta = parseFindingMeta(finding);
+  const status = cols.status;
+
+  // PoC: real finding.evidence first (string or serialized blob), then the
+  // metadata.poc/proof fallbacks, else the graceful empty state.
+  const poc =
+    (typeof finding.evidence === 'string' && finding.evidence)
+    || (finding.evidence ? JSON.stringify(finding.evidence, null, 2) : '')
+    || (meta.poc as string)
+    || (meta.proof as string)
+    || '';
+
+  // Suggested fix: real finding.recommendation first, then a structured list
+  // in metadata, else nothing.
+  const fixes: string[] = finding.recommendation
+    ? [finding.recommendation]
+    : Array.isArray(meta.remediation)
+      ? (meta.remediation as string[])
+      : Array.isArray(meta.fixes)
+        ? (meta.fixes as string[])
+        : [];
+
+  // Policy decision: an explicit metadata.policy_decision wins; otherwise we
+  // name the governing scope from the finding's real scopeId, falling back to
+  // a metadata scope name, then the graceful "no decision recorded" text.
+  const policy = (meta.policy_decision as string) || (meta.policyDecision as string) || '';
+  const scope =
+    finding.scopeId
+    || (meta.scope_name as string)
+    || (meta.scopeName as string)
+    || '';
+
+  return (
+    <div className="drawer" data-testid="alert-drawer" style={{ height: '100%' }}>
+      <SheetHeader className="drawer-hd">
+        <SevTick s={sev} />
+        <div className="grow">
+          <div className="kit-row" style={{ gap: 8, marginBottom: 2, flexWrap: 'wrap' }}>
+            <SeverityBadge severity={finding.severity} />
+            <span className="mono" style={{ fontSize: 11, color: 'var(--fg-mono-ts)' }}>
+              {finding.id.slice(0, 12)}
+            </span>
+            <span className="caption" style={{ color: statusColor(status) }}>
+              · {status}
+            </span>
+          </div>
+          <SheetTitle className="title">{finding.title || '(untitled)'}</SheetTitle>
+          <SheetDescription className="sub mono" style={{ fontSize: 11 }}>
+            {[cols.cve, cols.rule !== '—' ? `via ${cols.rule}` : '']
+              .filter(Boolean)
+              .join(' · ') || 'No detector metadata'}
+          </SheetDescription>
+        </div>
+      </SheetHeader>
+
+      <Tabs
+        value={tab}
+        onValueChange={(v) => onTab(v as DetailTab)}
+        className="drawer-bd flex flex-col min-h-0"
+      >
+        <TabsList className="tabs shrink-0" data-testid="alert-detail-tabs">
+          <TabsTrigger className="tab" value="evidence" data-testid="alert-tab-evidence">
+            Evidence
+          </TabsTrigger>
+          <TabsTrigger className="tab" value="asset" data-testid="alert-tab-asset">
+            Asset
+          </TabsTrigger>
+          <TabsTrigger className="tab" value="trace" data-testid="alert-tab-trace">
+            Trace
+          </TabsTrigger>
+          <TabsTrigger className="tab" value="history" data-testid="alert-tab-history">
+            History
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="evidence" className="flex-1 overflow-y-auto" style={{ padding: '14px 16px' }}>
+          <DrawerCaption className="mb-1.5">EVIDENCE</DrawerCaption>
+          <Kv
+            items={[
+              { k: 'asset', v: cols.asset },
+              { k: 'host:port', v: cols.hostPort },
+              { k: 'cwe / cve', v: cols.cve || '—' },
+              { k: 'detector', v: cols.rule },
+              {
+                k: 'run',
+                v: finding.runId ? (
+                  <Link to={`/runs/${finding.runId}`} className="link">
+                    {finding.runId.slice(0, 12)}
+                  </Link>
+                ) : (
+                  '—'
+                ),
+              },
+              { k: 'first seen', v: finding.first_seen_at || '—' },
+            ]}
+          />
+
+          <DrawerCaption className="mt-[18px] mb-1.5">PROOF-OF-CONCEPT</DrawerCaption>
+          {poc ? (
+            <pre
+              data-testid="alert-poc"
+              style={{
+                background: 'var(--bg-1)',
+                border: '1px solid var(--line-1)',
+                borderLeft: '2px solid var(--sev-crit)',
+                borderRadius: 'var(--r-3)',
+                padding: '10px 12px',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                color: 'var(--fg-1)',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+                lineHeight: 1.55,
+                maxHeight: 220,
+                overflow: 'auto',
+              }}
+            >
+              {poc}
+            </pre>
+          ) : (
+            <p className="text-sm text-muted-foreground" data-testid="alert-poc-empty">
+              No PoC recorded for this finding.
+            </p>
+          )}
+
+          <DrawerCaption className="mt-[18px] mb-1.5">POLICY DECISION</DrawerCaption>
+          <div
+            className="panel"
+            style={{ background: 'var(--policy-bg)', borderColor: 'var(--policy-line)' }}
+            data-testid="alert-policy"
+          >
+            <div className="panel-bd" style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <span aria-hidden="true" style={{ color: 'var(--policy)', marginTop: 2 }}>⛒</span>
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--fg-1)', fontWeight: 500 }}>
+                  {policy ? 'Policy applied' : 'No policy intervention'}
+                </div>
+                <div className="mono" style={{ fontSize: 11, color: 'var(--fg-2)', marginTop: 4 }}>
+                  {policy
+                    || (scope
+                      ? `Discovered under scope ${scope}; no exploit step was blocked.`
+                      : 'No policy decision recorded for this finding.')}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DrawerCaption className="mt-[18px] mb-1.5">SUGGESTED FIX</DrawerCaption>
+          {fixes.length > 0 ? (
+            <ul
+              data-testid="alert-fixes"
+              style={{ paddingLeft: 18, color: 'var(--fg-2)', fontSize: 12, lineHeight: 1.7 }}
+            >
+              {fixes.map((f, i) => (
+                <li key={i}>{f}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted-foreground" data-testid="alert-fixes-empty">
+              No remediation guidance recorded.
+            </p>
+          )}
+
+          {finding.description ? (
+            <>
+              <DrawerCaption className="mt-[18px] mb-1.5">DESCRIPTION</DrawerCaption>
+              <p className="text-sm text-foreground whitespace-pre-wrap break-words">
+                {finding.description}
+              </p>
+            </>
+          ) : null}
+        </TabsContent>
+
+        <TabsContent value="asset" className="flex-1 overflow-y-auto" style={{ padding: '14px 16px' }}>
+          {/* Mounted only here; the AssetTab fetch fires lazily on first
+              selection and is cached by React Query after. */}
+          {tab === 'asset' ? <AssetTab assetId={finding.assetId} /> : null}
+        </TabsContent>
+
+        <TabsContent value="trace" className="flex-1 overflow-y-auto" style={{ padding: '14px 16px' }}>
+          <TraceTab finding={finding} />
+        </TabsContent>
+
+        <TabsContent value="history" className="flex-1 overflow-y-auto" style={{ padding: '14px 16px' }}>
+          <HistoryTab finding={finding} />
+        </TabsContent>
+      </Tabs>
+
+      <div className="drawer-ft" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+        {feedback ? (
+          <p
+            role="status"
+            className={feedback.kind === 'ok' ? 'text-xs text-[var(--ok-2)]' : 'text-xs text-destructive'}
+          >
+            {feedback.text}
+          </p>
+        ) : null}
+        <TriageRail finding={finding} onTriage={onTriage} disabled={triaging} />
+      </div>
+    </div>
+  );
+}
+
 export function AlertDetailRoute() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [open, setOpen] = useState(true);
-  const [tab, setTab] = useState<'detail' | 'asset'>('detail');
+  const [tab, setTab] = useState<DetailTab>('evidence');
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   // Read the cached list and find by id. /api/findings/:id isn't a
@@ -595,135 +1097,14 @@ export function AlertDetailRoute() {
             </SheetDescription>
           </SheetHeader>
         ) : (
-          <>
-            <SheetHeader>
-              <div className="flex items-center gap-2 flex-wrap">
-                <SeverityBadge severity={finding.severity} />
-                <span className="font-mono text-[10px] text-muted-foreground">
-                  {finding.id.slice(0, 12)}
-                </span>
-                <Badge variant="outline">
-                  {finding.triage_status || finding.status || 'new'}
-                </Badge>
-              </div>
-              <SheetTitle>{finding.title || '(untitled)'}</SheetTitle>
-              <SheetDescription>
-                {finding.first_seen_at
-                  ? `First seen ${finding.first_seen_at}`
-                  : 'No first-seen timestamp'}
-              </SheetDescription>
-            </SheetHeader>
-
-            <Tabs
-              value={tab}
-              onValueChange={(v) => setTab(v as 'detail' | 'asset')}
-              className="flex-1 flex flex-col min-h-0"
-            >
-              <TabsList className="shrink-0" data-testid="alert-detail-tabs">
-                <TabsTrigger value="detail" data-testid="alert-tab-detail">
-                  Detail
-                </TabsTrigger>
-                <TabsTrigger value="asset" data-testid="alert-tab-asset">
-                  Asset
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent
-                value="detail"
-                className="flex-1 overflow-y-auto px-4 py-4 space-y-3"
-              >
-              {finding.description ? (
-                <section>
-                  <h3 className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted-foreground mb-1">
-                    Description
-                  </h3>
-                  <p className="text-sm text-foreground whitespace-pre-wrap break-words">
-                    {finding.description}
-                  </p>
-                </section>
-              ) : null}
-              {finding.recommendation ? (
-                <section>
-                  <h3 className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted-foreground mb-1">
-                    Recommendation
-                  </h3>
-                  <p className="text-sm text-foreground whitespace-pre-wrap break-words">
-                    {finding.recommendation}
-                  </p>
-                </section>
-              ) : null}
-              <section>
-                <h3 className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted-foreground mb-1">
-                  Source
-                </h3>
-                <dl className="grid grid-cols-[80px_1fr] gap-x-3 gap-y-1 text-[12px]">
-                  <dt className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted-foreground self-center">
-                    Run
-                  </dt>
-                  <dd className="font-mono text-[11px]">
-                    {finding.runId ? (
-                      <Link
-                        to={`/runs/${finding.runId}`}
-                        className="text-[var(--cy-2)] hover:underline"
-                      >
-                        {finding.runId.slice(0, 12)}
-                      </Link>
-                    ) : (
-                      '—'
-                    )}
-                  </dd>
-                  <dt className="font-mono text-[10px] uppercase tracking-[0.06em] text-muted-foreground self-center">
-                    Asset
-                  </dt>
-                  <dd className="font-mono text-[11px]">
-                    {finding.assetId ? finding.assetId.slice(0, 12) : '—'}
-                  </dd>
-                </dl>
-              </section>
-              {finding.evidence ? (
-                <details className="rounded-md border border-border bg-[var(--bg-1)] px-3 py-2">
-                  <summary className="cursor-pointer text-xs font-semibold text-foreground">
-                    Evidence
-                  </summary>
-                  <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] text-[var(--fg-2)]">
-                    {typeof finding.evidence === 'string'
-                      ? finding.evidence
-                      : JSON.stringify(finding.evidence, null, 2)}
-                  </pre>
-                </details>
-              ) : null}
-              </TabsContent>
-
-              <TabsContent
-                value="asset"
-                className="flex-1 overflow-y-auto px-4 py-4"
-              >
-                {/* Mounted only here; the AssetTab fetch fires lazily on
-                    first selection and is cached by React Query after. */}
-                {tab === 'asset' ? <AssetTab assetId={finding.assetId} /> : null}
-              </TabsContent>
-            </Tabs>
-
-            <div className="border-t border-border px-4 py-3 space-y-2">
-              {feedback ? (
-                <p
-                  role="status"
-                  className={
-                    feedback.kind === 'ok'
-                      ? 'text-xs text-[var(--ok-2)]'
-                      : 'text-xs text-destructive'
-                  }
-                >
-                  {feedback.text}
-                </p>
-              ) : null}
-              <TriageRail
-                finding={finding}
-                onTriage={handleTriage}
-                disabled={triage.isPending}
-              />
-            </div>
-          </>
+          <FindingDrawer
+            finding={finding}
+            tab={tab}
+            onTab={setTab}
+            feedback={feedback}
+            onTriage={handleTriage}
+            triaging={triage.isPending}
+          />
         )}
       </SheetContent>
     </Sheet>

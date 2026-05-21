@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { apiFetch } from './api';
 import type {
+  FindingHistory,
   FindingRecord,
   FindingSeverity,
   FindingTriageStatus,
@@ -25,12 +26,15 @@ export function severityRank(sev: string | null | undefined): number {
   return SEV_RANK[String(sev || '').toLowerCase()] ?? 0;
 }
 
-export function severityClass(sev: string | null | undefined): 'crit' | 'high' | 'med' | 'low' | 'info' {
+export function severityClass(
+  sev: string | null | undefined,
+): 'crit' | 'high' | 'med' | 'low' | 'info' | 'ok' {
   const s = String(sev || '').toLowerCase();
   if (s === 'critical' || s === 'crit') return 'crit';
   if (s === 'high') return 'high';
   if (s === 'medium' || s === 'med') return 'med';
   if (s === 'low') return 'low';
+  if (s === 'ok') return 'ok';
   return 'info';
 }
 
@@ -81,12 +85,29 @@ export const findingsApi = {
     if (!data) throw new Error('triage returned no finding');
     return data;
   },
+  history: async (id: string): Promise<FindingHistory> => {
+    const data = await apiFetch<FindingHistory>(
+      `/api/findings/${encodeURIComponent(id)}/history`,
+    );
+    if (!data) throw new Error('history returned no body');
+    return data;
+  },
 };
 
 export function useFindings(q: FindingsQuery = {}) {
   return useQuery({
     queryKey: ['findings', 'list', q],
     queryFn: () => findingsApi.list(q),
+  });
+}
+
+// Lifecycle history for a single finding. Disabled until an id is present
+// (the History tab only mounts the query once a finding is selected).
+export function useFindingHistory(id: string | null | undefined) {
+  return useQuery({
+    queryKey: ['findings', 'history', id],
+    queryFn: () => findingsApi.history(id!),
+    enabled: Boolean(id),
   });
 }
 

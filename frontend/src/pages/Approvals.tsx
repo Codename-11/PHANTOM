@@ -24,6 +24,7 @@ import { Link, Outlet, useNavigate, useParams } from 'react-router-dom';
 import { ApprovalCard } from '@/components/ApprovalCard';
 import { ApprovalsHistory } from '@/components/ApprovalsHistory';
 import { ApprovalsKpiStrip } from '@/components/ApprovalsKpiStrip';
+import { EngagingIcon } from '@/components/AgentStateIcon';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
 import {
@@ -309,6 +310,18 @@ export function ApprovalDetailRoute() {
                 >
                   {feedback.text}
                 </p>
+              ) : null}
+              {approve.isPending ? (
+                <div
+                  role="status"
+                  className="flex items-center gap-2 text-xs text-[var(--cy-1)]"
+                  data-testid="approval-engaging"
+                >
+                  <EngagingIcon size={20} />
+                  <span className="font-mono uppercase tracking-[0.06em]">
+                    Engaging · running authorized install…
+                  </span>
+                </div>
               ) : null}
               {approval.status === 'pending' ? (
                 <div className="flex flex-wrap gap-2 justify-end">

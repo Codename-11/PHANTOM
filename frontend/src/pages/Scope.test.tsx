@@ -2,10 +2,11 @@
 // Mirrors the Campaigns list test pattern so the assertion shape stays
 // uniform across the migrated surfaces.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
+import { Route, Routes } from 'react-router-dom';
 
 import { renderWithProviders } from '@/test/test-utils';
-import ScopesPage from './Scope';
+import ScopesPage, { ScopeDetailRoute } from './Scope';
 import type { ScopeRecord } from '@/lib/types';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -103,6 +104,40 @@ describe('ScopesPage', () => {
     await waitFor(() => {
       expect(screen.getByText('archived')).toBeInTheDocument();
     });
+  });
+
+  it('renders the detail metadata as a Kv grid with target chips + class badges', async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse(
+        makeScope({
+          rules_of_engagement: 'No traffic after 22:00.',
+          notes: 'handle with care',
+        }),
+      ),
+    ) as unknown as typeof fetch;
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/scope/:id" element={<ScopeDetailRoute />} />
+      </Routes>,
+      { route: '/scope/s1' },
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('scope-detail-kv')).toBeInTheDocument();
+    });
+    const kv = screen.getByTestId('scope-detail-kv');
+    // Kv keys present.
+    expect(within(kv).getByText('Allowed')).toBeInTheDocument();
+    expect(within(kv).getByText('Blocked')).toBeInTheDocument();
+    expect(within(kv).getByText('RoE')).toBeInTheDocument();
+    // Targets render as kit target chips.
+    expect(kv.querySelector('.chip.target[data-value]')).toBeTruthy();
+    expect(within(kv).getByText('10.0.0.5')).toBeInTheDocument();
+    // Allowed/blocked classes render as `.badge` chips.
+    expect(kv.querySelector('.badge.ok')).toBeTruthy();
+    expect(kv.querySelector('.badge.policy')).toBeTruthy();
+    expect(within(kv).getByText('No traffic after 22:00.')).toBeInTheDocument();
   });
 
   it('shows the failure banner on a network error', async () => {

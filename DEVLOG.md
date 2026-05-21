@@ -521,3 +521,95 @@ Notes:
 Notes:
 - Artifacts, graph visualization, scope policy enforcement, and prompt profile editing remain intentionally out of scope for this slice.
 - `phantom.service` was restarted after implementation to validate the live smoke path.
+
+## 2026-05-21 17:25 EDT — UI parity pass: restore the SEC UI-kit concept after the React migration
+
+The A8.x React migration had "minified" the UI away from the PHANTOM SEC UI-kit
+concept: it kept the app shell but collapsed the design-token system to a ~15-token
+subset and rebuilt screens as generic shadcn surfaces, dropping the kit's purpose-built
+component anatomy. Audited current React vs the design handoff bundle (`.design-fetch-v3`)
+and executed a full-parity enhancement plan via an agent team. Plan: `docs/UI_ENHANCEMENT_PLAN.md`.
+
+Foundation (single source of truth restored):
+- `frontend/src/styles/globals.css` — re-expanded the token system to full kit parity
+  (severity scale crit/high/med/low/info/ok ×fg/bg/line, governance `--policy`/`--redacted`,
+  spacing `--s-*`, radii `--r-*`, font-size `--fs-*`, density `--row-*`/`--ctl-h` + compact
+  override, motion `--ease`/`--t-*`, elevation `--elev-*`/`--ring-focus`, interaction tints).
+  Legacy aliases (`--danger`/`--ok-2`/`--warn-2`) kept so in-flight components don't break.
+- `tailwind.config.ts` — exposed sev-*/policy colors, r1–r5 radii, fs-* sizes, elevation shadows.
+- `frontend/src/styles/kit-components.css` (new) — ported the kit's semantic component classes
+  (.panel/.stat/.sev-tick/.evt timeline/.chip.target/.drawer/.kv/.bar/.spark/.tbl/.alert-row/.cmdk),
+  omitting the kit's global `*` reset so Tailwind preflight stays authoritative. Imported in main.tsx.
+- `frontend/src/components/ui/kit.tsx` (new) — typed primitives Panel/Stat/SevTick/Chip/TargetChip/
+  Bar/Spark/Kv/ButtonGroup/Kbd. `SeverityBadge` refactored to the kit `.badge` anatomy + the missing `ok` level.
+
+Screens brought to kit parity (one agent each, composing the primitives):
+- Dash → cockpit: 6-up KPI Stat strip + Live runs / Untriaged (sev-tick) / Policy-decisions-24h (bars
+  + top-reasons) / Toolpack-availability / Asset-health-movers panels.
+- Alerts → alert-queue: dense `.tbl.zebra.dense` with sev-tick edge + mono-cyan IDs + hover row-actions
+  + selected cyan inset; detail drawer with Evidence/Asset/Trace/History tabs, Kv grid, Policy Decision,
+  PoC pre-block, Suggested Fix.
+- Runs → run-detail: `.timeline`/`.evt` grammar (tool=cyan-filled, blocked=purple, failed=red, ok=green)
+  with inline `.cmd` blocks + `.reason` lines; persistent right Kv metadata drawer (run/scope/prompt/artifacts,
+  redacted creds shown as `•••`).
+- Graph: legend overlay, orthogonal + dashed policy edges, node kind-badges + sub-text, replay marker,
+  grid background, zoom-widget overlay, node inspector drawer, toolbar (search/seg-tabs/follow/show-blocked).
+- Scope builder: `.chip.target` mono targets, allow/ask/deny action matrix (locked exploit/destructive rows),
+  client-side dry-run policy-preview drawer; Scope detail → Kv grid.
+- Asset Profile (new page + route `/assets/:id`): identity Kv, health score + spark + severity distribution,
+  open-findings .tbl with sev-tick, services table, scope membership.
+
+Validation passed:
+- `npm run build:react` — passing (CSS bundle 53 kB).
+- `npm run test:frontend` — 170/170 passing (25 files; +19 new tests from the parity work).
+- `npx tsc --noEmit -p tsconfig.frontend.json` — 0 errors.
+
+Notes / deferrals:
+- Visual screenshot capture was skipped — browser automation wasn't connected this session; `npm run dev`
+  (localhost:5173) left running for manual review.
+- Several panels derive/placeholder fields the API doesn't expose yet (asset health score, toolpack readiness,
+  per-finding PoC/history). The scope dry-run is a labelled client-side preview (no dry-run endpoint).
+- Runs trace timeline couldn't be eyeballed with live events (runs table empty in the seed); renders empty state.
+
+## 2026-05-21 17:48 EDT — UI parity wave 2: brand/motion layer + placeholder fixes
+
+Second pass after a re-audit against the design handoff. Two gaps closed: (1) the motion/brand
+layer from chat2.md was never ported, and (2) several first-pass "placeholders" were actually
+backed by endpoints the agents hadn't discovered.
+
+Brand & motion (was 0% incorporated):
+- NEW `frontend/src/components/PhantomMark.tsx` — packet-train logomark (static sidebar + animated
+  splash variants, prefers-reduced-motion aware). Replaces the plain `bg-primary` dot in AppShell.
+- NEW `frontend/src/components/SplashScreen.tsx` — animated packet-train boot screen; now the App.tsx
+  Suspense fallback (was literal "Loading…").
+- `frontend/src/index.html` — added the kit's packet-train favicon data-URI.
+- NEW `frontend/src/components/AgentStateIcon.tsx` + `styles/agent-states.css` — the four isometric
+  agent-state animations (loading/scanning/engaging/verified) with reduced-motion fallbacks, imported
+  in main.tsx. Wired: RunPill running→scanning, completed→verified (one-shot); Runs.tsx loading
+  skeletons → contextual loading/scanning loaders. (Engaging exported, reserved for a future
+  tool-execution/approval surface.)
+
+Placeholder fixes (mostly real endpoints that were never wired):
+- Dash asset health → real aggregation of `/api/findings` by assetId (open count + worst severity),
+  labelled findings-derived. Toolpack readiness → real `/api/toolpacks/:id/availability` ($PATH check).
+- Graph search → client-side label filter (dims non-matches); Run/Topology/Asset view-switch → new
+  deterministic `nodeTypeFilter` param on `layoutGraph()` (backward-compatible default).
+- Alerts Trace tab → real `/api/runs/:id/events` via `useRunEvents`; PoC/Policy/Suggested-Fix now read
+  real finding fields (evidence/scopeId/recommendation) before metadata fallback.
+- Alerts History tab → NEW read-only `GET /api/findings/:id/history` (server/assets/asset-store.js
+  `getFindingHistory` + server/routes/api.js), reconstructs lifecycle from finding timestamps +
+  triage + the run's trace_events; mirrors the /api/approvals pattern; +2 server tests.
+- Scope dry-run → now calls the REAL evaluator via `POST /api/scopes/evaluate-draft` (probes each
+  action class + a synthetic out-of-scope action); client-side preview kept only as a labelled
+  fallback if the call fails.
+
+Validation passed:
+- `npx tsc --noEmit -p tsconfig.frontend.json` — 0 errors.
+- `npm run build:react` — clean.
+- `npm run test:frontend` — 191/191 (27 files; +21 since wave 1).
+- `npm run test:unit` — 390/390 (47 suites), including the new findings-history endpoint.
+
+Remaining deferrals:
+- Visual screenshot capture still pending (no browser automation this session); dev server at
+  localhost:5173 for manual review.
+- Engaging animation is built but unwired (no run state maps to it yet).

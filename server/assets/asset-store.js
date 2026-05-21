@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { getDB, getRun, createRun, addTraceEvent } from '../memory/store.js';
+import { getDB, getRun, createRun, addTraceEvent, getTraceEvents } from '../memory/store.js';
 
 function parseJSON(value, fallback) {
   if (!value) return fallback;
@@ -301,6 +301,105 @@ export function setFindingTriage(id, { triageStatus, dismissalNote = null }) {
 
 export function isHighSeverity(severity) {
   return severity === 'high' || severity === 'critical';
+}
+
+// Reconstructs a finding's lifecycle timeline — no dedicated audit table.
+// Mirrors the /api/approvals pattern: derive the log from existing state
+// (the finding's own timestamps + triage state) joined with the
+// trace_events of the originating run, so consumers get an ordered event
+// list without a schema change.
+//
+// Event kinds emitted:
+//   detected   — first_seen_at  (the finding was first recorded)
+//   trace      — each trace_event from the originating run (run context)
+//   updated    — last_seen_at   (most recent re-observation / triage write)
+//   fixed      — fixed_at        (only when set)
+//   triage     — current triage_status (+ dismissal_note when dismissed)
+export function getFindingHistory(id, { traceLimit = 200 } = {}) {
+  const finding = getFinding(id);
+  if (!finding) return null;
+
+  const events = [];
+
+  if (finding.first_seen_at) {
+    events.push({
+      kind: 'detected',
+      label: 'Detected',
+      at: finding.first_seen_at,
+      detail: finding.title || '',
+    });
+  }
+
+  // Pull the originating run's trace events — these give the lifecycle the
+  // surrounding context (which tool produced it, what ran before/after). We
+  // anchor on the recorded trace_event_id when present so the producing
+  // event is flagged; otherwise we still surface the run's trace.
+  let traceEvents = [];
+  if (finding.runId) {
+    traceEvents = getTraceEvents(finding.runId, { limit: traceLimit }).map((ev) => ({
+      kind: 'trace',
+      label: ev.tool_name || ev.type,
+      at: ev.started_at || ev.created_at,
+      detail: ev.output_preview || ev.phase || '',
+      eventType: ev.type,
+      seq: ev.seq,
+      isOrigin: finding.traceEventId ? ev.id === finding.traceEventId : false,
+    }));
+  }
+  events.push(...traceEvents);
+
+  // last_seen_at marks the latest re-observation / triage write. Only emit
+  // it when it differs from first_seen_at so a freshly-created finding
+  // doesn't show a redundant row.
+  if (finding.last_seen_at && finding.last_seen_at !== finding.first_seen_at) {
+    events.push({
+      kind: 'updated',
+      label: 'Last seen',
+      at: finding.last_seen_at,
+      detail: '',
+    });
+  }
+
+  if (finding.fixed_at) {
+    events.push({
+      kind: 'fixed',
+      label: 'Marked fixed',
+      at: finding.fixed_at,
+      detail: '',
+    });
+  }
+
+  const triageStatus = finding.triage_status || 'new';
+  events.push({
+    kind: 'triage',
+    label: 'Triage',
+    at: finding.last_seen_at || finding.first_seen_at || null,
+    detail: triageStatus,
+    dismissalNote: finding.dismissal_note || null,
+  });
+
+  // Stable chronological order; rows without a timestamp sort last but keep
+  // insertion order among themselves.
+  const ts = (e) => {
+    if (!e.at) return Number.POSITIVE_INFINITY;
+    const t = Date.parse(e.at);
+    return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
+  };
+  const ordered = events
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => (ts(a.e) - ts(b.e)) || (a.i - b.i))
+    .map(({ e }) => e);
+
+  return {
+    findingId: finding.id,
+    runId: finding.runId,
+    traceEventId: finding.traceEventId,
+    scopeId: finding.scopeId,
+    severity: finding.severity,
+    triageStatus,
+    dismissalNote: finding.dismissal_note || null,
+    events: ordered,
+  };
 }
 
 function normalizeSnapshot(row) {

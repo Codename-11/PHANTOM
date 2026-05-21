@@ -1,6 +1,6 @@
-// Trace timeline — renders one row per event and maps event status /
-// type onto a severity bucket so the dot color follows the convention
-// from the legacy `.trace-event` CSS.
+// Trace timeline — renders the run's events using the kit's `.timeline` /
+// `.evt` grammar and maps event status / type onto the kit's event state
+// (tool / blocked / failed / ok / default) used by the colored node.
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
@@ -34,42 +34,74 @@ describe('TraceTimeline', () => {
     expect(screen.getByTestId('trace-timeline-empty')).toBeInTheDocument();
   });
 
-  it('renders one row per event with the correct labels', () => {
+  it('renders one .evt node per event with the kind + tool name labels', () => {
     const events: TraceEvent[] = [
       ev({ seq: 1, type: 'run.started', status: 'started', phase: 'init' }),
       ev({ seq: 2, type: 'tool.call.completed', tool_name: 'http.get', status: 'completed' }),
       ev({ seq: 3, type: 'tool.call.blocked', tool_name: 'shell.exec', status: 'blocked', phase: 'tool' }),
       ev({ seq: 4, type: 'run.failed', status: 'failed', phase: 'end' }),
     ];
-    render(<TraceTimeline events={events} />);
-    const rows = screen.getByTestId('trace-timeline').querySelectorAll('li');
+    const { container } = render(<TraceTimeline events={events} />);
+    const rows = screen.getByTestId('trace-timeline').querySelectorAll('.evt');
     expect(rows.length).toBe(4);
-    expect(screen.getByText('#1')).toBeInTheDocument();
-    expect(screen.getByText('#2')).toBeInTheDocument();
-    expect(screen.getByText('http.get')).toBeInTheDocument();
-    expect(screen.getByText('shell.exec')).toBeInTheDocument();
+    // Event type renders in the `.kind` slot.
+    const kinds = Array.from(container.querySelectorAll('.evt .hdr .kind')).map(
+      (n) => n.textContent,
+    );
+    expect(kinds).toContain('run.started');
+    expect(kinds).toContain('tool.call.completed');
+    // Tool name renders in the `.name` slot.
+    const names = Array.from(container.querySelectorAll('.evt .hdr .name')).map(
+      (n) => n.textContent,
+    );
+    expect(names).toContain('http.get');
+    expect(names).toContain('shell.exec');
   });
 
-  it('maps status / type onto the severity attribute used by the dot', () => {
+  it('maps status / type onto the kit event state used by the node color', () => {
     const events: TraceEvent[] = [
       ev({ seq: 1, type: 'run.started', status: 'started' }),
-      ev({ seq: 2, type: 'tool.call.completed', status: 'completed' }),
-      ev({ seq: 3, type: 'tool.call.blocked', status: 'blocked' }),
-      ev({ seq: 4, type: 'tool.call.failed', status: 'failed' }),
+      ev({ seq: 2, type: 'tool.call.completed', tool_name: 'http.get', status: 'completed' }),
+      ev({ seq: 3, type: 'tool.call.blocked', tool_name: 'shell.exec', status: 'blocked' }),
+      ev({ seq: 4, type: 'tool.call.failed', tool_name: 'http.get', status: 'failed' }),
+      ev({ seq: 5, type: 'assistant.reply', status: 'completed' }),
     ];
     render(<TraceTimeline events={events} />);
-    const rows = screen.getByTestId('trace-timeline').querySelectorAll('li');
-    expect(rows[0]?.getAttribute('data-event-severity')).toBe('info');
-    expect(rows[1]?.getAttribute('data-event-severity')).toBe('success');
-    expect(rows[2]?.getAttribute('data-event-severity')).toBe('warn');
-    expect(rows[3]?.getAttribute('data-event-severity')).toBe('error');
+    const rows = screen.getByTestId('trace-timeline').querySelectorAll('.evt');
+    expect(rows[0]?.getAttribute('data-event-state')).toBe('info');
+    expect(rows[1]?.getAttribute('data-event-state')).toBe('tool');
+    expect(rows[2]?.getAttribute('data-event-state')).toBe('blocked');
+    expect(rows[3]?.getAttribute('data-event-state')).toBe('failed');
+    expect(rows[4]?.getAttribute('data-event-state')).toBe('ok');
+    // The kit class is applied for non-default states.
+    expect(rows[1]?.classList.contains('tool')).toBe(true);
+    expect(rows[2]?.classList.contains('blocked')).toBe(true);
+    expect(rows[3]?.classList.contains('failed')).toBe(true);
+    expect(rows[4]?.classList.contains('ok')).toBe(true);
   });
 
-  it('renders the outputPreview snippet when present', () => {
+  it('renders the outputPreview snippet in the body when present', () => {
     const events: TraceEvent[] = [
       ev({ seq: 1, type: 'assistant.reply', output_preview: 'hello world' }),
     ];
     render(<TraceTimeline events={events} />);
     expect(screen.getByText('hello world')).toBeInTheDocument();
+  });
+
+  it('renders a .cmd block for tool events and a .reason line for blocked events', () => {
+    const events: TraceEvent[] = [
+      ev({
+        seq: 1,
+        type: 'tool.call.blocked',
+        tool_name: 'shell.exec',
+        status: 'blocked',
+        metadata: { reason: 'destructive action not allowed' },
+      }),
+    ];
+    const { container } = render(<TraceTimeline events={events} />);
+    const cmd = container.querySelector('.evt.blocked .body .cmd');
+    expect(cmd?.textContent).toBe('shell.exec');
+    const reason = container.querySelector('.evt.blocked .reason');
+    expect(reason?.textContent).toContain('destructive action not allowed');
   });
 });

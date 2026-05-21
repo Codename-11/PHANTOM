@@ -1,7 +1,15 @@
 // Run status pill. Tiny Badge wrapper that picks the right variant per
 // RunStatus so the list rows + detail header render with consistent
 // chip styling. Mirrors the CampaignPill / ScopePill pattern.
+//
+// A live run states map onto the ported agent-state animations so the
+// pill carries motion, not just color:
+//   running   → ScanningIcon (active recon sweep — the agent is working)
+//   completed → VerifiedIcon (green check draw, plays once)
+// Other statuses stay text-only. The status label text is always
+// preserved so screen readers + tests still read the word.
 import { Badge } from './ui/badge';
+import { ScanningIcon, VerifiedIcon } from './AgentStateIcon';
 import type { CampaignStatus, RunStatus } from '@/lib/types';
 
 interface RunPillProps {
@@ -23,11 +31,26 @@ const VARIANT_BY_STATUS: Record<RunStatus, CampaignStatus> = {
   unknown: 'draft',
 };
 
+// Inline agent-state icon for the in-flight / resolved statuses. Sized to
+// sit flush with the pill's text cap-height.
+function StatusIcon({ status }: { status: string }) {
+  if (status === 'running') {
+    return <ScanningIcon size={14} className="-ml-0.5 shrink-0" />;
+  }
+  if (status === 'completed') {
+    return <VerifiedIcon size={14} className="-ml-0.5 shrink-0" play />;
+  }
+  return null;
+}
+
 export function RunPill({ status, className }: RunPillProps) {
   const variant = (VARIANT_BY_STATUS[status as RunStatus] ?? 'draft') as CampaignStatus;
   return (
     <Badge variant={variant} className={className}>
-      {status}
+      <span className="inline-flex items-center gap-1">
+        <StatusIcon status={status} />
+        {status}
+      </span>
     </Badge>
   );
 }

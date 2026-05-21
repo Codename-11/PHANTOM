@@ -15,6 +15,7 @@ import { renderWithProviders } from '@/test/test-utils';
 import { ToastProvider } from '@/components/ui/toast';
 import ScopeCreateRoute, {
   bucketTargets,
+  computePolicyPreview,
   defaultScopeFormState,
   validateScopeForm,
   type TargetChip,
@@ -112,6 +113,110 @@ describe('scope-builder action-mode semantics (deny-default)', () => {
     expect(blockedActions).toContain('destructive');
     expect(blockedActions).toContain('online-bruteforce');
     expect(blockedActions).not.toContain('network-scan'); // ask
+  });
+});
+
+describe('computePolicyPreview (client-side dry-run)', () => {
+  it('maps auto→allow, ask→allow(gate), deny→block + a synthetic out-of-scope block', () => {
+    let modes = defaultActionModes();
+    modes = setActionMode(modes, 'network-scan', 'ask');
+    const preview = computePolicyPreview(modes, []);
+
+    // One row per action class + the synthetic out-of-scope probe.
+    expect(preview.actions).toHaveLength(ACTION_CLASSES.length + 1);
+    const oos = preview.actions.find((a) => a.cls === 'out-of-scope');
+    expect(oos?.decision).toBe('block');
+
+    // recon (auto) allows; network-scan (ask) counts as allowed-with-gate.
+    expect(preview.actions.find((a) => a.cls === 'recon')?.decision).toBe('allow');
+    expect(preview.actions.find((a) => a.cls === 'network-scan')?.decision).toBe('ask');
+    // Locked classes are always blocked.
+    expect(preview.actions.find((a) => a.cls === 'exploit')?.decision).toBe('block');
+
+    // Counts: ask is allowed, block tallies separately, pct is clamped 0..100.
+    expect(preview.allowed + preview.blocked).toBe(preview.actions.length);
+    expect(preview.allowedPct).toBeGreaterThanOrEqual(0);
+    expect(preview.allowedPct).toBeLessThanOrEqual(100);
+  });
+
+  it('interpolates the first target into the sample command', () => {
+    const preview = computePolicyPreview(defaultActionModes(), [
+      { id: 'host:lab.test', kind: 'host', value: 'lab.test' },
+    ]);
+    const recon = preview.actions.find((a) => a.cls === 'recon');
+    expect(recon?.command).toContain('lab.test');
+  });
+});
+
+describe('ScopeCreate policy preview drawer', () => {
+  let originalFetch: typeof fetch;
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('renders the preview drawer with allowed/blocked counts and an out-of-scope block row', async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse([])) as unknown as typeof fetch;
+    renderRoute();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('scope-policy-preview')).toBeInTheDocument();
+    });
+    // Summary surfaces both counts.
+    expect(screen.getByTestId('scope-preview-allowed')).toBeInTheDocument();
+    expect(screen.getByTestId('scope-preview-blocked')).toBeInTheDocument();
+    // The sample-action list includes the synthetic out-of-scope block.
+    const actions = screen.getByTestId('scope-preview-actions');
+    expect(actions.querySelector('[data-action-class="out-of-scope"]')).not.toBeNull();
+    expect(
+      actions.querySelector('[data-action-class="out-of-scope"]'),
+    ).toHaveAttribute('data-decision', 'block');
+  });
+
+  it('uses the real evaluator (POST /api/scopes/evaluate-draft) and labels the drawer "Dry-run"', async () => {
+    let evalCalls = 0;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/scopes/evaluate-draft') && init?.method === 'POST') {
+        evalCalls++;
+        // Real evaluator shape — deny for everything keeps the assertion simple.
+        return jsonResponse({
+          allowed: false, mode: 'deny', explicit: true,
+          reason: 'denied by draft policy', risk: 'network-scan',
+          targets: [], policyMode: 'governed', gate: 'action',
+        });
+      }
+      return jsonResponse([]);
+    }) as unknown as typeof fetch;
+
+    renderRoute();
+
+    // Once the real evaluator responds, the drawer flips Preview → Dry-run.
+    await waitFor(() => {
+      expect(screen.getByTestId('scope-preview-mode')).toHaveTextContent('Dry-run');
+    });
+    expect(evalCalls).toBeGreaterThan(0);
+  });
+
+  it('falls back to the client-side preview when the evaluator call fails', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/scopes/evaluate-draft') && init?.method === 'POST') {
+        return jsonResponse({ error: 'boom' }, 500);
+      }
+      return jsonResponse([]);
+    }) as unknown as typeof fetch;
+
+    renderRoute();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('scope-policy-preview')).toBeInTheDocument();
+    });
+    // Failure keeps the client-side label.
+    expect(screen.getByTestId('scope-preview-mode')).toHaveTextContent('Preview');
   });
 });
 

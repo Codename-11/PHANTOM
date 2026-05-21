@@ -602,6 +602,73 @@ describe('API Routes Integration', () => {
     assert.ok(!JSON.stringify(detail).includes('vault:portal-ref'));
   });
 
+  test('GET /api/findings/:id/history reconstructs the lifecycle from timestamps + trace_events', async () => {
+    // Build a scope → run → trace events → finding chain so the history has
+    // real run context to fold in.
+    let res = await fetch(`${baseUrl}/scopes`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'History scope', targets: { hosts: ['hist.example.test'] }, allowedActions: ['recon'] }),
+    });
+    assert.strictEqual(res.status, 200);
+    const scope = await res.json();
+
+    const conv = createConversation('History API run');
+    const run = createRun({ conversationId: conv.id, title: 'History run', goal: 'g', model: 'grok-4.3', providerRoute: 'hermes-proxy', scopeId: scope.id });
+    const startEvent = addTraceEvent(run.id, { type: 'run.started', phase: 'general', status: 'started', outputPreview: 'kickoff' });
+    const toolEvent = addTraceEvent(run.id, { type: 'tool.call.completed', phase: 'tool', status: 'completed', toolName: 'web_request', outputPreview: 'Server: nginx leaked' });
+
+    // Asset + finding anchored on the producing trace event.
+    res = await fetch(`${baseUrl}/assets`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'host', name: 'hist-host' }),
+    });
+    const asset = await res.json();
+
+    res = await fetch(`${baseUrl}/findings`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assetId: asset.id, runId: run.id, traceEventId: toolEvent.id, scopeId: scope.id, title: 'Header leak', severity: 'medium', evidence: 'Server: nginx', recommendation: 'Hide version header' }),
+    });
+    assert.strictEqual(res.status, 200);
+    const finding = await res.json();
+
+    // Triage it so the triage row carries a real status.
+    res = await fetch(`${baseUrl}/findings/${finding.id}/triage`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ triageStatus: 'acknowledged' }),
+    });
+    assert.strictEqual(res.status, 200);
+
+    // History endpoint.
+    res = await fetch(`${baseUrl}/findings/${finding.id}/history`);
+    assert.strictEqual(res.status, 200);
+    const history = await res.json();
+    assert.strictEqual(history.findingId, finding.id);
+    assert.strictEqual(history.runId, run.id);
+    assert.strictEqual(history.scopeId, scope.id);
+    assert.strictEqual(history.triageStatus, 'acknowledged');
+    assert.ok(Array.isArray(history.events) && history.events.length > 0);
+
+    // Lifecycle anchors present.
+    assert.ok(history.events.some((e) => e.kind === 'detected'), 'has a detected event');
+    assert.ok(history.events.some((e) => e.kind === 'triage' && e.detail === 'acknowledged'), 'has the triage status');
+
+    // Run trace events are folded in, and the producing event is flagged.
+    const traceEvents = history.events.filter((e) => e.kind === 'trace');
+    assert.strictEqual(traceEvents.length, 2, 'both run trace events appear');
+    assert.ok(traceEvents.some((e) => e.eventType === 'run.started'));
+    const origin = traceEvents.find((e) => e.isOrigin);
+    assert.ok(origin, 'the originating trace event is flagged');
+    assert.strictEqual(origin.eventType, 'tool.call.completed');
+    // startEvent is not the origin.
+    assert.ok(history.events.every((e) => !(e.eventType === 'run.started' && e.isOrigin)));
+    void startEvent;
+  });
+
+  test('GET /api/findings/:id/history returns 404 for unknown finding', async () => {
+    const res = await fetch(`${baseUrl}/findings/does-not-exist/history`);
+    assert.strictEqual(res.status, 404);
+  });
+
   test('Artifact endpoints list metadata and serve artifact content', async () => {
     const conv = createConversation('Artifact API test');
     const run = createRun({

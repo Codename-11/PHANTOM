@@ -33,9 +33,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
 import { Tooltip } from '@/components/ui/tooltip';
 import { useToast } from '@/components/ui/toast';
+import { Bar } from '@/components/ui/kit';
 import {
   scopesApi,
   useCreateScope,
@@ -145,6 +145,182 @@ function parsedToChip(t: ParsedTarget): TargetChip {
   return { id: t.id || `${kind}:${t.value}`, kind, value: t.value };
 }
 
+// ── Dry-run policy preview (client-side) ──────────────────────────────
+//
+// No /api/scopes/dry-run endpoint exists in lib/scopes.ts, so this computes a
+// client-side preview from the current action-class matrix + targets, using
+// the same deny-default semantics the server evaluator enforces. Labelled
+// "Preview" in the UI so operators know it's not a server round-trip.
+//   - auto  → allowed (runs without prompting)
+//   - ask   → allowed-with-gate (counts as allowed; would prompt at runtime)
+//   - deny  → blocked (policy)
+//   - a synthetic out-of-scope probe is always blocked.
+
+export type PreviewDecision = 'allow' | 'ask' | 'block';
+
+export interface PreviewAction {
+  decision: PreviewDecision;
+  cls: string;
+  command: string;
+}
+
+export interface PolicyPreviewResult {
+  allowed: number;
+  blocked: number;
+  allowedPct: number;
+  actions: PreviewAction[];
+}
+
+// One representative command per action class so the sample list reads like
+// the kit's dry-run. Falls back to a generic probe for unknown classes.
+const SAMPLE_COMMAND: Record<string, string> = {
+  'read/local': 'read_file workspace/notes.md',
+  recon: 'GET https://{target}/robots.txt',
+  'network-scan': 'nmap -sV {target}',
+  'web-vuln': 'nuclei -u https://{target}',
+  credentialed: 'auth probe https://{target}/login (stored creds)',
+  'offline-password-audit': 'hashcat -m 0 hashes.txt rockyou.txt',
+  'online-bruteforce': 'hydra -L users.txt {target}',
+  exploit: 'msfconsole exploit against {target}',
+  destructive: 'UPDATE orders SET status="x" WHERE 1=1',
+};
+
+// Representative {toolName, args} probes — one per builder action class —
+// that the server-side risk classifier (server/scope/policy.js classifyRisk)
+// resolves to the matching policy risk. The REAL evaluator decides the mode;
+// these only supply inputs that exercise each class deterministically.
+//   web-vuln maps onto network-scan in the evaluator (nuclei/nikto), so its
+//   probe is classified accordingly — we keep the builder label for the row.
+interface ClassProbe {
+  toolName: string;
+  command: (target: string) => string;
+}
+const CLASS_PROBE: Record<string, ClassProbe> = {
+  'read/local': { toolName: 'read_file', command: () => 'workspace/notes.md' },
+  recon: { toolName: 'web_request', command: (t) => `https://${t}/robots.txt` },
+  'network-scan': { toolName: 'execute_command', command: (t) => `nmap -sV ${t}` },
+  'web-vuln': { toolName: 'execute_command', command: (t) => `nuclei -u https://${t}` },
+  credentialed: { toolName: 'execute_command', command: (t) => `ssh admin@${t}` },
+  'offline-password-audit': { toolName: 'execute_command', command: () => 'hashcat -m 0 hashes.txt rockyou.txt' },
+  'online-bruteforce': { toolName: 'execute_command', command: (t) => `hydra -L users.txt ${t}` },
+  exploit: { toolName: 'execute_command', command: (t) => `msfconsole -x "exploit ${t}"` },
+  destructive: { toolName: 'execute_command', command: () => 'rm -rf /var/www' },
+};
+
+// Map an evaluator result's `mode` onto the drawer's decision vocabulary.
+function modeToDecision(mode: string): PreviewDecision {
+  if (mode === 'auto') return 'allow';
+  if (mode === 'ask') return 'ask';
+  return 'block';
+}
+
+export function computePolicyPreview(
+  modes: ScopeActionModes,
+  targets: TargetChip[],
+): PolicyPreviewResult {
+  const sampleTarget = targets[0]?.value ?? 'target.example';
+  const actions: PreviewAction[] = [];
+
+  for (const cls of ACTION_CLASSES) {
+    const mode: ScopeActionMode = cls.locked ? 'deny' : (modes[cls.id] ?? 'deny');
+    const decision: PreviewDecision =
+      mode === 'auto' ? 'allow' : mode === 'ask' ? 'ask' : 'block';
+    const command = (SAMPLE_COMMAND[cls.id] ?? `${cls.id} probe {target}`).replace(
+      '{target}',
+      sampleTarget,
+    );
+    actions.push({ decision, cls: cls.id, command });
+  }
+
+  // Always include a synthetic out-of-scope probe — blocked by definition.
+  actions.push({
+    decision: 'block',
+    cls: 'out-of-scope',
+    command: 'GET https://competitor.example/internal',
+  });
+
+  const allowed = actions.filter((a) => a.decision !== 'block').length;
+  const blocked = actions.length - allowed;
+  const allowedPct = actions.length ? Math.round((allowed / actions.length) * 100) : 0;
+  return { allowed, blocked, allowedPct, actions };
+}
+
+// Real dry-run: evaluate a representative probe per action class against the
+// draft via POST /api/scopes/evaluate-draft (the SAME evaluator that gates
+// live runs). Plus a synthetic out-of-scope recon probe — blocked by the
+// target gate when the draft has targets. Throws on any failure so the
+// caller can fall back to computePolicyPreview().
+export async function dryRunPolicyPreview(
+  modes: ScopeActionModes,
+  targets: TargetChip[],
+): Promise<PolicyPreviewResult> {
+  const sampleTarget = targets[0]?.value ?? 'target.example';
+  const buckets = bucketTargets(targets, []);
+  const { allowedActions, blockedActions } = deriveAllowedBlocked(modes);
+  const draftScope = {
+    name: 'Draft scope',
+    targets: {
+      hosts: buckets.hosts,
+      domains: buckets.domains,
+      cidrs: buckets.cidrs,
+      urls: buckets.urls,
+      assetIds: buckets.assetIds,
+    },
+    allowedActions,
+    blockedActions,
+    expiresAt: null as string | null,
+  };
+
+  const probes = ACTION_CLASSES.map((cls) => {
+    const probe = CLASS_PROBE[cls.id] ?? {
+      toolName: 'execute_command',
+      command: (t: string) => `${cls.id} probe ${t}`,
+    };
+    const command = probe.command(sampleTarget);
+    const args =
+      probe.toolName === 'web_request'
+        ? { url: command }
+        : probe.toolName === 'read_file'
+          ? { path: command }
+          : { command };
+    return { clsId: cls.id, toolName: probe.toolName, args, command };
+  });
+
+  // Evaluate every probe through the real endpoint, in parallel.
+  const evaluated = await Promise.all(
+    probes.map(async (p) => {
+      const result = await scopesApi.dryRunPolicy({
+        scope: draftScope,
+        toolName: p.toolName,
+        args: p.args,
+      });
+      return {
+        decision: modeToDecision(result.mode),
+        cls: p.clsId,
+        command: SAMPLE_COMMAND[p.clsId]?.replace('{target}', sampleTarget) ?? p.command,
+      } as PreviewAction;
+    }),
+  );
+
+  // Synthetic out-of-scope probe — a recon against a host the draft can't
+  // contain. With targets defined the evaluator's target gate blocks it.
+  const oos = await scopesApi.dryRunPolicy({
+    scope: draftScope,
+    toolName: 'web_request',
+    args: { url: 'https://competitor.example/internal' },
+  });
+  evaluated.push({
+    decision: targets.length > 0 ? modeToDecision(oos.mode) : 'block',
+    cls: 'out-of-scope',
+    command: 'GET https://competitor.example/internal',
+  });
+
+  const allowed = evaluated.filter((a) => a.decision !== 'block').length;
+  const blocked = evaluated.length - allowed;
+  const allowedPct = evaluated.length ? Math.round((allowed / evaluated.length) * 100) : 0;
+  return { allowed, blocked, allowedPct, actions: evaluated };
+}
+
 // ── Action-class 3-state matrix ───────────────────────────────────────
 
 const MODE_LABEL: Record<ScopeActionMode, string> = {
@@ -154,11 +330,13 @@ const MODE_LABEL: Record<ScopeActionMode, string> = {
 };
 const MODES: ScopeActionMode[] = ['auto', 'ask', 'deny'];
 
-const RISK_TICK: Record<string, string> = {
-  low: 'bg-[var(--ok)]',
-  med: 'bg-[var(--warn)]',
-  high: 'bg-[var(--warn-2)]',
-  crit: 'bg-destructive',
+// Map a row's risk level onto the kit's severity `.badge` variant. Token-
+// driven (no ad-hoc Tailwind borders) so the matrix reads in the kit palette.
+const RISK_BADGE: Record<string, string> = {
+  low: 'badge low',
+  med: 'badge med',
+  high: 'badge high',
+  crit: 'badge crit',
 };
 
 function ActionClassMatrix({
@@ -182,8 +360,8 @@ function ActionClassMatrix({
           <div
             key={row.id}
             className={cn(
-              'flex items-center gap-3 px-3 py-2 border-b border-[var(--line-1)] last:border-b-0',
-              locked && 'bg-destructive/5',
+              'flex items-center gap-3 px-3 py-2 border-b border-[var(--line-1)] last:border-b-0 border-l-2 border-l-transparent',
+              locked && 'bg-[var(--policy-bg)] border-l-[var(--policy)]',
             )}
             data-action-class={row.id}
             data-mode={current}
@@ -191,14 +369,8 @@ function ActionClassMatrix({
           >
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span
-                  aria-hidden="true"
-                  className={cn('h-2 w-2 rounded-full shrink-0', RISK_TICK[row.risk])}
-                />
                 <span className="font-mono text-xs text-foreground">{row.id}</span>
-                <Badge variant="outline" className="font-mono text-[9px] uppercase">
-                  {row.risk}
-                </Badge>
+                <span className={RISK_BADGE[row.risk]}>{row.risk}</span>
               </div>
               <p className="font-mono text-[10px] text-[var(--fg-3)] mt-0.5 truncate">
                 {row.examples}
@@ -207,7 +379,7 @@ function ActionClassMatrix({
             {locked ? (
               <Tooltip content="Policy-locked. Exploit and destructive classes are always denied and can only be elevated server-side.">
                 <span
-                  className="font-mono text-[10px] uppercase tracking-wider text-destructive"
+                  className="badge policy"
                   data-testid={`scope-mode-locked-${row.id}`}
                 >
                   locked · deny
@@ -215,7 +387,7 @@ function ActionClassMatrix({
               </Tooltip>
             ) : (
               <div
-                className="flex items-center gap-1 shrink-0"
+                className="btn-group shrink-0"
                 role="radiogroup"
                 aria-label={`${row.id} mode`}
                 data-action-mode={row.id}
@@ -232,11 +404,10 @@ function ActionClassMatrix({
                       data-testid={`scope-mode-${row.id}-${mode}`}
                       onClick={() => onChange(row.id, mode)}
                       className={cn(
-                        'rounded px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide border transition-colors',
-                        active && mode === 'auto' && 'border-[var(--ok-2)] text-[var(--ok-2)] bg-[var(--ok)]/10',
-                        active && mode === 'ask' && 'border-[var(--warn-2)] text-[var(--warn-2)] bg-[var(--warn)]/10',
-                        active && mode === 'deny' && 'border-destructive text-destructive bg-destructive/10',
-                        !active && 'border-[var(--line-1)] text-muted-foreground hover:border-[var(--line-3)]',
+                        'btn btn-sm font-mono uppercase tracking-wide',
+                        active && mode === 'auto' && 'text-[var(--sev-ok)] border-[var(--sev-ok-line)] bg-[var(--sev-ok-bg)]',
+                        active && mode === 'ask' && 'text-[var(--sev-med)] border-[var(--sev-med-line)] bg-[var(--sev-med-bg)]',
+                        active && mode === 'deny' && 'text-[var(--policy)] border-[var(--policy-line)] bg-[var(--policy-bg)]',
                       )}
                     >
                       {MODE_LABEL[mode]}
@@ -249,6 +420,113 @@ function ActionClassMatrix({
         );
       })}
     </div>
+  );
+}
+
+// ── Dry-run policy preview drawer ─────────────────────────────────────
+//
+// Right-side `.drawer` summarizing the (client-side) evaluator preview:
+// allowed/blocked counts, a `Bar`, and a list of sample action decisions
+// rendered as `.evt`-style rows (allow=ok / block=policy / ask=med).
+
+const DECISION_EVT: Record<PreviewDecision, string> = {
+  allow: 'evt ok',
+  ask: 'evt',
+  block: 'evt blocked',
+};
+
+const DECISION_COLOR: Record<PreviewDecision, string> = {
+  allow: 'var(--sev-ok)',
+  ask: 'var(--sev-med)',
+  block: 'var(--policy)',
+};
+
+export function PolicyPreviewDrawer({
+  preview,
+  live = false,
+}: {
+  preview: PolicyPreviewResult;
+  live?: boolean;
+}) {
+  return (
+    <aside className="drawer" data-testid="scope-policy-preview" aria-label="Policy dry-run preview">
+      <div className="drawer-hd">
+        <div className="grow">
+          <div className="caption">{live ? 'Policy dry-run' : 'Policy preview'}</div>
+          <div className="title">Dry-run against sample actions</div>
+          <div className="sub mono">
+            {live
+              ? 'Live evaluator · the same policy that gates real runs'
+              : 'Client-side preview · same deny-default the evaluator gates real runs with'}
+          </div>
+        </div>
+        <span className="badge cyan" data-testid="scope-preview-mode">
+          {live ? 'Dry-run' : 'Preview'}
+        </span>
+      </div>
+
+      <div className="drawer-bd" style={{ padding: '14px 16px' }}>
+        <div className="caption" style={{ marginBottom: 6 }}>
+          Summary
+        </div>
+        <div
+          className="rounded-[var(--r-3)] border border-[var(--line-1)] bg-[var(--bg-1)] p-3 mb-4"
+          data-testid="scope-preview-summary"
+        >
+          <div className="flex items-center gap-2 mb-1.5">
+            <span
+              className="mono text-lg"
+              style={{ color: 'var(--sev-ok)' }}
+              data-testid="scope-preview-allowed"
+            >
+              {preview.allowed}
+            </span>
+            <span className="caption">Allowed</span>
+            <span className="grow" />
+            <span
+              className="mono text-lg"
+              style={{ color: 'var(--policy)' }}
+              data-testid="scope-preview-blocked"
+            >
+              {preview.blocked}
+            </span>
+            <span className="caption">Blocked</span>
+          </div>
+          <Bar pct={preview.allowedPct} kind="ok" />
+        </div>
+
+        <div className="caption" style={{ marginBottom: 6 }}>
+          Sample actions
+        </div>
+        <div className="flex flex-col gap-1" data-testid="scope-preview-actions">
+          {preview.actions.map((a, i) => (
+            <div
+              key={`${a.cls}-${i}`}
+              className={cn(
+                DECISION_EVT[a.decision],
+                'rounded-[var(--r-3)] border border-[var(--line-1)] bg-[var(--bg-1)] px-2.5 py-1.5',
+              )}
+              style={{ borderLeft: `2px solid ${DECISION_COLOR[a.decision]}` }}
+              data-decision={a.decision}
+              data-action-class={a.cls}
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className="mono text-[10px] uppercase tracking-wider"
+                  style={{ color: DECISION_COLOR[a.decision] }}
+                >
+                  {a.decision}
+                </span>
+                <span className="caption">{a.cls}</span>
+              </div>
+              <div className="mono text-[11px] text-foreground mt-0.5 break-all">
+                {a.command}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </aside>
   );
 }
 
@@ -328,9 +606,7 @@ export function ScopeCreateForm({
                   )}
                 >
                   <div className="flex items-center gap-2 mb-0.5">
-                    <Badge variant="outline" className="font-mono text-[9px] uppercase">
-                      {risk}
-                    </Badge>
+                    <span className={RISK_BADGE[risk] ?? 'badge info'}>{risk}</span>
                     <span className="text-xs font-semibold text-foreground">{tpl.name}</span>
                   </div>
                   <p className="text-[11px] text-muted-foreground">{tpl.summary || ''}</p>
@@ -386,25 +662,29 @@ export function ScopeCreateForm({
           </p>
         ) : null}
         {state.targets.length > 0 ? (
-          <div className="flex flex-wrap gap-1" role="list" data-testid="scope-target-chips">
+          <div className="flex flex-wrap gap-1.5" role="list" data-testid="scope-target-chips">
             {state.targets.map((t) => (
+              // Kit `.chip.target` anatomy (mono value + uppercase `.kind`
+              // label). Rendered inline rather than via the KitTargetChip
+              // primitive so we keep the list/remove test hooks the builder
+              // contract relies on; the markup matches the primitive's output.
               <span
                 key={t.id}
                 role="listitem"
                 data-kind={t.kind}
                 data-value={t.value}
-                className="inline-flex items-center gap-1 rounded-full border border-[var(--line-2)] bg-[var(--bg-2)] pl-2 pr-1 py-0.5 font-mono text-[11px]"
+                className="chip target"
               >
-                <span className="text-[var(--fg-3)]">{t.kind}</span>
-                <span className="text-foreground">{t.value}</span>
+                <span className="kind">{t.kind}</span>
+                <span>{t.value}</span>
                 <button
                   type="button"
+                  className="x"
                   aria-label={`Remove ${t.value}`}
                   data-testid={`scope-remove-target-${t.value}`}
                   onClick={() => onRemoveTarget(t.id)}
-                  className="ml-0.5 rounded-full px-1 text-muted-foreground hover:text-destructive"
                 >
-                  ×
+                  ✕
                 </button>
               </span>
             ))}
@@ -548,10 +828,38 @@ export function ScopeCreateRoute() {
   const { data: roeTemplates = [] } = useRoeTemplates();
   const { data: assets = [] } = useScopeAssets();
   const validation = useMemo(() => validateScopeForm(state), [state]);
+  // Client-side approximation — the instant fallback shown until the real
+  // evaluator responds (or if it fails).
+  const fallbackPreview = useMemo(
+    () => computePolicyPreview(state.actionModes, state.targets),
+    [state.actionModes, state.targets],
+  );
+  // Real dry-run against POST /api/scopes/evaluate-draft. When it resolves we
+  // swap in the live result and flip the drawer label to "Dry-run". On any
+  // failure we keep the client-side fallback (labelled "Preview").
+  const [livePreview, setLivePreview] = useState<PolicyPreviewResult | null>(null);
+  const preview = livePreview ?? fallbackPreview;
 
   useEffect(() => {
     if (!open) navigate('/scope', { replace: true });
   }, [open, navigate]);
+
+  // Re-run the real evaluator whenever the matrix or targets change. The
+  // effect is debounced via a cancellation flag so a stale in-flight result
+  // never overwrites a newer one.
+  useEffect(() => {
+    let cancelled = false;
+    dryRunPolicyPreview(state.actionModes, state.targets)
+      .then((result) => {
+        if (!cancelled) setLivePreview(result);
+      })
+      .catch(() => {
+        if (!cancelled) setLivePreview(null); // fall back to client-side
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [state.actionModes, state.targets]);
 
   const parseOnBlur = async () => {
     const input = state.targetsInput.trim();
@@ -668,7 +976,7 @@ export function ScopeCreateRoute() {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
         data-testid="scope-create-dialog"
-        className="max-w-2xl max-h-[90vh] flex flex-col"
+        className="max-w-5xl max-h-[90vh] flex flex-col"
       >
         <DialogHeader>
           <p className="font-mono uppercase tracking-[0.08em] text-[10px] text-muted-foreground">
@@ -680,22 +988,27 @@ export function ScopeCreateRoute() {
             Exploit and destructive classes stay locked-deny by policy.
           </DialogDescription>
         </DialogHeader>
-        <ScopeCreateForm
-          state={state}
-          setState={setState}
-          validation={validation}
-          submitted={submitted}
-          parsing={parsing}
-          parseError={parseError}
-          onBlurTargets={() => void parseOnBlur()}
-          onRemoveTarget={handleRemoveTarget}
-          onSelectTemplate={handleSelectTemplate}
-          onSelectRoeTemplate={handleSelectRoeTemplate}
-          onSetMode={handleSetMode}
-          templates={templates}
-          roeTemplates={roeTemplates}
-          assets={assets}
-        />
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_340px] min-h-0 flex-1 overflow-hidden">
+          <ScopeCreateForm
+            state={state}
+            setState={setState}
+            validation={validation}
+            submitted={submitted}
+            parsing={parsing}
+            parseError={parseError}
+            onBlurTargets={() => void parseOnBlur()}
+            onRemoveTarget={handleRemoveTarget}
+            onSelectTemplate={handleSelectTemplate}
+            onSelectRoeTemplate={handleSelectRoeTemplate}
+            onSetMode={handleSetMode}
+            templates={templates}
+            roeTemplates={roeTemplates}
+            assets={assets}
+          />
+          <div className="hidden md:block min-h-0 overflow-hidden">
+            <PolicyPreviewDrawer preview={preview} live={livePreview !== null} />
+          </div>
+        </div>
         <DialogFooter>
           {errorBanner ? (
             <span

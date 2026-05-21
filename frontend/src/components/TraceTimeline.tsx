@@ -1,11 +1,17 @@
-// Trace timeline — vertically stacked rows, one per event, with a
-// severity-colored dot, the event seq + type + phase, and the
-// outputPreview snippet. Replaces the legacy `.trace-event` rendering
-// from frontend/js/pages/runs-page.js renderTraceTimeline().
+// Trace timeline — renders the run's events with the PHANTOM SEC kit's
+// `.timeline` / `.evt` grammar (a single vertical rail with colored event
+// nodes). Replaces the legacy `.trace-event` rendering from
+// frontend/js/pages/runs-page.js renderTraceTimeline().
 //
-// Kept deliberately simple — the legacy page does extra work (chunk
-// aggregation, replay scrubbing) that the React detail Sheet does not
-// own yet. The mega-plan defers the full replay scrubber to A8.5.
+// State → kit class mapping (frontend/src/styles/kit-components.css):
+//   tool    → `.evt.tool`     filled cyan node       (tool.call.* events)
+//   blocked → `.evt.blocked`  purple node + reason   (policy-blocked)
+//   failed  → `.evt.failed`   red node               (failed / errored)
+//   ok      → `.evt.ok`       green node             (completed)
+//   default → `.evt`          cyan-border node       (everything else)
+//
+// Data wiring is unchanged: events still arrive from useRunEvents and we
+// only read the existing TraceEvent fields.
 
 import type { TraceEvent } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -15,32 +21,62 @@ interface TraceTimelineProps {
   className?: string;
 }
 
-// Map raw event status / type onto a small set of severity buckets so
-// the dot color reflects "did this go well?" at a glance.
-type Severity = 'info' | 'success' | 'warn' | 'error';
+// The kit's four event states (plus the implicit cyan-border default).
+type EvtState = 'tool' | 'blocked' | 'failed' | 'ok' | 'info';
 
-const DOT_COLOR: Record<Severity, string> = {
-  info: 'bg-[var(--cy-2)]',
-  success: 'bg-[var(--ok-2)]',
-  warn: 'bg-[var(--warn-2)]',
-  error: 'bg-destructive',
-};
+function isBlocked(event: TraceEvent): boolean {
+  return (
+    event.type === 'tool.call.blocked' ||
+    event.type === 'scope.blocked' ||
+    event.status === 'blocked'
+  );
+}
 
-function severityFor(event: TraceEvent): Severity {
-  if (event.type === 'tool.call.blocked' || event.type === 'scope.blocked') return 'warn';
-  if (event.status === 'failed' || event.type === 'run.failed' || event.type === 'tool.call.failed') {
-    return 'error';
-  }
-  if (event.status === 'completed') return 'success';
+function isFailed(event: TraceEvent): boolean {
+  return (
+    event.status === 'failed' ||
+    event.type === 'run.failed' ||
+    event.type === 'tool.call.failed'
+  );
+}
+
+// Map a raw event onto one of the kit's `.evt` states. Order matters:
+// governance (blocked) and failure outrank the generic "tool" styling.
+function stateFor(event: TraceEvent): EvtState {
+  if (isBlocked(event)) return 'blocked';
+  if (isFailed(event)) return 'failed';
+  if (event.type.startsWith('tool.call')) return 'tool';
+  if (event.status === 'completed') return 'ok';
   return 'info';
 }
 
 function previewOf(event: TraceEvent): string {
-  // tool_name renders separately in the row header, so we deliberately
-  // do NOT fall back to it for the preview snippet — the legacy code
-  // did, which produced duplicate "http.get http.get" rows when an
-  // event had no output.
+  // tool_name renders in the header, so we deliberately do NOT fall back
+  // to it for the body snippet — that produced duplicate rows in legacy.
   return event.output_preview || event.outputPreview || '';
+}
+
+// The mono command line surfaced in a `.cmd` block. We use the tool name
+// (the action) so blocked / tool events show what was attempted.
+function commandOf(event: TraceEvent): string {
+  return event.tool_name ?? '';
+}
+
+// Policy reason for blocked events — pulled from metadata if the server
+// attached one, otherwise a sensible default.
+function reasonOf(event: TraceEvent): string | null {
+  if (!isBlocked(event)) return null;
+  const meta = event.metadata;
+  if (meta && typeof meta === 'object') {
+    const r = (meta as Record<string, unknown>).reason;
+    if (typeof r === 'string' && r.trim()) return r;
+  }
+  return 'blocked by scope policy';
+}
+
+// Right-aligned timestamp — prefer the wall-clock created_at.
+function tsOf(event: TraceEvent): string {
+  return event.created_at || event.started_at || '';
 }
 
 export function TraceTimeline({ events, className }: TraceTimelineProps) {
@@ -56,46 +92,39 @@ export function TraceTimeline({ events, className }: TraceTimelineProps) {
   }
 
   return (
-    <ol
-      className={cn('relative space-y-2 list-none m-0 p-0', className)}
-      data-testid="trace-timeline"
-    >
+    <div className={cn('timeline', className)} data-testid="trace-timeline">
       {events.map((event) => {
-        const sev = severityFor(event);
+        const state = stateFor(event);
         const preview = previewOf(event);
+        const cmd = commandOf(event);
+        const reason = reasonOf(event);
+        const ts = tsOf(event);
         return (
-          <li
+          <div
             key={event.id || `${event.run_id}-${event.seq}`}
-            className="rounded-md border border-border bg-card px-3 py-2"
+            className={cn('evt', state !== 'info' && state)}
             data-event-type={event.type}
             data-event-status={event.status || ''}
-            data-event-severity={sev}
+            data-event-state={state}
           >
-            <div className="flex items-center gap-2">
-              <span
-                aria-hidden="true"
-                className={cn('inline-block w-2 h-2 rounded-full shrink-0', DOT_COLOR[sev])}
-              />
-              <span className="font-mono text-[11px] text-muted-foreground">#{event.seq}</span>
-              <strong className="text-[13px] text-foreground">{event.type}</strong>
+            <div className="hdr">
+              <span className="kind">{event.type}</span>
               {event.tool_name ? (
-                <em className="font-mono text-[11px] text-[var(--cy-2)] not-italic">
-                  {event.tool_name}
-                </em>
+                <span className="name">{event.tool_name}</span>
               ) : null}
-              <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.06em] text-muted-foreground">
-                {event.phase || '—'} · {event.status || '—'}
-              </span>
+              {ts ? <span className="ts">{ts}</span> : null}
             </div>
-            {preview ? (
-              <pre className="mt-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] text-[var(--fg-2)]">
-                {preview}
-              </pre>
+            {preview || cmd || reason ? (
+              <div className="body">
+                {preview ? <span>{preview}</span> : null}
+                {cmd ? <span className="cmd">{cmd}</span> : null}
+                {reason ? <span className="reason">⤷ {reason}</span> : null}
+              </div>
             ) : null}
-          </li>
+          </div>
         );
       })}
-    </ol>
+    </div>
   );
 }
 

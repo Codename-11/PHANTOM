@@ -611,7 +611,10 @@ export interface FindingRecord {
   severity: FindingSeverity;
   status: string;
   assetId: string | null;
+  serviceId?: string | null;
   runId: string | null;
+  traceEventId?: string | null;
+  scopeId?: string | null;
   recommendation: string | null;
   evidence: unknown;
   metadata: Record<string, unknown> | string | null;
@@ -620,6 +623,38 @@ export interface FindingRecord {
   fixed_at: string | null;
   triage_status?: FindingTriageStatus | null;
   dismissal_note?: string | null;
+}
+
+// /api/findings/:id/history — read-only lifecycle reconstruction. Mirrors
+// `getFindingHistory` in server/assets/asset-store.js: the finding's own
+// timestamps + triage state joined with the originating run's trace_events.
+export type FindingHistoryEventKind =
+  | 'detected'
+  | 'trace'
+  | 'updated'
+  | 'fixed'
+  | 'triage';
+
+export interface FindingHistoryEvent {
+  kind: FindingHistoryEventKind;
+  label: string;
+  at: string | null;
+  detail?: string;
+  eventType?: string;
+  seq?: number;
+  isOrigin?: boolean;
+  dismissalNote?: string | null;
+}
+
+export interface FindingHistory {
+  findingId: string;
+  runId: string | null;
+  traceEventId: string | null;
+  scopeId: string | null;
+  severity: FindingSeverity;
+  triageStatus: FindingTriageStatus | string;
+  dismissalNote: string | null;
+  events: FindingHistoryEvent[];
 }
 
 // ── Dash hero (A5 next-action cascade, ported from dash-hero.js) ─────

@@ -88,7 +88,7 @@ import { getPostureTrend } from '../runs/trending.js';
 import { getOnboardingStatus, markOnboardingComplete, resetOnboarding } from '../onboarding/onboarding.js';
 import {
   createAsset, getAsset, getAssets, updateAsset, archiveAsset,
-  createFinding, getFindings, updateFinding, setFindingTriage, isHighSeverity,
+  createFinding, getFindings, updateFinding, setFindingTriage, isHighSeverity, getFindingHistory,
   createAssetSnapshot, getAssetSnapshots,
   createRunTemplateFromRun, getRunTemplates, materializeRunFromTemplate,
   compareAssetSnapshots, getRunComparisons,
@@ -1317,6 +1317,16 @@ router.patch('/findings/:id/triage', (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// Read-only lifecycle reconstruction. Like /approvals, the history is
+// derived from existing state — the finding's own timestamps + triage
+// state, joined with the originating run's trace_events — so there's no
+// new audit table. 404 when the finding doesn't exist.
+router.get('/findings/:id/history', (req, res) => {
+  const history = getFindingHistory(req.params.id, { traceLimit: req.query.limit || 200 });
+  if (!history) return res.status(404).json({ error: 'Finding not found' });
+  res.json(history);
 });
 
 router.get('/run-templates', (req, res) => {

@@ -115,6 +115,10 @@ export interface LayoutOptions {
   rowGap?: number;
   paddingX?: number;
   paddingY?: number;
+  // Optional whitelist of node `type`s to keep (the view-switch passes the
+  // set relevant to Run / Topology / Asset). Omitted/undefined ⇒ keep every
+  // node (backward compatible). Edges referencing a dropped node are pruned.
+  nodeTypeFilter?: Iterable<string>;
 }
 
 export function layoutGraph(
@@ -126,8 +130,20 @@ export function layoutGraph(
   const paddingX = options.paddingX ?? 60;
   const paddingY = options.paddingY ?? 48;
 
-  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
-  const edges = Array.isArray(graph.edges) ? graph.edges : [];
+  const allNodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const allEdges = Array.isArray(graph.edges) ? graph.edges : [];
+
+  // Apply the optional node-type whitelist. Default (no filter) keeps every
+  // node so existing call sites are unaffected. The filter is deterministic:
+  // it preserves the input node order and only drops by type.
+  const typeSet = options.nodeTypeFilter ? new Set(options.nodeTypeFilter) : null;
+  const nodes = typeSet ? allNodes.filter((n) => typeSet.has(n.type)) : allNodes;
+  const keptIds = new Set(nodes.map((n) => n.id));
+  // Drop edges whose endpoints were filtered out (the positioned-node guard
+  // below would skip them anyway, but pruning here keeps width/height honest).
+  const edges = typeSet
+    ? allEdges.filter((e) => keptIds.has(e.source) && keptIds.has(e.target))
+    : allEdges;
 
   // Bucket nodes into deterministic columns by type.
   const columns = new Map<number, RunGraphNode[]>();
@@ -178,17 +194,44 @@ export function layoutGraph(
   };
 }
 
-// Node fill token by type (falls back to neutral). Severity/blocked
-// status overrides type color so policy-blocked nodes always read red.
-export function nodeColorVar(node: RunGraphNode): string {
+// --- presentation derivations (kit graph parity) -----------------------
+// These helpers shape the raw run-graph data into the kit's visual
+// vocabulary — node kind classification, border/fill tokens, the
+// uppercase kind-badge, a muted sub-text line, and orthogonal edge
+// routing. They are pure + deterministic so the canvas renders the same
+// way the design concept did.
+
+/** Is this node a governance / policy-blocked node? */
+export function isPolicyNode(node: RunGraphNode): boolean {
   const status = String(node.status || '').toLowerCase();
   const scope = String(node.metadata?.scopeStatus || '').toLowerCase();
-  if (status === 'blocked' || status === 'skipped' || scope === 'out-of-scope') {
-    return 'var(--danger)';
-  }
-  if (status === 'failed' || status === 'error' || node.type === 'error') {
-    return 'var(--warn-2)';
-  }
+  return (
+    node.type === 'policy' ||
+    node.type === 'blocked_by_policy' ||
+    status === 'blocked' ||
+    status === 'skipped' ||
+    scope === 'out-of-scope' ||
+    scope === 'blocked'
+  );
+}
+
+/** Is this node a finding/error (severity-colored)? */
+export function isFindingNode(node: RunGraphNode): boolean {
+  const status = String(node.status || '').toLowerCase();
+  return (
+    node.type === 'error' ||
+    node.type === 'finding' ||
+    status === 'failed' ||
+    status === 'error'
+  );
+}
+
+// Node border/accent token by kind. Severity/blocked status overrides the
+// type color so policy-blocked nodes always read purple (governance) and
+// findings read red (severity). Cyan is the system accent for run/flow.
+export function nodeColorVar(node: RunGraphNode): string {
+  if (isPolicyNode(node)) return 'var(--policy)';
+  if (isFindingNode(node)) return 'var(--sev-crit)';
   switch (node.type) {
     case 'run':
       return 'var(--cy-1)';
@@ -196,12 +239,77 @@ export function nodeColorVar(node: RunGraphNode): string {
     case 'command':
       return 'var(--cy-2)';
     case 'host':
+    case 'domain':
     case 'url':
     case 'port':
       return 'var(--cy-3)';
     case 'artifact':
-      return 'var(--ok-2)';
+      return 'var(--sev-ok)';
     default:
       return 'var(--cy-3)';
   }
+}
+
+// Node fill token — active node highlights, policy/finding tint by class,
+// everything else the neutral panel surface.
+export function nodeFillVar(node: RunGraphNode, active = false): string {
+  if (active) return 'var(--bg-3)';
+  if (isPolicyNode(node)) return 'var(--policy-bg)';
+  if (isFindingNode(node)) return 'var(--sev-crit-bg)';
+  return 'var(--bg-2)';
+}
+
+// Uppercase kind-badge text shown in each node's top-right corner.
+export function nodeKindLabel(node: RunGraphNode): string {
+  const t = String(node.type || '').toLowerCase();
+  if (t === 'blocked_by_policy' || isPolicyNode(node)) return 'POLICY';
+  if (t === 'error') return 'FINDING';
+  if (t === 'command') return 'TOOL';
+  if (t === 'url' || t === 'domain') return 'HOST';
+  return (node.type || 'NODE').toUpperCase();
+}
+
+// Muted sub-text line under the node label. Derives a sensible second
+// line from whatever the data model carries (scope/policy/status); omits
+// gracefully (empty string) when nothing useful is available.
+export function nodeSubText(node: RunGraphNode): string {
+  const meta = node.metadata ?? {};
+  const reason = meta.policyReason ? String(meta.policyReason) : '';
+  const scope = meta.scopeStatus ? String(meta.scopeStatus) : '';
+  const status = node.status ? String(node.status) : '';
+  if (reason) return reason.length > 30 ? `${reason.slice(0, 29)}…` : reason;
+  if (scope && scope !== 'observed') return scope;
+  const refSeq = node.seq != null ? `evt #${node.seq}` : '';
+  const parts = [status, refSeq].filter(Boolean);
+  return parts.join(' · ');
+}
+
+// Edge stroke token by type/status. blocked edges read purple (policy),
+// generated edges green (artifact), findings/errors red, the rest cyan.
+export function edgeStrokeVar(edge: RunGraphEdge): string {
+  const type = String(edge.type || '').toLowerCase();
+  if (type.includes('blocked')) return 'var(--policy)';
+  if (type === 'generated') return 'var(--sev-ok)';
+  return 'var(--cy-2)';
+}
+
+/** Should this edge render dashed (policy-block / blocked)? */
+export function isBlockedEdge(edge: RunGraphEdge): boolean {
+  return String(edge.type || '').toLowerCase().includes('blocked');
+}
+
+// Build an orthogonal (right-angle) SVG path between two anchor points.
+// Edges leave the source's right edge and enter the target's left edge;
+// the turn happens at the horizontal midpoint, producing the kit's
+// stepped connectors instead of straight diagonals. Same-row edges stay
+// a single straight horizontal segment.
+export function orthogonalPath(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): string {
+  if (Math.abs(y1 - y2) < 0.5) return `M ${x1} ${y1} L ${x2} ${y2}`;
+  const midX = x1 + (x2 - x1) / 2;
+  return `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`;
 }

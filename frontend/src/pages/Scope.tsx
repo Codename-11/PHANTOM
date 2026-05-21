@@ -12,8 +12,8 @@ import { Link, Outlet, useNavigate, useParams } from 'react-router-dom';
 
 import { ScopePill } from '@/components/ScopePill';
 import { PageHeader } from '@/components/PageHeader';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Kv, type KvItem } from '@/components/ui/kit';
 import {
   Sheet,
   SheetContent,
@@ -153,103 +153,96 @@ export function ScopesPage() {
 
 // ── Detail Sheet (mounted at /scope/:id) ──────────────────────────────
 
-function TargetList({ label, items }: { label: string; items: string[] | undefined }) {
-  if (!items?.length) return null;
+// Render a list of target strings as kit `.chip.target` chips (mono value +
+// uppercase `.kind` label), or a muted em-dash when empty.
+function TargetChips({ kind, items }: { kind: string; items: string[] | undefined }) {
+  if (!items?.length) {
+    return <span className="text-[var(--fg-3)]">—</span>;
+  }
   return (
-    <div>
-      <p className="font-mono uppercase tracking-[0.08em] text-[10px] text-muted-foreground mb-1">
-        {label}
-      </p>
-      <div className="flex flex-wrap gap-1">
-        {items.map((item) => (
-          <Badge key={`${label}-${item}`} variant="outline" className="font-mono">
-            {item}
-          </Badge>
-        ))}
-      </div>
-    </div>
+    <span className="inline-flex flex-wrap gap-1" data-target-kind={kind}>
+      {items.map((item) => (
+        <span key={`${kind}-${item}`} className="chip target" data-value={item}>
+          <span className="kind">{kind}</span>
+          <span>{item}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+// Render an action-class CSV array as `.badge` chips (token-driven). `tone`
+// picks the allowed (ok) vs blocked (policy) palette.
+function ClassBadges({
+  actions,
+  tone,
+}: {
+  actions: string[] | undefined;
+  tone: 'ok' | 'policy';
+}) {
+  const list = actions || [];
+  if (list.length === 0) {
+    return (
+      <span className="text-[var(--fg-3)]">
+        {tone === 'ok' ? 'default policy' : 'none'}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex flex-wrap gap-1">
+      {list.map((a) => (
+        <span key={`${tone}-${a}`} className={`badge ${tone}`}>
+          {a}
+        </span>
+      ))}
+    </span>
   );
 }
 
 function ScopeDetailBody({ scope }: { scope: ScopeRecord }) {
   const targets = scope.targets || {};
+  const status = deriveScopeStatus(scope);
+
+  // Read-only scope metadata as a single Kv grid (the kit's key/value list)
+  // instead of stacked text paragraphs.
+  const items: KvItem[] = [
+    { k: 'Name', v: scope.name, sans: true },
+    { k: 'ID', v: scope.id },
+    { k: 'Status', v: <ScopePill status={status} /> },
+    { k: 'Created', v: scope.created_at },
+    { k: 'Expires', v: scope.expires_at || '—' },
+    { k: 'Hosts', v: <TargetChips kind="host" items={targets.hosts} /> },
+    { k: 'Domains', v: <TargetChips kind="domain" items={targets.domains} /> },
+    { k: 'CIDRs', v: <TargetChips kind="cidr" items={targets.cidrs} /> },
+    { k: 'URLs', v: <TargetChips kind="url" items={targets.urls} /> },
+    {
+      k: 'Allowed',
+      v: <ClassBadges actions={scope.allowed_actions} tone="ok" />,
+    },
+    {
+      k: 'Blocked',
+      v: <ClassBadges actions={scope.blocked_actions} tone="policy" />,
+    },
+  ];
+
+  if (scope.rules_of_engagement) {
+    items.push({
+      k: 'RoE',
+      v: <span className="whitespace-pre-wrap">{scope.rules_of_engagement}</span>,
+      sans: true,
+    });
+  }
+  if (scope.notes) {
+    items.push({
+      k: 'Notes',
+      v: <span className="whitespace-pre-wrap">{scope.notes}</span>,
+      sans: true,
+    });
+  }
+
   return (
-    <div className="px-4 py-3 space-y-4">
-      <dl className="grid grid-cols-[110px_1fr] gap-x-3.5 gap-y-1.5 text-[12px]">
-        <dt className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground self-center">
-          ID
-        </dt>
-        <dd className="font-mono text-[11px] text-[var(--fg-2)]">{scope.id}</dd>
-        <dt className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground self-center">
-          Created
-        </dt>
-        <dd className="font-mono text-[11px] text-[var(--fg-2)]">{scope.created_at}</dd>
-        <dt className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground self-center">
-          Expires
-        </dt>
-        <dd className="font-mono text-[11px] text-[var(--fg-2)]">{scope.expires_at || '—'}</dd>
-      </dl>
-
-      <div className="space-y-3">
-        <TargetList label="Hosts" items={targets.hosts} />
-        <TargetList label="Domains" items={targets.domains} />
-        <TargetList label="CIDRs" items={targets.cidrs} />
-        <TargetList label="URLs" items={targets.urls} />
-      </div>
-
-      <div className="space-y-2">
-        <p className="font-mono uppercase tracking-[0.08em] text-[10px] text-muted-foreground">
-          Allowed actions
-        </p>
-        <div className="flex flex-wrap gap-1">
-          {(scope.allowed_actions || []).length === 0 ? (
-            <span className="font-mono text-[11px] text-muted-foreground">— default policy —</span>
-          ) : (
-            (scope.allowed_actions || []).map((a) => (
-              <Badge key={`a-${a}`} className="border-[var(--ok-2)] text-[var(--ok-2)] bg-transparent">
-                {a}
-              </Badge>
-            ))
-          )}
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <p className="font-mono uppercase tracking-[0.08em] text-[10px] text-muted-foreground">
-          Blocked actions
-        </p>
-        <div className="flex flex-wrap gap-1">
-          {(scope.blocked_actions || []).length === 0 ? (
-            <span className="font-mono text-[11px] text-muted-foreground">— none —</span>
-          ) : (
-            (scope.blocked_actions || []).map((a) => (
-              <Badge key={`b-${a}`} variant="outline" className="text-muted-foreground line-through">
-                {a}
-              </Badge>
-            ))
-          )}
-        </div>
-      </div>
-
-      {scope.notes ? (
-        <div className="space-y-1">
-          <p className="font-mono uppercase tracking-[0.08em] text-[10px] text-muted-foreground">
-            Notes
-          </p>
-          <p className="text-sm text-[var(--fg-2)] whitespace-pre-wrap">{scope.notes}</p>
-        </div>
-      ) : null}
-
-      {scope.rules_of_engagement ? (
-        <div className="space-y-1">
-          <p className="font-mono uppercase tracking-[0.08em] text-[10px] text-muted-foreground">
-            Rules of engagement
-          </p>
-          <p className="text-sm text-[var(--fg-2)] whitespace-pre-wrap">
-            {scope.rules_of_engagement}
-          </p>
-        </div>
-      ) : null}
+    <div className="px-4 py-3" data-testid="scope-detail-kv">
+      <Kv items={items} />
     </div>
   );
 }

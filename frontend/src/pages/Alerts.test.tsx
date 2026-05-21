@@ -72,6 +72,44 @@ function stubFetch(map: Record<string, unknown> = {}) {
         map.asset ?? { id: 'asset-1', name: 'app-lab-01', type: 'host', address: '10.0.0.5' },
       );
     }
+    if (url.includes('/api/findings/') && url.includes('/history')) {
+      return jsonResponse(
+        map.history ?? {
+          findingId: 'f-crit',
+          runId: 'run-1',
+          traceEventId: 'evt-2',
+          scopeId: 'scope-1',
+          severity: 'critical',
+          triageStatus: 'new',
+          dismissalNote: null,
+          events: [
+            { kind: 'detected', label: 'Detected', at: '2026-05-19T12:00:00Z', detail: 'SSRF on /api/proxy' },
+            { kind: 'trace', label: 'web_request', at: '2026-05-19T12:01:00Z', detail: 'leak', eventType: 'tool.call.completed', seq: 2, isOrigin: true },
+            { kind: 'triage', label: 'Triage', at: '2026-05-20T12:00:00Z', detail: 'new' },
+          ],
+        },
+      );
+    }
+    if (url.includes('/api/runs/') && url.includes('/events')) {
+      return jsonResponse(
+        map.events ?? [
+          {
+            id: 'evt-1', run_id: 'run-1', parent_event_id: null, seq: 1,
+            type: 'run.started', phase: 'general', status: 'started',
+            tool_name: null, output_ref: null, output_preview: 'kickoff',
+            started_at: '2026-05-19T12:00:30Z', ended_at: null, duration_ms: null,
+            created_at: '2026-05-19T12:00:30Z',
+          },
+          {
+            id: 'evt-2', run_id: 'run-1', parent_event_id: null, seq: 2,
+            type: 'tool.call.completed', phase: 'tool', status: 'completed',
+            tool_name: 'web_request', output_ref: null, output_preview: 'Server: nginx leaked',
+            started_at: '2026-05-19T12:01:00Z', ended_at: null, duration_ms: 120,
+            created_at: '2026-05-19T12:01:00Z',
+          },
+        ],
+      );
+    }
     if (url.includes('/api/findings')) {
       return jsonResponse(map.findings ?? findings);
     }
@@ -119,6 +157,33 @@ describe('AlertsPage', () => {
     expect(badges.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('queue view renders a dense .tbl table with header columns', async () => {
+    stubFetch();
+    renderRoute('/alerts');
+    await waitFor(() => {
+      expect(screen.getByTestId('alerts-list')).toBeInTheDocument();
+    });
+    const list = screen.getByTestId('alerts-list');
+    expect(list).toHaveAttribute('data-view', 'queue');
+    const table = list.querySelector('table.tbl.zebra.dense');
+    expect(table).not.toBeNull();
+    expect(screen.getByText('FINDING')).toBeInTheDocument();
+    expect(screen.getByText('HOST:PORT')).toBeInTheDocument();
+    // One <tr> per finding in tbody.
+    expect(screen.getAllByTestId('alerts-row').length).toBe(2);
+  });
+
+  it('selected finding row gets the .selected class for the cyan inset', async () => {
+    stubFetch();
+    renderRoute('/alerts/f-crit');
+    await waitFor(() => {
+      expect(screen.getByTestId('alerts-list')).toBeInTheDocument();
+    });
+    const rows = screen.getAllByTestId('alerts-row');
+    const selected = rows.find((r) => r.getAttribute('data-finding-id') === 'f-crit');
+    expect(selected).toHaveClass('selected');
+  });
+
   it('filter chip restricts the rows to the selected severity', async () => {
     stubFetch();
     renderRoute('/alerts');
@@ -150,6 +215,25 @@ describe('AlertsPage', () => {
       const parsed = JSON.parse(String(last?.body ?? '{}'));
       expect(parsed.triageStatus).toBe('acknowledged');
     });
+  });
+
+  it('drawer shows Evidence Kv, Policy Decision, Suggested Fix, and the four tabs', async () => {
+    stubFetch();
+    renderRoute('/alerts/f-crit');
+    await screen.findByTestId('triage-rail', {}, { timeout: 3000 });
+    // Drawer + the four kit tabs.
+    expect(screen.getByTestId('alert-drawer')).toBeInTheDocument();
+    expect(screen.getByTestId('alert-tab-evidence')).toBeInTheDocument();
+    expect(screen.getByTestId('alert-tab-asset')).toBeInTheDocument();
+    expect(screen.getByTestId('alert-tab-trace')).toBeInTheDocument();
+    expect(screen.getByTestId('alert-tab-history')).toBeInTheDocument();
+    // Evidence sections. f-crit has no evidence → PoC placeholder; it has a
+    // recommendation → Suggested Fix list renders it.
+    expect(screen.getByText('PROOF-OF-CONCEPT')).toBeInTheDocument();
+    expect(screen.getByTestId('alert-poc-empty')).toBeInTheDocument();
+    expect(screen.getByTestId('alert-policy')).toBeInTheDocument();
+    expect(screen.getByTestId('alert-fixes')).toBeInTheDocument();
+    expect(screen.getByText(/Validate target URL against an allowlist/)).toBeInTheDocument();
   });
 
   it('renders the empty state when no findings match the filter', async () => {
@@ -231,5 +315,47 @@ describe('AlertsPage', () => {
     expect(card).toBeInTheDocument();
     expect(assetCalls().length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('app-lab-01')).toBeInTheDocument();
+  });
+
+  it('Trace tab renders the run events from /api/runs/:id/events', async () => {
+    stubFetch();
+    renderRoute('/alerts/f-crit');
+    await screen.findByTestId('triage-rail', {}, { timeout: 3000 });
+    fireEvent.mouseDown(screen.getByTestId('alert-tab-trace'));
+    fireEvent.click(screen.getByTestId('alert-tab-trace'));
+    const events = await screen.findByTestId('alert-trace-events', {}, { timeout: 3000 });
+    expect(events).toBeInTheDocument();
+    // Both stubbed trace events render in the timeline.
+    expect(events.querySelector('[data-seq="1"]')).not.toBeNull();
+    expect(events.querySelector('[data-seq="2"]')).not.toBeNull();
+    expect(screen.getByText('web_request')).toBeInTheDocument();
+  });
+
+  it('Trace tab shows the no-run empty state when runId is null', async () => {
+    stubFetch({
+      findings: [{ ...findings[0], id: 'f-norun', runId: null }],
+    });
+    renderRoute('/alerts/f-norun');
+    await screen.findByTestId('triage-rail', {}, { timeout: 3000 });
+    fireEvent.mouseDown(screen.getByTestId('alert-tab-trace'));
+    fireEvent.click(screen.getByTestId('alert-tab-trace'));
+    expect(await screen.findByTestId('alert-trace-empty')).toBeInTheDocument();
+  });
+
+  it('History tab renders the reconstructed lifecycle from /api/findings/:id/history', async () => {
+    stubFetch();
+    renderRoute('/alerts/f-crit');
+    await screen.findByTestId('triage-rail', {}, { timeout: 3000 });
+    fireEvent.mouseDown(screen.getByTestId('alert-tab-history'));
+    fireEvent.click(screen.getByTestId('alert-tab-history'));
+    const history = await screen.findByTestId('alert-history', {}, { timeout: 3000 });
+    expect(history).toBeInTheDocument();
+    // Detected + trace + triage rows from the stubbed history (wait for the
+    // async fetch to resolve and the rows to render).
+    await waitFor(() => {
+      expect(history.querySelector('[data-kind="detected"]')).not.toBeNull();
+    });
+    expect(history.querySelector('[data-kind="trace"][data-origin="true"]')).not.toBeNull();
+    expect(history.querySelector('[data-kind="triage"]')).not.toBeNull();
   });
 });

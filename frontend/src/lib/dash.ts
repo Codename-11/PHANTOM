@@ -6,7 +6,7 @@
 // The hero MUST stay alive when any of the four sources fail, so each
 // fetch swallows its own error and falls through to the next priority.
 
-import { useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 
 import { apiFetch, ApiError } from './api';
 import { campaignsApi } from './campaigns';
@@ -23,6 +23,7 @@ import type {
   FindingRecord,
   OnboardingChecklist,
   RunRecord,
+  Toolpack,
 } from './types';
 
 // Tolerant probe: return null on any failure (timeout, 4xx, 5xx, parse).
@@ -179,6 +180,57 @@ export function deriveAction({
     ctaRoute: 'campaigns',
     tone: 'cy',
   };
+}
+
+// ── Toolpack readiness ────────────────────────────────────────────────
+//
+// /api/toolpacks (list) ships the pack metadata but NOT host availability.
+// /api/toolpacks/:id/availability re-hydrates each pack's `tools[]` with an
+// `{available: boolean}` flag derived from a $PATH lookup on the server.
+// We fan out one availability query per pack id so the Dash toolpacks panel
+// can render a real readiness dot instead of "unknown".
+
+export type ToolpackReadiness = 'ready' | 'partial' | 'missing' | 'unknown';
+
+// Collapse a hydrated pack's per-tool `.available` flags into one bucket.
+export function readinessFromTools(tools: Toolpack['tools']): ToolpackReadiness {
+  const list = tools ?? [];
+  const known = list.filter((t) => typeof t.available === 'boolean');
+  if (known.length === 0) return 'unknown';
+  const up = known.filter((t) => t.available).length;
+  if (up === known.length) return 'ready';
+  if (up === 0) return 'missing';
+  return 'partial';
+}
+
+export interface ToolpackReadinessState {
+  readiness: ToolpackReadiness;
+  isLoading: boolean;
+  isError: boolean;
+}
+
+// Fetch availability for a set of toolpack ids and return a per-id readiness
+// map. Each id is an independent query (tolerant: an errored probe degrades
+// to `unknown` for that one pack without blocking the others).
+export function useToolpackReadiness(ids: string[]): Record<string, ToolpackReadinessState> {
+  const results = useQueries({
+    queries: ids.map((id) => ({
+      queryKey: ['toolpacks', 'availability', id],
+      queryFn: () => apiFetch<Toolpack>(`/api/toolpacks/${encodeURIComponent(id)}/availability`),
+      staleTime: 30_000,
+    })),
+  });
+
+  const map: Record<string, ToolpackReadinessState> = {};
+  ids.forEach((id, i) => {
+    const r = results[i];
+    map[id] = {
+      readiness: r?.data ? readinessFromTools(r.data.tools) : 'unknown',
+      isLoading: Boolean(r?.isLoading),
+      isError: Boolean(r?.isError),
+    };
+  });
+  return map;
 }
 
 // localStorage payload — same key the legacy bundle writes.

@@ -32,7 +32,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/toast';
 import { ListRow } from '@/components/ListRow';
+import { Kv, type KvItem } from '@/components/ui/kit';
 import { RunPill } from '@/components/RunPill';
+import { LoadingIcon, ScanningIcon } from '@/components/AgentStateIcon';
 import { TraceTimeline } from '@/components/TraceTimeline';
 import { RunReplayScrubber } from '@/components/RunReplayScrubber';
 import { RunSynthesisCard } from '@/components/RunSynthesisCard';
@@ -49,6 +51,7 @@ import type {
   EvidenceBundle,
   EvidenceFinding,
   RunRecord,
+  TraceEvent,
 } from '@/lib/types';
 
 function ago(iso: string | null | undefined): string {
@@ -93,13 +96,40 @@ function RunRow({ run }: { run: RunRecord }) {
   );
 }
 
+// Contextual agent-state loader. Replaces the generic Tailwind skeletons
+// on agent surfaces with the ported iso animations + a status caption, so
+// "the agent is working" reads as motion rather than a gray block.
+function AgentLoader({
+  icon,
+  label,
+  testid,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  testid: string;
+}) {
+  return (
+    <div
+      className="flex flex-col items-center justify-center gap-3 py-10 text-center"
+      data-testid={testid}
+      role="status"
+      aria-live="polite"
+    >
+      {icon}
+      <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-[var(--fg-3)]">
+        {label}
+      </span>
+    </div>
+  );
+}
+
 function RunListSkeleton() {
   return (
-    <div className="flex flex-col gap-2" data-testid="runs-loading">
-      {[0, 1, 2].map((i) => (
-        <Skeleton key={i} className="h-[72px]" />
-      ))}
-    </div>
+    <AgentLoader
+      testid="runs-loading"
+      icon={<LoadingIcon size={48} />}
+      label="Fetching runs…"
+    />
   );
 }
 
@@ -238,10 +268,11 @@ function SynthesisPane({ run }: { run: RunRecord }) {
       </dl>
 
       {isLoading ? (
-        <div className="space-y-2" data-testid="synthesis-loading">
-          <Skeleton className="h-24 w-full" />
-          <Skeleton className="h-32 w-full" />
-        </div>
+        <AgentLoader
+          testid="synthesis-loading"
+          icon={<LoadingIcon size={48} />}
+          label="Building synthesis…"
+        />
       ) : isError || !synthesis ? (
         <div className="space-y-2">
           <div
@@ -267,15 +298,160 @@ function SynthesisPane({ run }: { run: RunRecord }) {
   );
 }
 
-function TracePane({ runId }: { runId: string }) {
+// ── Redacted metadata snapshot ────────────────────────────────────────
+//
+// A persistent right-side drawer (kit `.drawer` + `.kv`) summarising the
+// governed run state: RUN / SCOPE / PROMPT / ARTIFACTS. Sourced entirely
+// from the run record (+ joined scope summary + redacted prompt_snapshot)
+// — no new data wiring. The server already strips credential refs from
+// the snapshot; we surface those as a styled `•••` redaction token.
+
+// A masked value rendered in the governance "redacted" color.
+function Redacted({ label = '•••' }: { label?: string }) {
+  return (
+    <span style={{ color: 'var(--redacted)', letterSpacing: '0.1em' }}>{label}</span>
+  );
+}
+
+// Read a string field off the freeform prompt_snapshot blob.
+function snapField(
+  snap: Record<string, unknown> | null | undefined,
+  ...keys: string[]
+): string | null {
+  if (!snap) return null;
+  for (const k of keys) {
+    const v = snap[k];
+    if (typeof v === 'string' && v.trim()) return v;
+    if (typeof v === 'number') return String(v);
+  }
+  return null;
+}
+
+type RunDetail = RunRecord & { events?: TraceEvent[]; artifacts?: ArtifactRecord[] };
+
+function RunMetadataPanel({ run }: { run: RunDetail }) {
+  const snap = run.prompt_snapshot;
+  const scope = run.scope;
+
+  const runItems: KvItem[] = [
+    { k: 'id', v: run.id },
+    { k: 'status', v: <RunPill status={run.status} /> },
+    { k: 'started', v: run.started_at || '—' },
+    { k: 'toolpack', v: snapField(snap, 'toolpack', 'tool_pack') ?? '—' },
+    { k: 'model', v: run.model || '—' },
+  ];
+
+  // Fragment list / redaction marker live on the (already-redacted) snapshot.
+  const fragments = Array.isArray((snap as Record<string, unknown>)?.fragments)
+    ? ((snap as Record<string, unknown>).fragments as unknown[]).join(' + ')
+    : snapField(snap, 'fragments');
+  const credentialsRedacted =
+    !!snap &&
+    typeof snap === 'object' &&
+    !!(snap as Record<string, unknown>).scope &&
+    typeof (snap as Record<string, unknown>).scope === 'object';
+
+  const promptItems: KvItem[] = [
+    { k: 'profile', v: snapField(snap, 'profile', 'profileId', 'prompt_profile_id') ?? '—' },
+    { k: 'fragments', v: fragments ?? '—' },
+    {
+      k: 'redaction',
+      v: credentialsRedacted ? (
+        <span style={{ color: 'var(--sev-ok)' }}>applied</span>
+      ) : (
+        '—'
+      ),
+    },
+  ];
+
+  const artifacts = run.artifacts ?? [];
+
+  return (
+    <aside className="drawer rounded-md border border-border" data-testid="run-metadata-panel">
+      <div className="drawer-hd">
+        <div className="grow">
+          <div className="title" style={{ fontSize: 13 }}>
+            Run metadata
+          </div>
+          <div className="sub mono" style={{ fontSize: 11 }}>
+            redacted snapshot · governed
+          </div>
+        </div>
+      </div>
+      <div className="drawer-bd" style={{ padding: '14px 16px' }}>
+        <div className="caption" style={{ marginBottom: 6 }}>
+          RUN
+        </div>
+        <Kv items={runItems} />
+
+        <div className="caption" style={{ marginTop: 18, marginBottom: 6 }}>
+          SCOPE
+        </div>
+        <Kv
+          items={[
+            { k: 'name', v: scope?.name || 'no scope' },
+            {
+              k: 'credentials',
+              v: <Redacted />,
+            },
+            { k: 'expires', v: scope?.expires_at || '—' },
+          ]}
+        />
+
+        <div className="caption" style={{ marginTop: 18, marginBottom: 6 }}>
+          PROMPT
+        </div>
+        <Kv items={promptItems} />
+
+        <div className="caption" style={{ marginTop: 18, marginBottom: 6 }}>
+          ARTIFACTS
+        </div>
+        {artifacts.length === 0 ? (
+          <p className="text-[12px] text-muted-foreground">No artifacts captured.</p>
+        ) : (
+          artifacts.map((a) => (
+            <a
+              key={a.id}
+              href={a.contentUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="row"
+              style={{
+                padding: '6px 8px',
+                border: '1px solid var(--line-1)',
+                borderRadius: 'var(--r-3)',
+                marginBottom: 6,
+                cursor: 'pointer',
+                color: 'var(--fg-1)',
+                textDecoration: 'none',
+              }}
+            >
+              <span className="mono" style={{ fontSize: 12, color: 'var(--cy-1)' }}>
+                {a.type || 'artifact'}
+              </span>
+              <span className="mono" style={{ fontSize: 12 }}>
+                {a.title || a.id.slice(0, 12)}
+              </span>
+              <span className="grow" />
+              <span className="ts">{a.id.slice(0, 8)}</span>
+            </a>
+          ))
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function TracePane({ run }: { run: RunDetail }) {
+  const runId = run.id;
   const { data: events, isLoading, isError, error } = useRunEvents(runId);
   if (isLoading) {
     return (
-      <div className="space-y-2 py-3" data-testid="trace-loading">
-        {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-12 w-full" />
-        ))}
-      </div>
+      <AgentLoader
+        testid="trace-loading"
+        icon={<ScanningIcon size={48} />}
+        label="Fetching trace…"
+      />
     );
   }
   if (isError) {
@@ -287,19 +463,22 @@ function TracePane({ runId }: { runId: string }) {
   }
   const list = events ?? [];
   return (
-    <div className="space-y-4">
-      <section aria-label="Replay scrubber">
-        <h3 className="mb-2 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
-          Replay
-        </h3>
-        <RunReplayScrubber events={list} />
-      </section>
-      <section aria-label="Trace timeline">
-        <h3 className="mb-2 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
-          Full timeline
-        </h3>
-        <TraceTimeline events={list} />
-      </section>
+    <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
+      <div className="space-y-4 min-w-0">
+        <section aria-label="Replay scrubber">
+          <h3 className="mb-2 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+            Replay
+          </h3>
+          <RunReplayScrubber events={list} />
+        </section>
+        <section aria-label="Trace timeline">
+          <h3 className="mb-2 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+            Full timeline
+          </h3>
+          <TraceTimeline events={list} />
+        </section>
+      </div>
+      <RunMetadataPanel run={run} />
     </div>
   );
 }
@@ -680,7 +859,7 @@ export function RunDetailRoute() {
                   <SynthesisPane run={run} />
                 </TabsContent>
                 <TabsContent value="trace">
-                  <TracePane runId={run.id} />
+                  <TracePane run={run} />
                 </TabsContent>
                 <TabsContent value="artifacts">
                   <ArtifactsPane artifacts={run.artifacts ?? []} />

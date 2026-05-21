@@ -1,11 +1,19 @@
-/* PHANTOM React bundle · global styles.
+/* PHANTOM React bundle · global styles + design tokens.
  *
  * Tailwind base/components/utilities sit on top of the cool-slate token
- * palette from frontend/css/styles.css. The @layer base block below
- * mirrors those CSS variables so the React bundle renders identically
- * during dev (when only this file is loaded) AND in production (where
- * the legacy stylesheet may also be present). Once A8.5 deletes the
- * legacy bundle these variables become the single source of truth.
+ * palette. The @layer base block below is the single source of truth for
+ * the design system, restored to full parity with the "PHANTOM SEC UI kit"
+ * concept (kit/tokens.css). The A8.1 React port had collapsed this to a
+ * ~15-token subset (surfaces/lines/fg + one cyan accent); the UI-enhancement
+ * pass (2026-05-21) re-expands it to the full ~90-token system so the kit's
+ * severity / governance / density / motion semantics render correctly.
+ *
+ * Legacy aliases (--danger / --warn / --ok / --ok-2 / --warn-2) are kept
+ * alongside the kit's canonical --sev-* tokens so existing components that
+ * reference them keep working during the screen-by-screen parity pass.
+ *
+ * Component classes (.panel/.stat/.sev-tick/.evt/...) live in the companion
+ * stylesheet kit-components.css, imported from main.tsx after this file.
  */
 @tailwind base;
 @tailwind components;
@@ -13,41 +21,149 @@
 
 @layer base {
   :root {
-    /* Surfaces */
+    /* ── Surfaces (cool slate) ─────────────────────────────────────── */
     --bg-0: #0a0c10;
     --bg-1: #0f1218;
     --bg-2: #141821;
     --bg-3: #1a1f2a;
     --bg-4: #212838;
+    --bg-hover: rgba(255, 255, 255, 0.04);
+    --bg-pressed: rgba(255, 255, 255, 0.07);
+    --bg-selected: rgba(95, 182, 255, 0.08);
+    --bg-stripe: rgba(255, 255, 255, 0.015);
 
-    /* Lines */
+    /* ── Lines ─────────────────────────────────────────────────────── */
     --line-1: #1d2330;
     --line-2: #2a3242;
     --line-3: #3a4458;
+    --line-cy: rgba(95, 182, 255, 0.35);
 
-    /* Foreground */
+    /* ── Foreground ────────────────────────────────────────────────── */
     --fg-1: #e8edf5;
     --fg-2: #9aa4b6;
     --fg-3: #6a7587;
     --fg-4: #4a5263;
+    --fg-mono-ts: #7e8aa0;
 
-    /* Cyan accent (single primary accent — no green) */
+    /* ── System accent (cool — cyan, single primary accent) ────────── */
     --cy-1: #5fb6ff;
     --cy-2: #2d8fdb;
     --cy-3: #1a4a73;
     --cy-fg: #aed8ff;
+    --cy-tint: rgba(95, 182, 255, 0.10);
+    --cy-tint-strong: rgba(95, 182, 255, 0.18);
 
-    /* Status */
+    /* ── Severity (warm — semantic only) ───────────────────────────── */
+    --sev-crit: #ef5350;  --sev-crit-bg: rgba(239, 83, 80, 0.12);   --sev-crit-line: rgba(239, 83, 80, 0.35);
+    --sev-high: #f5a524;  --sev-high-bg: rgba(245, 165, 36, 0.12);  --sev-high-line: rgba(245, 165, 36, 0.32);
+    --sev-med:  #facc15;  --sev-med-bg:  rgba(250, 204, 21, 0.10);  --sev-med-line:  rgba(250, 204, 21, 0.28);
+    --sev-low:  #6098ff;  --sev-low-bg:  rgba(96, 152, 255, 0.10);  --sev-low-line:  rgba(96, 152, 255, 0.28);
+    --sev-info: #98a2b3;  --sev-info-bg: rgba(152, 162, 179, 0.10); --sev-info-line: rgba(152, 162, 179, 0.25);
+    --sev-ok:   #4ade80;  --sev-ok-bg:   rgba(74, 222, 128, 0.10);  --sev-ok-line:   rgba(74, 222, 128, 0.28);
+
+    /* ── Governance (policy / blocked / redacted) ──────────────────── */
+    --policy: #a78bfa;  --policy-bg: rgba(167, 139, 250, 0.12);  --policy-line: rgba(167, 139, 250, 0.30);
+    --redacted: #5d6478;
+
+    /* ── Legacy status aliases (kept for in-flight components) ─────── */
     --danger: #ef4444;
     --warn: #f59e0b;
     --ok: #4ade80;
-
-    /* Muted status shades — softer, lower-chroma variants used for fills,
-     * borders, and small status text on the dark-slate surfaces (the
-     * bright --ok/--warn read as neon at small sizes). Previously these
-     * were hard-coded as #66c293 / #d8b15a across ~10 files. */
     --ok-2: #66c293;
     --warn-2: #d8b15a;
+
+    /* ── Type ──────────────────────────────────────────────────────── */
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+    --fs-9: 9px;
+    --fs-10: 10px;
+    --fs-11: 11px;
+    --fs-12: 12px;
+    --fs-13: 13px; /* body */
+    --fs-15: 15px;
+    --fs-17: 17px;
+    --fs-20: 20px;
+    --fs-24: 24px;
+    --fs-32: 32px;
+    --fs-44: 44px;
+
+    --lh-tight: 1.25;
+    --lh-body: 1.5;
+    --lh-loose: 1.65;
+
+    /* ── Spacing ───────────────────────────────────────────────────── */
+    --s-1: 2px;
+    --s-2: 4px;
+    --s-3: 6px;
+    --s-4: 8px;
+    --s-5: 10px;
+    --s-6: 12px;
+    --s-7: 14px;
+    --s-8: 16px;
+    --s-9: 20px;
+    --s-10: 24px;
+    --s-11: 32px;
+    --s-12: 40px;
+    --s-13: 48px;
+    --s-14: 64px;
+
+    /* ── Radii ─────────────────────────────────────────────────────── */
+    --r-1: 2px;
+    --r-2: 3px;
+    --r-3: 4px;
+    --r-4: 6px;
+    --r-5: 8px;
+    --r-pill: 999px;
+
+    /* ── Density ───────────────────────────────────────────────────── */
+    --row-sm: 28px;
+    --row-md: 32px;
+    --row-lg: 40px;
+    --ctl-h: 30px;
+    --ctl-h-sm: 24px;
+
+    /* ── Motion ────────────────────────────────────────────────────── */
+    --ease: cubic-bezier(0.2, 0, 0, 1);
+    --t-snap: 80ms var(--ease);
+    --t-fast: 140ms var(--ease);
+    --t-base: 220ms var(--ease);
+
+    /* ── Elevation ─────────────────────────────────────────────────── */
+    --elev-1: 0 1px 0 rgba(0, 0, 0, 0.4);
+    --elev-2: 0 4px 12px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.02) inset;
+    --elev-3: 0 12px 32px rgba(0, 0, 0, 0.55), 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+    --ring-focus: 0 0 0 1px var(--bg-0), 0 0 0 3px var(--cy-tint-strong);
+  }
+
+  /* density mode override (data-density="compact" on <html>) */
+  :root[data-density='compact'] {
+    --fs-13: 12px;
+    --row-sm: 24px;
+    --row-md: 28px;
+    --row-lg: 34px;
+    --ctl-h: 26px;
+  }
+
+  /* light mode (operator override — kept restrained) */
+  :root[data-theme='light'] {
+    --bg-0: #f4f5f7;
+    --bg-1: #ffffff;
+    --bg-2: #fafbfd;
+    --bg-3: #f0f2f6;
+    --bg-4: #ffffff;
+    --bg-hover: rgba(0, 0, 0, 0.04);
+    --bg-pressed: rgba(0, 0, 0, 0.06);
+    --bg-selected: rgba(45, 143, 219, 0.10);
+    --bg-stripe: rgba(0, 0, 0, 0.02);
+    --line-1: #e3e6ec;
+    --line-2: #d2d7e0;
+    --line-3: #aab1be;
+    --fg-1: #0e1118;
+    --fg-2: #45506a;
+    --fg-3: #6a7587;
+    --fg-4: #aab1be;
+    --fg-mono-ts: #5a657a;
   }
 
   html,
@@ -59,7 +175,17 @@
   body {
     background-color: var(--bg-0);
     color: var(--fg-1);
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
+    font-size: var(--fs-13);
+    line-height: var(--lh-body);
+    font-feature-settings: 'ss01', 'cv11', 'cv02';
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: var(--cy-tint-strong);
+    color: var(--fg-1);
   }
 }
