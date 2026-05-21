@@ -666,6 +666,46 @@ Alerts page → `DataTable`.
 Delete the vanilla bundle; delete migrated `frontend/js/` modules;
 remove `cf-*`, `campaign-*`, `goals-*` sections from `styles.css`.
 
+#### A8.5b parity-close — DONE (2026-05-21)
+
+All 8 documented per-page parity gaps are closed in the React bundle
+(see the 2026-05-21 DEVLOG entry): Dash sparklines + governance card,
+Alerts grid/map/search/export + lazy Asset tab, Approvals KPI strip +
+decision-history, Settings 3 placeholder tabs filled, Scope full
+builder, Runs replay scrubber + LLM synthesis, Graph read-only SVG v1,
+Artifacts sandboxed inline preview. Also landed: shared `AppShell`
+(sidebar + breadcrumb), dependency-free Toast/Tooltip/Progress/Spinner,
+`Button loading`, `ListRow`, `motion-reduce` guards, and `--ok-2` /
+`--warn-2` status tokens. `npm run test:frontend` 143/143; tsc clean.
+
+**The structural deletion below is still NOT done** — the legacy
+`frontend/js/` modules + CSS sections remain as the `git revert` safety
+net until the React surfaces are browser-verified. That deletion is the
+remaining A8.5b commit.
+
+#### A8.5b residual deferrals (follow-ups, non-blocking)
+
+These were scoped out of the parity-close pass and need their own small
+commits — none block the legacy deletion:
+
+1. **Scope dry-run policy preview** — port `/api/scopes/evaluate-draft`
+   into the React builder (legacy showed a live policy preview).
+2. **Scope ROE rate-caps / active-hours / blackout-windows editors** —
+   currently loaded from ROE templates but not editable in the create
+   form (only `action_modes` + ROE prose are applied).
+3. **Runs replay via `/api/runs/:id/replay`** — the scrubber currently
+   steps over already-loaded `useRunEvents`; the richer replay endpoint
+   (graph-linked stepping) is unused.
+4. **Settings write-paths** — Prompts / Security&Scope / Tools-MCP-Skills
+   tabs are read-only inventories; create/edit/upload deep-link to the
+   legacy builders.
+5. **Synthesis next-step actions** — `rerun` / `summary` actions route to
+   `/graph` or `/scope` rather than triggering a re-run; needs handlers.
+6. **Graph interactive canvas** — full physics/drag/pan renderer remains
+   deferred (A8 "Deferred" list); the v1 SVG is read-only.
+7. **a11y:** Radix `DialogContent` missing `aria-describedby` warning —
+   add descriptions in a later a11y sweep.
+
 ### Token mapping (`tailwind.config.ts`)
 
 ```ts
