@@ -15,6 +15,7 @@ import { Link, Outlet, useNavigate, useParams } from 'react-router-dom';
 import { ListRow } from '@/components/ListRow';
 import { SeverityBadge } from '@/components/SeverityBadge';
 import { TriageRail } from '@/components/TriageRail';
+import { PageHeader } from '@/components/PageHeader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -279,52 +280,47 @@ export function AlertsPage() {
   return (
     <main className="min-h-screen bg-background text-foreground p-6 font-sans">
       <div className="max-w-[1400px] mx-auto">
-        <header className="flex items-start justify-between gap-4 mb-4">
-          <div>
-            <p className="font-mono uppercase tracking-[0.08em] text-[11px] text-muted-foreground mb-1">
-              Triage queue
-            </p>
-            <h1 className="text-2xl font-semibold text-foreground mb-1">Alerts</h1>
-            <p className="text-sm text-muted-foreground max-w-2xl">
-              Every finding lands here. Filter by severity or triage status, then
-              ack / progress / dismiss / close from the drawer. High and critical
-              dismissals require a note for the audit trail.
-            </p>
-          </div>
-          <div className="flex gap-2 shrink-0">
-            <Tooltip content="Download the currently-filtered findings as CSV">
+        <PageHeader
+          className="mb-4"
+          eyebrow="Triage queue"
+          title="Alerts"
+          description="Every finding lands here. Filter by severity or triage status, then ack / progress / dismiss / close from the drawer. High and critical dismissals require a note for the audit trail."
+          actions={
+            <>
+              <Tooltip content="Download the currently-filtered findings as CSV">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleExport('csv')}
+                  disabled={filtered.length === 0}
+                  data-testid="export-csv-btn"
+                >
+                  ↓ CSV
+                </Button>
+              </Tooltip>
+              <Tooltip content="Download the currently-filtered findings as JSON">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleExport('json')}
+                  disabled={filtered.length === 0}
+                  data-testid="export-json-btn"
+                >
+                  ↓ JSON
+                </Button>
+              </Tooltip>
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
-                onClick={() => handleExport('csv')}
-                disabled={filtered.length === 0}
-                data-testid="export-csv-btn"
+                onClick={() => refetch()}
+                loading={isFetching}
+                data-testid="refresh-alerts-btn"
               >
-                ↓ CSV
+                ↻ Refresh
               </Button>
-            </Tooltip>
-            <Tooltip content="Download the currently-filtered findings as JSON">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleExport('json')}
-                disabled={filtered.length === 0}
-                data-testid="export-json-btn"
-              >
-                ↓ JSON
-              </Button>
-            </Tooltip>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => refetch()}
-              loading={isFetching}
-              data-testid="refresh-alerts-btn"
-            >
-              ↻ Refresh
-            </Button>
-          </div>
-        </header>
+            </>
+          }
+        />
 
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <Input

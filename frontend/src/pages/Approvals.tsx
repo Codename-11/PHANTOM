@@ -24,6 +24,7 @@ import { Link, Outlet, useNavigate, useParams } from 'react-router-dom';
 import { ApprovalCard } from '@/components/ApprovalCard';
 import { ApprovalsHistory } from '@/components/ApprovalsHistory';
 import { ApprovalsKpiStrip } from '@/components/ApprovalsKpiStrip';
+import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -88,19 +89,12 @@ export function ApprovalsPage() {
   return (
     <main className="min-h-screen bg-background text-foreground p-6 font-sans">
       <div className="max-w-[1400px] mx-auto">
-        <header className="flex items-start justify-between gap-4 mb-4">
-          <div>
-            <p className="font-mono uppercase tracking-[0.08em] text-[11px] text-muted-foreground mb-1">
-              Operator decision queue
-            </p>
-            <h1 className="text-2xl font-semibold text-foreground mb-1">Approvals</h1>
-            <p className="text-sm text-muted-foreground max-w-2xl">
-              Every high-risk action — installs, scope overrides, future registry
-              imports — pauses here until you approve or deny. High and critical
-              denials require an operator note for the audit trail.
-            </p>
-          </div>
-          <div className="flex gap-2 shrink-0">
+        <PageHeader
+          className="mb-4"
+          eyebrow="Operator decision queue"
+          title="Approvals"
+          description="Every high-risk action — installs, scope overrides, future registry imports — pauses here until you approve or deny. High and critical denials require an operator note for the audit trail."
+          actions={
             <Button
               variant="ghost"
               size="sm"
@@ -110,8 +104,8 @@ export function ApprovalsPage() {
             >
               ↻ Refresh
             </Button>
-          </div>
-        </header>
+          }
+        />
 
         {!isLoading && !isError ? (
           <ApprovalsKpiStrip stats={stats} pendingCount={list.length} />

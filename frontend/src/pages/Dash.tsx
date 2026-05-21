@@ -19,6 +19,7 @@ import { DashRiskChart } from '@/components/DashRiskChart';
 import { DashSparkline } from '@/components/DashSparkline';
 import { RunPill } from '@/components/RunPill';
 import { SeverityBadge } from '@/components/SeverityBadge';
+import { PageHeader } from '@/components/PageHeader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -349,33 +350,27 @@ export function DashPage() {
   return (
     <main className="min-h-screen bg-background text-foreground p-6 font-sans">
       <div className="max-w-[1400px] mx-auto space-y-4">
-        <header className="flex items-start justify-between gap-4">
-          <div>
-            <p className="font-mono uppercase tracking-[0.08em] text-[11px] text-muted-foreground mb-1">
-              Operations Command Center
-            </p>
-            <h1 className="text-2xl font-semibold text-foreground mb-1">Dash</h1>
-            <p className="text-sm text-muted-foreground max-w-2xl">
-              One pane of glass for system readiness, active campaigns, governance
-              decisions, and untriaged alerts. The hero card surfaces the next
-              concrete action so you always know what to do next.
-            </p>
-          </div>
-          <div className="flex gap-2 shrink-0">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleRefresh}
-              loading={isFetching || charts.isFetching}
-              data-testid="refresh-dash-btn"
-            >
-              ↻ Refresh
-            </Button>
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/onboarding">Onboarding</Link>
-            </Button>
-          </div>
-        </header>
+        <PageHeader
+          eyebrow="Operations Command Center"
+          title="Dash"
+          description="One pane of glass for system readiness, active campaigns, governance decisions, and untriaged alerts. The hero card surfaces the next concrete action so you always know what to do next."
+          actions={
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleRefresh}
+                loading={isFetching || charts.isFetching}
+                data-testid="refresh-dash-btn"
+              >
+                ↻ Refresh
+              </Button>
+              <Button variant="ghost" size="sm" asChild>
+                <Link to="/onboarding">Onboarding</Link>
+              </Button>
+            </>
+          }
+        />
 
         {isLoading ? (
           <DashSkeleton />

@@ -41,13 +41,13 @@ export function DashHero({ action, continueCard }: DashHeroProps) {
     <article
       data-tone={action.tone}
       data-testid="dash-hero"
-      className={`rounded-lg border border-border bg-card text-card-foreground px-5 py-4 border-l-4 ${accent} shadow-sm`}
+      className={`rounded-lg border border-border bg-card text-card-foreground px-4 py-3 border-l-2 ${accent} shadow-sm`}
     >
       <div className="flex flex-col gap-2">
         <p className="font-mono uppercase tracking-[0.08em] text-[11px] text-muted-foreground">
           {action.eyebrow}
         </p>
-        <h2 className="text-xl font-semibold text-foreground leading-tight">
+        <h2 className="text-lg font-semibold text-foreground leading-tight">
           {action.title}
         </h2>
         {action.body ? (

@@ -8,6 +8,7 @@
 import { Link, Outlet, useNavigate } from 'react-router-dom';
 
 import { CampaignPill } from '@/components/CampaignPill';
+import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCampaigns } from '@/lib/useCampaigns';
@@ -96,38 +97,33 @@ export function CampaignsPage() {
   return (
     <main className="min-h-screen bg-background text-foreground p-6 font-sans">
       <div className="max-w-[1400px] mx-auto">
-        <header className="flex items-start justify-between gap-4 mb-4">
-          <div>
-            <p className="font-mono uppercase tracking-[0.08em] text-[11px] text-muted-foreground mb-1">
-              Governed multi-run automation
-            </p>
-            <h1 className="text-2xl font-semibold text-foreground mb-1">Campaigns</h1>
-            <p className="text-sm text-muted-foreground max-w-2xl">
-              Scoped security objectives that continue across child runs until completion,
-              blocker, approval gate, budget limit, or stop. PHANTOM remains the supervisor —
-              every child action is a normal PHANTOM run.
-            </p>
-          </div>
-          <div className="flex gap-2 shrink-0">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => refetch()}
-              disabled={isFetching}
-              data-testid="refresh-campaigns-btn"
-            >
-              ↻ Refresh
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => navigate('/campaigns/new')}
-              data-testid="new-campaign-btn"
-            >
-              <span aria-hidden="true">+</span> New campaign
-            </Button>
-          </div>
-        </header>
+        <PageHeader
+          className="mb-4"
+          eyebrow="Governed multi-run automation"
+          title="Campaigns"
+          description="Scoped security objectives that continue across child runs until completion, blocker, approval gate, budget limit, or stop. PHANTOM remains the supervisor — every child action is a normal PHANTOM run."
+          actions={
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => refetch()}
+                disabled={isFetching}
+                data-testid="refresh-campaigns-btn"
+              >
+                ↻ Refresh
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => navigate('/campaigns/new')}
+                data-testid="new-campaign-btn"
+              >
+                <span aria-hidden="true">+</span> New campaign
+              </Button>
+            </>
+          }
+        />
 
         <section
           aria-label="Campaign list"

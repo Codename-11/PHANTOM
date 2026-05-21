@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { Link, Outlet, useNavigate, useParams } from 'react-router-dom';
 
 import { ScopePill } from '@/components/ScopePill';
+import { PageHeader } from '@/components/PageHeader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -89,38 +90,39 @@ export function ScopesPage() {
   return (
     <main className="min-h-screen bg-background text-foreground p-6 font-sans">
       <div className="max-w-[1400px] mx-auto">
-        <header className="flex items-start justify-between gap-4 mb-4">
-          <div>
-            <p className="font-mono uppercase tracking-[0.08em] text-[11px] text-muted-foreground mb-1">
-              Authorized operating boundaries
-            </p>
-            <h1 className="text-2xl font-semibold text-foreground mb-1">Scope</h1>
-            <p className="text-sm text-muted-foreground max-w-2xl">
+        <PageHeader
+          className="mb-4"
+          eyebrow="Authorized operating boundaries"
+          title="Scope"
+          description={
+            <>
               Each scope authorizes PHANTOM to act against a specific set of targets
               with a specific action-class policy. The legacy{' '}
               <code className="font-mono">/scope</code> page still hosts the full builder.
-            </p>
-          </div>
-          <div className="flex gap-2 shrink-0">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => refetch()}
-              disabled={isFetching}
-              data-testid="refresh-scopes-btn"
-            >
-              ↻ Refresh
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => navigate('/scope/new')}
-              data-testid="new-scope-btn"
-            >
-              <span aria-hidden="true">+</span> New scope
-            </Button>
-          </div>
-        </header>
+            </>
+          }
+          actions={
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => refetch()}
+                disabled={isFetching}
+                data-testid="refresh-scopes-btn"
+              >
+                ↻ Refresh
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => navigate('/scope/new')}
+                data-testid="new-scope-btn"
+              >
+                <span aria-hidden="true">+</span> New scope
+              </Button>
+            </>
+          }
+        />
 
         <section aria-label="Scope list" data-empty={list.length === 0} className="py-4">
           {isLoading ? (

@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import { PageHeader } from '@/components/PageHeader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -876,24 +877,19 @@ export function SettingsPage() {
   return (
     <main className="min-h-screen bg-background text-foreground p-6 font-sans">
       <div className="max-w-[1400px] mx-auto">
-        <header className="flex items-start justify-between gap-4 mb-4">
-          <div>
-            <p className="font-mono uppercase tracking-[0.08em] text-[11px] text-muted-foreground mb-1">
-              Operator control surface
-            </p>
-            <h1 className="text-2xl font-semibold text-foreground mb-1">Settings</h1>
-            <p className="text-sm text-muted-foreground max-w-2xl">
-              Provider configuration, prompts, governance, toolpacks, and diagnostics.
-              The legacy <code className="font-mono">/settings</code> route continues to
-              render the vanilla bundle until A8.5 flips it over.
-            </p>
-          </div>
-          <ProviderStatePill
-            state={providerState}
-            provider={settingsQ.data?.provider}
-            data-testid="provider-state-pill"
-          />
-        </header>
+        <PageHeader
+          className="mb-4"
+          eyebrow="Operator control surface"
+          title="Settings"
+          description="Provider configuration, prompts, governance, toolpacks, and diagnostics — the single operator control surface."
+          actions={
+            <ProviderStatePill
+              state={providerState}
+              provider={settingsQ.data?.provider}
+              data-testid="provider-state-pill"
+            />
+          }
+        />
 
         {settingsQ.isLoading ? (
           <div className="space-y-2">

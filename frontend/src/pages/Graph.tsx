@@ -14,6 +14,7 @@
 import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
+import { PageHeader } from '@/components/PageHeader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -54,31 +55,31 @@ export function GraphPage() {
   return (
     <main className="min-h-screen bg-background text-foreground p-6 font-sans">
       <div className="max-w-[1400px] mx-auto space-y-4">
-        <header className="flex items-start justify-between gap-4">
-          <div>
-            <p className="font-mono uppercase tracking-[0.08em] text-[11px] text-muted-foreground mb-1">
-              Run topology + artifact lineage
-            </p>
-            <h1 className="text-2xl font-semibold text-foreground mb-1">Graph</h1>
-            <p className="text-sm text-muted-foreground max-w-2xl">
+        <PageHeader
+          eyebrow="Run topology + artifact lineage"
+          title="Graph"
+          description={
+            <>
               A read-only node-link view of the selected run. For the full
               interactive canvas (zoom, pan, replay, blocked filter) open the
               legacy <code className="font-mono">/graph</code> viewer.
-            </p>
-          </div>
-          <div className="flex gap-2 shrink-0">
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/runs" data-testid="back-to-runs-btn">
-                ← Runs
-              </Link>
-            </Button>
-            <Button variant="primary" size="sm" asChild>
-              <a href={legacyHref} data-testid="open-legacy-graph">
-                Open in legacy graph viewer →
-              </a>
-            </Button>
-          </div>
-        </header>
+            </>
+          }
+          actions={
+            <>
+              <Button variant="ghost" size="sm" asChild>
+                <Link to="/runs" data-testid="back-to-runs-btn">
+                  ← Runs
+                </Link>
+              </Button>
+              <Button variant="primary" size="sm" asChild>
+                <a href={legacyHref} data-testid="open-legacy-graph">
+                  Open in legacy graph viewer →
+                </a>
+              </Button>
+            </>
+          }
+        />
 
         <Card data-testid="graph-toolbar-card">
           <CardHeader>

@@ -13,6 +13,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -175,33 +176,27 @@ export function OnboardingPage() {
   return (
     <main className="min-h-screen bg-background text-foreground p-6 font-sans">
       <div className="max-w-3xl mx-auto space-y-4">
-        <header className="flex items-start justify-between gap-4">
-          <div>
-            <p className="font-mono uppercase tracking-[0.08em] text-[11px] text-muted-foreground mb-1">
-              Get started
-            </p>
-            <h1 className="text-2xl font-semibold text-foreground mb-1">Onboarding</h1>
-            <p className="text-sm text-muted-foreground max-w-2xl">
-              Five steps to a fully-wired PHANTOM workspace. Load the demo scenario
-              first to see the surface populated, or skip ahead and authorize a
-              real scope.
-            </p>
-          </div>
-          <div className="flex gap-2 shrink-0">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => refetch()}
-              disabled={isFetching}
-              data-testid="refresh-onb-btn"
-            >
-              ↻ Refresh
-            </Button>
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/dash">Back to Dash</Link>
-            </Button>
-          </div>
-        </header>
+        <PageHeader
+          eyebrow="Get started"
+          title="Onboarding"
+          description="Five steps to a fully-wired PHANTOM workspace. Load the demo scenario first to see the surface populated, or skip ahead and authorize a real scope."
+          actions={
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => refetch()}
+                disabled={isFetching}
+                data-testid="refresh-onb-btn"
+              >
+                ↻ Refresh
+              </Button>
+              <Button variant="ghost" size="sm" asChild>
+                <Link to="/dash">Back to Dash</Link>
+              </Button>
+            </>
+          }
+        />
 
         {isLoading ? (
           <OnboardingSkeleton />

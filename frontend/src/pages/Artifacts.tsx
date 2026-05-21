@@ -17,6 +17,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { ArtifactPreview } from '@/components/ArtifactPreview';
+import { PageHeader } from '@/components/PageHeader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -218,20 +219,12 @@ export function ArtifactsPage() {
   return (
     <main className="min-h-screen bg-background text-foreground p-6 font-sans">
       <div className="max-w-[1400px] mx-auto">
-        <header className="flex items-start justify-between gap-4 mb-4">
-          <div>
-            <p className="font-mono uppercase tracking-[0.08em] text-[11px] text-muted-foreground mb-1">
-              Run outputs, evidence bundles, previews
-            </p>
-            <h1 className="text-2xl font-semibold text-foreground mb-1">Artifacts</h1>
-            <p className="text-sm text-muted-foreground max-w-2xl">
-              Every report, evidence bundle, graph snapshot, and preview that PHANTOM
-              generates lands here. Use the filter chips to focus on a specific
-              bucket, then select a row to preview it in-page — content renders in a
-              sandboxed pane.
-            </p>
-          </div>
-          <div className="flex gap-2 shrink-0">
+        <PageHeader
+          className="mb-4"
+          eyebrow="Run outputs, evidence bundles, previews"
+          title="Artifacts"
+          description="Every report, evidence bundle, graph snapshot, and preview that PHANTOM generates lands here. Use the filter chips to focus on a specific bucket, then select a row to preview it in-page — content renders in a sandboxed pane."
+          actions={
             <Button
               variant="ghost"
               size="sm"
@@ -241,8 +234,8 @@ export function ArtifactsPage() {
             >
               ↻ Refresh
             </Button>
-          </div>
-        </header>
+          }
+        />
 
         <section className="mb-4">
           <FilterChips filter={filter} setFilter={setFilter} counts={counts} />
