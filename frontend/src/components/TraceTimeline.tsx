@@ -21,8 +21,8 @@ type Severity = 'info' | 'success' | 'warn' | 'error';
 
 const DOT_COLOR: Record<Severity, string> = {
   info: 'bg-[var(--cy-2)]',
-  success: 'bg-[#66c293]',
-  warn: 'bg-[#d8b15a]',
+  success: 'bg-[var(--ok-2)]',
+  warn: 'bg-[var(--warn-2)]',
   error: 'bg-destructive',
 };
 

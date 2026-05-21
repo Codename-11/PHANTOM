@@ -22,9 +22,9 @@ interface ApprovalCardProps {
 const RISK_TINT: Record<string, string> = {
   exploit:         'border-destructive bg-destructive/10 text-destructive',
   destructive:     'border-destructive bg-destructive/10 text-destructive',
-  credentialed:    'border-[#d8b15a] bg-[#d8b15a]/10 text-[#d8b15a]',
-  'online-bruteforce':       'border-[#d8b15a] bg-[#d8b15a]/10 text-[#d8b15a]',
-  'offline-password-audit':  'border-[#d8b15a] bg-[#d8b15a]/10 text-[#d8b15a]',
+  credentialed:    'border-[var(--warn-2)] bg-[var(--warn-2)]/10 text-[var(--warn-2)]',
+  'online-bruteforce':       'border-[var(--warn-2)] bg-[var(--warn-2)]/10 text-[var(--warn-2)]',
+  'offline-password-audit':  'border-[var(--warn-2)] bg-[var(--warn-2)]/10 text-[var(--warn-2)]',
   recon:           'border-[var(--cy-2)] bg-[var(--cy-3)]/30 text-[var(--cy-1)]',
   'network-scan':  'border-[var(--cy-2)] bg-[var(--cy-3)]/30 text-[var(--cy-1)]',
 };

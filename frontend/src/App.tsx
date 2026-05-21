@@ -8,6 +8,8 @@
 // vanilla bundle until REACT_PAGES in server/index.js is updated.
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
+import { AppShell } from './components/AppShell';
+import { ToastProvider } from './components/ui/toast';
 import CampaignsPage from './pages/Campaigns';
 import CampaignDetailRoute from './pages/CampaignDetail';
 import CampaignCreateRoute from './pages/CampaignCreate';
@@ -54,7 +56,9 @@ function HealthCard() {
 export function App() {
   return (
     <BrowserRouter>
-      <Routes>
+      <ToastProvider>
+        <AppShell>
+          <Routes>
         {/* A8.5 cutover — every migrated surface now mounts at BOTH the
             bare path (the operator default) AND the legacy /react/* path
             (still available for explicit preview / debugging). server
@@ -120,8 +124,10 @@ export function App() {
         <Route path="/react/artifacts" element={<ArtifactsPage />} />
         <Route path="/react" element={<Navigate to="/dash" replace />} />
 
-        <Route path="*" element={<HealthCard />} />
-      </Routes>
+            <Route path="*" element={<HealthCard />} />
+          </Routes>
+        </AppShell>
+      </ToastProvider>
     </BrowserRouter>
   );
 }

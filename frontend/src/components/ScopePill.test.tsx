@@ -13,7 +13,7 @@ describe('ScopePill', () => {
     // The badge variant is encoded in the class list — we sniff for the
     // distinctive completed-variant color token rather than re-asserting
     // every class, which would be brittle.
-    expect(pill.className).toMatch(/#66c293/);
+    expect(pill.className).toMatch(/--ok-2/);
   });
 
   it('renders the expired label with the failed variant', () => {

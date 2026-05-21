@@ -11,9 +11,9 @@ interface SeverityBadgeProps {
 
 const STYLES: Record<'crit' | 'high' | 'med' | 'low' | 'info', string> = {
   crit: 'border-destructive bg-destructive/10 text-destructive',
-  high: 'border-[#d8b15a] bg-[#d8b15a]/10 text-[#d8b15a]',
+  high: 'border-[var(--warn-2)] bg-[var(--warn-2)]/10 text-[var(--warn-2)]',
   med:  'border-[var(--cy-2)] bg-[var(--cy-3)]/30 text-[var(--cy-1)]',
-  low:  'border-[#66c293] bg-[#66c293]/10 text-[#66c293]',
+  low:  'border-[var(--ok-2)] bg-[var(--ok-2)]/10 text-[var(--ok-2)]',
   info: 'border-[var(--line-2)] bg-[var(--bg-3)] text-[var(--fg-3)]',
 };
 

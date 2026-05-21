@@ -20,7 +20,7 @@ interface RiskGridProps {
 const SEVERITY_TICK: Record<RiskClass['risk'], string> = {
   low: 'bg-[var(--ok)]',
   med: 'bg-[var(--warn)]',
-  high: 'bg-[#d8b15a]',
+  high: 'bg-[var(--warn-2)]',
   crit: 'bg-destructive',
 };
 
@@ -78,7 +78,7 @@ export function RiskGrid({ allowed, onChange, className }: RiskGridProps) {
             <span className="font-mono text-xs text-foreground">{r.label}</span>
             {r.warn ? (
               <span
-                className="ml-auto font-mono text-[10px] text-[#d8b15a] uppercase tracking-wider"
+                className="ml-auto font-mono text-[10px] text-[var(--warn-2)] uppercase tracking-wider"
                 title="Requires explicit operator approval"
               >
                 approval-only

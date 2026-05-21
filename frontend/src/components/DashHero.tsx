@@ -19,22 +19,22 @@ interface DashHeroProps {
 
 const TONE_ACCENT: Record<DashHeroAction['tone'], string> = {
   crit: 'border-l-destructive',
-  warn: 'border-l-[#d8b15a]',
+  warn: 'border-l-[var(--warn-2)]',
   cy:   'border-l-[var(--cy-1)]',
-  ok:   'border-l-[#66c293]',
+  ok:   'border-l-[var(--ok-2)]',
 };
 
-function routeToReactPath(route: string | undefined): string {
-  if (!route) return '/react/dash';
-  // Legacy router routes (`approvals`, `settings`, `campaigns`, `scope`,
-  // `runs`, …) map directly under /react/. Unknown values fall back to
-  // the bare React subpath.
-  return `/react/${route}`;
+function routeToPath(route: string | undefined): string {
+  if (!route) return '/dash';
+  // Router routes (`approvals`, `settings`, `campaigns`, `scope`, `runs`,
+  // …) map directly to the bare canonical path. Unknown values fall back
+  // to Dash.
+  return `/${route}`;
 }
 
 export function DashHero({ action, continueCard }: DashHeroProps) {
   const accent = TONE_ACCENT[action.tone] ?? 'border-l-[var(--cy-1)]';
-  const ctaPath = routeToReactPath(action.ctaRoute);
+  const ctaPath = routeToPath(action.ctaRoute);
   const ctaIsAnchor = Boolean(action.ctaScroll && !action.ctaRoute);
 
   return (
@@ -86,7 +86,7 @@ export function DashHero({ action, continueCard }: DashHeroProps) {
               </span>
               <Button variant="ghost" size="sm" asChild>
                 <Link
-                  to={continueCard.route ? routeToReactPath(continueCard.route) : '/react/dash'}
+                  to={continueCard.route ? routeToPath(continueCard.route) : '/dash'}
                   data-continue-id={continueCard.id}
                 >
                   {continueCard.label}

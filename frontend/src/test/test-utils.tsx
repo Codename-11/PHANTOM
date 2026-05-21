@@ -5,6 +5,8 @@ import { render, type RenderOptions } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 
+import { ToastProvider } from '@/components/ui/toast';
+
 interface Options extends Omit<RenderOptions, 'wrapper'> {
   route?: string;
   queryClient?: QueryClient;
@@ -23,7 +25,9 @@ export function renderWithProviders(ui: ReactNode, opts: Options = {}) {
   const queryClient = opts.queryClient ?? makeQueryClient();
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[opts.route ?? '/']}>{children}</MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter initialEntries={[opts.route ?? '/']}>{children}</MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>
   );
   return {

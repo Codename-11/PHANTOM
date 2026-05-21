@@ -24,9 +24,9 @@ const badgeVariants = cva(
           'border-[var(--cy-2)] bg-[var(--cy-3)]/30 text-[var(--cy-1)]',
         paused: 'border-[var(--line-2)] bg-[var(--bg-3)] text-[var(--fg-2)]',
         needs_approval:
-          'border-[#d8b15a] bg-[var(--bg-3)] text-[#d8b15a]',
+          'border-[var(--warn-2)] bg-[var(--bg-3)] text-[var(--warn-2)]',
         completed:
-          'border-[#66c293] bg-[var(--bg-3)] text-[#66c293]',
+          'border-[var(--ok-2)] bg-[var(--bg-3)] text-[var(--ok-2)]',
         failed: 'border-destructive bg-[var(--bg-3)] text-destructive',
         canceled: 'border-[var(--fg-3)] bg-[var(--bg-3)] text-[var(--fg-3)]',
       },

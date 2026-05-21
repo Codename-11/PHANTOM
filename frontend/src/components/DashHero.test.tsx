@@ -158,7 +158,7 @@ describe('DashHero rendering', () => {
     expect(screen.getByText('Continue Recon sweep')).toBeInTheDocument();
     expect(screen.getByText('Map perimeter')).toBeInTheDocument();
     const cta = screen.getByRole('link', { name: /Open campaign/ });
-    expect(cta).toHaveAttribute('href', '/react/campaigns');
+    expect(cta).toHaveAttribute('href', '/campaigns');
   });
 
   it('renders the Continue-where-left-off pill when one is provided', () => {

@@ -41,6 +41,13 @@
     --danger: #ef4444;
     --warn: #f59e0b;
     --ok: #4ade80;
+
+    /* Muted status shades — softer, lower-chroma variants used for fills,
+     * borders, and small status text on the dark-slate surfaces (the
+     * bright --ok/--warn read as neon at small sizes). Previously these
+     * were hard-coded as #66c293 / #d8b15a across ~10 files. */
+    --ok-2: #66c293;
+    --warn-2: #d8b15a;
   }
 
   html,

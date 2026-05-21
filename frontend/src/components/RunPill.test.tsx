@@ -19,8 +19,8 @@ describe('RunPill', () => {
     render(<RunPill status="completed" />);
     const pill = screen.getByText('completed');
     expect(pill).toBeInTheDocument();
-    // completed badge uses #66c293 (green) in the cva map.
-    expect(pill.className).toMatch(/#66c293/);
+    // completed badge uses the muted-ok token (--ok-2) in the cva map.
+    expect(pill.className).toMatch(/--ok-2/);
   });
 
   it('renders the failed label with the destructive variant', () => {
