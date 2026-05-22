@@ -20,6 +20,7 @@ import { useSettings } from '@/lib/settings';
 import { cn } from '@/lib/utils';
 
 import { PhantomMark } from './PhantomMark';
+import { ScopeStrip } from './ScopeStrip';
 import { TweaksMenu } from './TweaksMenu';
 import { Kbd } from './ui/kit';
 import {
@@ -265,6 +266,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
+            {/* Active-scope strip (kit ScopeStrip) — leads the action cluster */}
+            <ScopeStrip />
+
             {/* ⌘K command trigger (kit .cmd-trigger) */}
             <button
               type="button"

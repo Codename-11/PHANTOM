@@ -13,7 +13,7 @@
 // `?runId=` query string so a deep-link from the Runs surface works
 // either way.
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
 import { PageHeader } from '@/components/PageHeader';
@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ButtonGroup, Chip, Kv } from '@/components/ui/kit';
+import { IcPlay, IcPause, IcStep, IcReplay } from '@/components/ui/icons';
 import { useToast } from '@/components/ui/toast';
 import { useRunEvents } from '@/lib/runs';
 import { useArtifacts } from '@/lib/artifacts';
@@ -38,6 +39,22 @@ import { GraphCanvas } from '@/components/GraphCanvas';
 const ZOOM_STEP = 0.2;
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 2;
+
+// Replay transport — ~800ms per step auto-advance.
+const REPLAY_INTERVAL_MS = 800;
+
+// prefers-reduced-motion guard. Defaults to false (animate) in non-DOM /
+// test environments where matchMedia is unavailable.
+function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false;
+  }
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+}
 
 type GraphView = 'run' | 'topology' | 'asset';
 
@@ -100,18 +117,102 @@ export function GraphPage() {
     return set;
   }, [nodes, query]);
 
-  // The active replay step — first node flagged blocked, else the run node,
-  // else the first node. Derived deterministically since we have no live
-  // replay cursor in the read-only data model.
-  const activeId = useMemo<string | null>(() => {
-    const run = nodes.find((n) => n.type === 'run');
-    return run?.id ?? nodes[0]?.id ?? null;
+  // ── Replay sequence ──────────────────────────────────────────────────
+  // The transport replays the run's execution order. We order every node by
+  // its `seq` (the event/step index the server stamps), falling back to a
+  // stable label/id sort for nodes without a seq so the sequence is fully
+  // deterministic. The cursor indexes into this list and drives the active
+  // node (which feeds GraphCanvas's highlight + ▼REPLAY marker).
+  const sequence = useMemo<RunGraphNode[]>(() => {
+    return [...nodes].sort(
+      (a, b) =>
+        (a.seq ?? Number.MAX_SAFE_INTEGER) - (b.seq ?? Number.MAX_SAFE_INTEGER) ||
+        String(a.label || a.id).localeCompare(String(b.label || b.id)),
+    );
   }, [nodes]);
+
+  const stepCount = sequence.length;
+  const [cursor, setCursor] = useState(0);
+  const [playing, setPlaying] = useState(false);
+
+  // Keep the cursor in range as the sequence changes (run switch, filter,
+  // load). Clamp rather than reset so a valid position survives re-renders.
+  useEffect(() => {
+    setCursor((c) => (stepCount === 0 ? 0 : Math.min(c, stepCount - 1)));
+    if (stepCount === 0) setPlaying(false);
+  }, [stepCount]);
+
+  // Active node = the node under the cursor. Replaces the old "first node"
+  // derivation; this is the single source of truth for the ▼REPLAY marker.
+  const activeNode = stepCount > 0 ? sequence[Math.min(cursor, stepCount - 1)] : null;
+  const activeId = activeNode?.id ?? null;
+
+  const step = useCallback(() => {
+    setCursor((c) => {
+      const next = Math.min(c + 1, Math.max(0, stepCount - 1));
+      // Reaching the end stops auto-advance.
+      if (next >= stepCount - 1) setPlaying(false);
+      return next;
+    });
+  }, [stepCount]);
+
+  const reset = useCallback(() => {
+    setPlaying(false);
+    setCursor(0);
+  }, []);
+
+  // Manual Step pauses any running playback.
+  const stepManual = useCallback(() => {
+    setPlaying(false);
+    setCursor((c) => Math.min(c + 1, Math.max(0, stepCount - 1)));
+  }, [stepCount]);
+
+  // Play/Pause toggle. Starting from the end rewinds to 0 so Play always
+  // produces visible motion. No-op when there are no steps.
+  const togglePlay = useCallback(() => {
+    if (stepCount === 0) return;
+    setPlaying((p) => {
+      if (!p && cursor >= stepCount - 1) setCursor(0);
+      return !p;
+    });
+  }, [cursor, stepCount]);
+
+  // Auto-advance timer. Respects prefers-reduced-motion by skipping the
+  // timer entirely (the user can still Step manually).
+  const reduced = useRef(prefersReducedMotion());
+  useEffect(() => {
+    if (!playing || reduced.current) return;
+    if (cursor >= stepCount - 1) {
+      setPlaying(false);
+      return;
+    }
+    const id = window.setInterval(step, REPLAY_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, [playing, cursor, stepCount, step]);
+
+  // Selecting a node in the canvas moves the cursor to it and pauses.
+  const selectNode = useCallback(
+    (n: RunGraphNode) => {
+      setSelectedId(n.id);
+      setPlaying(false);
+      const idx = sequence.findIndex((s) => s.id === n.id);
+      if (idx >= 0) setCursor(idx);
+    },
+    [sequence],
+  );
 
   const selected = useMemo<RunGraphNode | null>(
     () => nodes.find((n) => n.id === selectedId) ?? null,
     [nodes, selectedId],
   );
+
+  const activeLabel = activeNode ? activeNode.label || activeNode.id : '';
+  const activeTs =
+    activeNode?.metadata && (activeNode.metadata.ts ?? activeNode.metadata.timestamp)
+      ? String(activeNode.metadata.ts ?? activeNode.metadata.timestamp)
+      : activeNode?.seq != null
+        ? `evt #${activeNode.seq}`
+        : '';
 
   function zoomBy(delta: number) {
     setZoom((z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round((z + delta) * 100) / 100)));
@@ -281,6 +382,102 @@ export function GraphPage() {
               </Button>
             </div>
 
+            {/* replay transport — Play/Pause • Step • Reset, progress + counter */}
+            <div
+              data-testid="graph-replay-transport"
+              className="flex flex-wrap items-center gap-2"
+              style={{ padding: '8px 14px', borderBottom: '1px solid var(--line-1)' }}
+            >
+              <button
+                type="button"
+                className="btn btn-sm btn-icon"
+                onClick={togglePlay}
+                disabled={stepCount === 0}
+                aria-label={playing ? 'Pause replay' : 'Play replay'}
+                aria-pressed={playing}
+                data-testid="graph-replay-play"
+              >
+                {playing ? <IcPause size={14} /> : <IcPlay size={14} />}
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-icon"
+                onClick={stepManual}
+                disabled={stepCount === 0 || cursor >= stepCount - 1}
+                aria-label="Step forward"
+                data-testid="graph-replay-step"
+              >
+                <IcStep size={14} />
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-icon"
+                onClick={reset}
+                disabled={stepCount === 0 || cursor === 0}
+                aria-label="Reset replay"
+                data-testid="graph-replay-reset"
+              >
+                <IcReplay size={14} />
+              </button>
+
+              <span
+                className="mono"
+                data-testid="graph-replay-counter"
+                style={{ fontSize: 11, color: 'var(--fg-2)', letterSpacing: '0.04em' }}
+              >
+                STEP {String(Math.min(cursor + 1, Math.max(stepCount, 1))).padStart(2, '0')} /{' '}
+                {String(stepCount).padStart(2, '0')}
+              </span>
+
+              {/* progress bar */}
+              <div
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={Math.max(stepCount - 1, 0)}
+                aria-valuenow={Math.min(cursor, Math.max(stepCount - 1, 0))}
+                data-testid="graph-replay-progress"
+                style={{
+                  flex: '1 1 120px',
+                  minWidth: 120,
+                  height: 4,
+                  borderRadius: 999,
+                  background: 'var(--bg-3)',
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  data-testid="graph-replay-progress-fill"
+                  style={{
+                    height: '100%',
+                    width: `${stepCount > 1 ? (cursor / (stepCount - 1)) * 100 : stepCount === 1 ? 100 : 0}%`,
+                    background: 'var(--cy-2)',
+                    transition: reduced.current ? 'none' : 'width 200ms ease',
+                  }}
+                />
+              </div>
+
+              {activeLabel ? (
+                <span
+                  className="mono"
+                  data-testid="graph-replay-active-label"
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--fg-1)',
+                    maxWidth: 240,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title={activeLabel}
+                >
+                  {activeLabel}
+                  {activeTs ? (
+                    <span style={{ color: 'var(--fg-3)' }}> · {activeTs}</span>
+                  ) : null}
+                </span>
+              ) : null}
+            </div>
+
             <CardContent className="p-0">
               <div
                 className="grid"
@@ -300,7 +497,7 @@ export function GraphPage() {
                       activeId={activeId}
                       nodeTypeFilter={nodeTypeFilter}
                       matchIds={matchIds}
-                      onSelect={(n) => setSelectedId(n.id)}
+                      onSelect={selectNode}
                       onZoomIn={() => zoomBy(ZOOM_STEP)}
                       onZoomOut={() => zoomBy(-ZOOM_STEP)}
                       onFit={() => setZoom(1)}

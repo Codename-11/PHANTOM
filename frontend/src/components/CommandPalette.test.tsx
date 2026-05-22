@@ -6,6 +6,7 @@ import { screen, fireEvent, waitFor } from '@testing-library/react';
 
 import { renderWithProviders } from '@/test/test-utils';
 import { useCommandPalette } from '@/lib/commandStore';
+import { useActiveScopeStore } from '@/lib/activeScope';
 import { CommandPalette } from './CommandPalette';
 
 // Capture router navigation without standing up real routes.
@@ -37,6 +38,8 @@ describe('CommandPalette', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     useCommandPalette.setState({ open: false });
+    useActiveScopeStore.setState({ activeScopeId: null });
+    try { localStorage.clear(); } catch { /* ignore */ }
   });
 
   it('renders the dialog with Navigation results when open', () => {
@@ -73,6 +76,50 @@ describe('CommandPalette', () => {
     fireEvent.change(input, { target: { value: 'graph' } });
     fireEvent.keyDown(window, { key: 'Enter' });
     expect(navigateSpy).toHaveBeenCalledWith('/graph');
+    expect(useCommandPalette.getState().open).toBe(false);
+  });
+
+  it('sets the active scope via the "Set scope" group (no navigation)', async () => {
+    // Override fetch so /api/scopes returns one scope; everything else empty.
+    const scope = {
+      id: 'scope-x',
+      name: 'Recon Scope',
+      targets: { hosts: ['x.example'] },
+      allowed_actions: [],
+      blocked_actions: [],
+      action_modes: null,
+      active_hours: null,
+      blackout_windows: null,
+      rate_caps: null,
+      rules_of_engagement: '',
+      credential_refs: [],
+      notes: '',
+      expires_at: null,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: null,
+      archived_at: null,
+    };
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      const body = url.includes('/api/scopes') && !url.includes('/api/scopes/')
+        ? JSON.stringify([scope])
+        : '[]';
+      return Promise.resolve(
+        new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }),
+      );
+    });
+
+    renderWithProviders(<CommandPalette />);
+    expect(await screen.findByText('Set scope')).toBeTruthy();
+    // "Recon Scope" also appears in the Assets / Scopes group (a route item),
+    // so target the one inside the Set scope group via its meta ("1 target").
+    const setScopeRow = screen
+      .getAllByText('Recon Scope')
+      .find((el) => el.closest('.cmdk-item')?.textContent?.includes('target'));
+    fireEvent.click(setScopeRow as HTMLElement);
+
+    expect(useActiveScopeStore.getState().activeScopeId).toBe('scope-x');
+    expect(navigateSpy).not.toHaveBeenCalled();
     expect(useCommandPalette.getState().open).toBe(false);
   });
 

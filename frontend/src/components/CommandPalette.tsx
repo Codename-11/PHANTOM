@@ -13,9 +13,10 @@ import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 
+import { useActiveScopeStore } from '@/lib/activeScope';
 import { useCommandPalette } from '@/lib/commandStore';
 import { useFindings } from '@/lib/findings';
-import { useScopes, useScopeAssets } from '@/lib/scopes';
+import { countScopeTargets, useScopes, useScopeAssets } from '@/lib/scopes';
 import { useRuns } from '@/lib/runs';
 import {
   IcSearch,
@@ -128,6 +129,7 @@ export function CommandPalette() {
 function CommandPaletteBody({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const setActiveScopeId = useActiveScopeStore((s) => s.setActiveScopeId);
   const [query, setQuery] = React.useState('');
   const [active, setActive] = React.useState(0);
 
@@ -195,6 +197,24 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
       .slice(0, 5);
     if (runItems.length) out.push({ label: 'Runs', items: runItems });
 
+    // Set scope — pick the active scope without leaving the current page.
+    // These are side-effecting (run) items, not routes: they update the
+    // shared active-scope state and close the palette.
+    const setScopeItems: CmdItem[] = scopes
+      .map((s) => {
+        const n = countScopeTargets(s);
+        return {
+          id: `setscope:${s.id}`,
+          icon: <IcShield {...IC()} />,
+          label: s.name || s.id,
+          meta: `${n} ${n === 1 ? 'target' : 'targets'}`,
+          run: () => setActiveScopeId(s.id),
+        };
+      })
+      .filter((i) => matches(i, lc))
+      .slice(0, 6);
+    if (setScopeItems.length) out.push({ label: 'Set scope', items: setScopeItems });
+
     // Actions
     const actions: CmdItem[] = [
       { id: 'act:new-scope', icon: <IcShield {...IC()} />, label: 'New scope', meta: 'N', route: '/scope/new' },
@@ -210,7 +230,7 @@ function CommandPaletteBody({ onClose }: { onClose: () => void }) {
     if (actions.length) out.push({ label: 'Actions', items: actions });
 
     return out;
-  }, [findings, scopes, assets, runs, lc, queryClient]);
+  }, [findings, scopes, assets, runs, lc, queryClient, setActiveScopeId]);
 
   // Flattened visible list — the keyboard cursor walks this.
   const flat = React.useMemo(() => groups.flatMap((g) => g.items), [groups]);

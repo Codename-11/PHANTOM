@@ -674,3 +674,25 @@ Validation: tsc --noEmit clean · build:react clean · frontend 201/201 (28 file
 
 Remaining (lower priority): topbar scope-strip needs an active-scope concept (product feature, not
 just UI); a few Graph view-switch/replay items stay presentational.
+
+## 2026-05-21 22:02 EDT — UI parity wave 5: active-scope + functional Graph replay
+
+Closed the last two flagged gaps; both are now live.
+
+- Active scope (NEW lib/activeScope.ts + components/ScopeStrip.tsx): zustand store persisting the
+  selected scope id (localStorage `phantom-active-scope`), resolved live against useScopes(). Topbar
+  ScopeStrip chip (kit's SCOPE · name · N targets · expires …) at the start of the action cluster, with
+  a selector Dialog + Clear. CommandPalette gains a "Set scope" group (⌘K → switch scope, no nav).
+  Persists across reload; exposed via useActiveScope() for future scope-filtering of page data.
+- Graph replay transport (Graph.tsx): replaced the derived "first node" active state with a real
+  cursor over the seq-ordered node sequence. Play/Pause auto-advances (~800ms, stops at end), Step,
+  Reset, a progressbar + "STEP nn / NN" counter + active node label/timestamp. The cursor drives the
+  existing active-node highlight + ▼REPLAY marker; selecting a node sets+pauses. prefers-reduced-motion
+  respected. View-switch (Run/Topology/Asset → nodeTypeFilter) + search dimming confirmed already live.
+
+Verified: tsc --noEmit clean · build:react clean · frontend 207/207 (29 files).
+
+Known backend follow-up (intentionally NOT faked): Registry "Request install" stays gated — the
+generic /api/installer/request only accepts installer-catalog toolIds and can't consume a registry
+manifest's install recipes; a registry→installer translation endpoint (with its own security review)
+is required. The button is honestly labeled "Request install (queued)" with a tooltip.
