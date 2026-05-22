@@ -198,11 +198,11 @@ describe('AlertsPage', () => {
     expect(screen.getByText(/SSRF on \/api\/proxy/)).toBeInTheDocument();
   });
 
-  it('renders the triage rail in the detail Sheet and submits Ack', async () => {
+  it('renders the triage rail in the inline detail panel and submits Ack', async () => {
     stubFetch();
     renderRoute('/alerts/f-low');
     // Both the AlertsPage list and the inner AlertDetailRoute depend on
-    // /api/findings; wait until the detail Sheet finishes loading.
+    // /api/findings; wait until the inline detail panel finishes loading.
     const rail = await screen.findByTestId('triage-rail', {}, { timeout: 3000 });
     expect(rail).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /^Ack$/ }));
@@ -215,6 +215,31 @@ describe('AlertsPage', () => {
       const parsed = JSON.parse(String(last?.body ?? '{}'));
       expect(parsed.triageStatus).toBe('acknowledged');
     });
+  });
+
+  it('renders the detail inline as a master-detail split — list stays visible beside it', async () => {
+    stubFetch();
+    renderRoute('/alerts/f-crit');
+    // The list table stays mounted alongside the inline detail (not a modal
+    // Sheet that hides the list).
+    await waitFor(() => {
+      expect(screen.getByTestId('alerts-list')).toBeInTheDocument();
+    });
+    expect(screen.getAllByTestId('alerts-row').length).toBe(2);
+    // Inline detail panel mounts beside it once the finding resolves.
+    expect(await screen.findByTestId('alert-detail-panel', {}, { timeout: 3000 })).toBeInTheDocument();
+  });
+
+  it('close button navigates back to the list (deep-link reversible)', async () => {
+    stubFetch();
+    renderRoute('/alerts/f-crit');
+    await screen.findByTestId('triage-rail', {}, { timeout: 3000 });
+    fireEvent.click(screen.getByTestId('alert-detail-close'));
+    // Detail unmounts; the list remains.
+    await waitFor(() => {
+      expect(screen.queryByTestId('alert-detail-panel')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('alerts-list')).toBeInTheDocument();
   });
 
   it('drawer shows Evidence Kv, Policy Decision, Suggested Fix, and the four tabs', async () => {

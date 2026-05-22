@@ -1,5 +1,6 @@
 // Approvals — pending install / scope / registry approval queue +
-// detail drawer (Sheet). Renders the A3 EXPLAINED shape produced by
+// persistent INLINE detail column (SplitPane, kit `.drawer` chrome).
+// Renders the A3 EXPLAINED shape produced by
 // server/approvals/explain.js, with raw JSON tucked inside a
 // <details> disclosure.
 //
@@ -19,7 +20,7 @@
 // Served at bare /approvals + /approvals/:id (A8.5 cutover).
 
 import { useEffect, useState } from 'react';
-import { Link, Outlet, useNavigate, useParams } from 'react-router-dom';
+import { Link, Outlet, useMatch, useNavigate, useParams } from 'react-router-dom';
 
 import { ApprovalCard } from '@/components/ApprovalCard';
 import { ApprovalsHistory } from '@/components/ApprovalsHistory';
@@ -35,13 +36,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
+import { IcX } from '@/components/ui/icons';
+import { SplitPane } from '@/components/ui/split-pane';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
@@ -82,16 +78,58 @@ function ApprovalsEmpty() {
 
 export function ApprovalsPage() {
   const navigate = useNavigate();
+  const detailOpen = !!useMatch('/approvals/:id');
   const { data, isLoading, isError, error, refetch, isFetching } = useApprovals();
   const list = data?.pending ?? [];
   const stats = data?.stats ?? { total: 0, byDecision: {}, byRisk: {}, series: [] };
   const historyEvents = data?.history?.events ?? [];
 
+  // The master column: KPI strip + the pending queue + decision history.
+  // Lives inside the SplitPane's list slot so it stays visible beside the
+  // inline detail column on desktop.
+  const listColumn = (
+    <div className="p-6">
+      {!isLoading && !isError ? (
+        <ApprovalsKpiStrip stats={stats} pendingCount={list.length} />
+      ) : null}
+
+      <section aria-label="Approval queue" className="py-4">
+        {isLoading ? (
+          <ApprovalsListSkeleton />
+        ) : isError ? (
+          <div
+            role="alert"
+            className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+          >
+            Failed to load approvals: {(error as Error)?.message ?? 'unknown error'}
+          </div>
+        ) : list.length === 0 ? (
+          <ApprovalsEmpty />
+        ) : (
+          <ul
+            className="flex flex-col gap-2 list-none m-0 p-0"
+            data-testid="approvals-list"
+          >
+            {list.map((a) => (
+              <li key={a.id}>
+                <ApprovalCard
+                  approval={a}
+                  onClick={() => navigate(`/approvals/${a.id}`)}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {!isLoading && !isError ? <ApprovalsHistory events={historyEvents} /> : null}
+    </div>
+  );
+
   return (
-    <main className="min-h-screen bg-background text-foreground p-6 font-sans">
-      <div className="max-w-[1400px] mx-auto">
+    <main className="flex h-[calc(100vh-3rem)] flex-col bg-background text-foreground font-sans">
+      <div className="px-6 pt-6">
         <PageHeader
-          className="mb-4"
           eyebrow="Operator decision queue"
           title="Approvals"
           description="Every high-risk action — installs, scope overrides, future registry imports — pauses here until you approve or deny. High and critical denials require an operator note for the audit trail."
@@ -107,49 +145,21 @@ export function ApprovalsPage() {
             </Button>
           }
         />
+      </div>
 
-        {!isLoading && !isError ? (
-          <ApprovalsKpiStrip stats={stats} pendingCount={list.length} />
-        ) : null}
-
-        <section aria-label="Approval queue" className="py-4">
-          {isLoading ? (
-            <ApprovalsListSkeleton />
-          ) : isError ? (
-            <div
-              role="alert"
-              className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
-            >
-              Failed to load approvals: {(error as Error)?.message ?? 'unknown error'}
-            </div>
-          ) : list.length === 0 ? (
-            <ApprovalsEmpty />
-          ) : (
-            <ul
-              className="flex flex-col gap-2 list-none m-0 p-0"
-              data-testid="approvals-list"
-            >
-              {list.map((a) => (
-                <li key={a.id}>
-                  <ApprovalCard
-                    approval={a}
-                    onClick={() => navigate(`/approvals/${a.id}`)}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {!isLoading && !isError ? <ApprovalsHistory events={historyEvents} /> : null}
-
-        <Outlet />
+      <div className="min-h-0 flex-1">
+        <SplitPane
+          list={listColumn}
+          detail={<Outlet />}
+          detailOpen={detailOpen}
+          detailWidth={420}
+        />
       </div>
     </main>
   );
 }
 
-// ── Detail Sheet (mounted at /approvals/:id) ──────────────────────────
+// ── Inline detail column (mounted at /approvals/:id) ──────────────────
 
 function DetailSkeleton() {
   return (
@@ -226,7 +236,6 @@ function DenyDialog({ open, approval, onCancel, onConfirm, submitting }: DenyDia
 export function ApprovalDetailRoute() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [open, setOpen] = useState(true);
   const [denyOpen, setDenyOpen] = useState(false);
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const { toast } = useToast();
@@ -234,9 +243,9 @@ export function ApprovalDetailRoute() {
   const { data: approval, isLoading, isError, error } = useApprovalDetail(id);
   const { approve, deny } = useApprovalAction(id);
 
-  useEffect(() => {
-    if (!open) navigate('/approvals', { replace: true });
-  }, [open, navigate]);
+  function close() {
+    navigate('/approvals', { replace: true });
+  }
 
   async function handleApprove() {
     setFeedback(null);
@@ -244,7 +253,7 @@ export function ApprovalDetailRoute() {
       await approve.mutateAsync();
       setFeedback({ kind: 'ok', text: '✓ Install approved.' });
       toast({ title: 'Install approved', description: 'Install commands are running.', variant: 'success' });
-      setTimeout(() => setOpen(false), 600);
+      setTimeout(close, 600);
     } catch (err) {
       const text = (err as Error).message;
       setFeedback({ kind: 'err', text: `✗ ${text}` });
@@ -259,7 +268,7 @@ export function ApprovalDetailRoute() {
       setFeedback({ kind: 'ok', text: '✓ Denied.' });
       toast({ title: 'Approval denied', variant: 'success' });
       setDenyOpen(false);
-      setTimeout(() => setOpen(false), 600);
+      setTimeout(close, 600);
     } catch (err) {
       const text = (err as Error).message;
       setFeedback({ kind: 'err', text: `✗ ${text}` });
@@ -268,101 +277,119 @@ export function ApprovalDetailRoute() {
   }
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetContent side="right" data-testid="approval-detail-sheet">
-        {isLoading ? (
-          <DetailSkeleton />
-        ) : isError || !approval ? (
-          <SheetHeader>
-            <SheetTitle>Failed to load</SheetTitle>
-            <SheetDescription>
-              {(error as Error)?.message ?? 'Approval not found.'}
-            </SheetDescription>
+    <div className="drawer" data-testid="approval-detail-sheet" style={{ height: '100%' }}>
+      {isLoading ? (
+        <DetailSkeleton />
+      ) : isError || !approval ? (
+        <div className="drawer-hd">
+          <div className="grow">
+            <div className="title">Failed to load</div>
+            <div className="sub">{(error as Error)?.message ?? 'Approval not found.'}</div>
             <div className="mt-2">
               <Button variant="ghost" size="sm" asChild>
                 <Link to="/approvals">Back to list</Link>
               </Button>
             </div>
-          </SheetHeader>
-        ) : (
-          <>
-            <SheetHeader>
-              <SheetTitle>Approval</SheetTitle>
-              <SheetDescription>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={close}
+            aria-label="Close detail"
+            data-testid="approval-detail-close"
+          >
+            <IcX />
+          </Button>
+        </div>
+      ) : (
+        <>
+          <div className="drawer-hd">
+            <div className="grow">
+              <div className="title">Approval</div>
+              <div className="sub">
                 Review the structured fields below before approving or denying.
                 Raw upstream JSON is available under <em>Raw details</em>.
-              </SheetDescription>
-            </SheetHeader>
-
-            <div className="flex-1 overflow-y-auto px-4 py-4">
-              <ApprovalCard approval={approval} mode="detail" />
+              </div>
             </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={close}
+              aria-label="Close detail"
+              data-testid="approval-detail-close"
+            >
+              <IcX />
+            </Button>
+          </div>
 
-            <div className="border-t border-border px-4 py-3 space-y-2">
-              {feedback ? (
-                <p
-                  role="status"
-                  className={
-                    feedback.kind === 'ok'
-                      ? 'text-xs text-[var(--ok-2)]'
-                      : 'text-xs text-destructive'
-                  }
-                >
-                  {feedback.text}
-                </p>
-              ) : null}
-              {approve.isPending ? (
-                <div
-                  role="status"
-                  className="flex items-center gap-2 text-xs text-[var(--cy-1)]"
-                  data-testid="approval-engaging"
-                >
-                  <EngagingIcon size={20} />
-                  <span className="font-mono uppercase tracking-[0.06em]">
-                    Engaging · running authorized install…
-                  </span>
-                </div>
-              ) : null}
-              {approval.status === 'pending' ? (
-                <div className="flex flex-wrap gap-2 justify-end">
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => setDenyOpen(true)}
-                    disabled={approve.isPending || deny.isPending}
-                    data-testid="approval-deny-btn"
-                  >
-                    Deny
-                  </Button>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => void handleApprove()}
-                    loading={approve.isPending}
-                    disabled={deny.isPending}
-                    data-testid="approval-approve-btn"
-                  >
-                    {approve.isPending ? 'Approving…' : 'Approve & install'}
-                  </Button>
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground text-right">
-                  Resolved · {approval.status.toUpperCase()}
-                </p>
-              )}
-            </div>
+          <div className="drawer-bd px-4 py-4">
+            <ApprovalCard approval={approval} mode="detail" />
+          </div>
 
-            <DenyDialog
-              open={denyOpen}
-              approval={approval}
-              onCancel={() => setDenyOpen(false)}
-              onConfirm={handleDeny}
-              submitting={deny.isPending}
-            />
-          </>
-        )}
-      </SheetContent>
-    </Sheet>
+          <div className="drawer-ft" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+            {feedback ? (
+              <p
+                role="status"
+                className={
+                  feedback.kind === 'ok'
+                    ? 'text-xs text-[var(--ok-2)]'
+                    : 'text-xs text-destructive'
+                }
+              >
+                {feedback.text}
+              </p>
+            ) : null}
+            {approve.isPending ? (
+              <div
+                role="status"
+                className="flex items-center gap-2 text-xs text-[var(--cy-1)]"
+                data-testid="approval-engaging"
+              >
+                <EngagingIcon size={20} />
+                <span className="font-mono uppercase tracking-[0.06em]">
+                  Engaging · running authorized install…
+                </span>
+              </div>
+            ) : null}
+            {approval.status === 'pending' ? (
+              <div className="flex flex-wrap gap-2 justify-end">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setDenyOpen(true)}
+                  disabled={approve.isPending || deny.isPending}
+                  data-testid="approval-deny-btn"
+                >
+                  Deny
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => void handleApprove()}
+                  loading={approve.isPending}
+                  disabled={deny.isPending}
+                  data-testid="approval-approve-btn"
+                >
+                  {approve.isPending ? 'Approving…' : 'Approve & install'}
+                </Button>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground text-right">
+                Resolved · {approval.status.toUpperCase()}
+              </p>
+            )}
+          </div>
+
+          <DenyDialog
+            open={denyOpen}
+            approval={approval}
+            onCancel={() => setDenyOpen(false)}
+            onConfirm={handleDeny}
+            submitting={deny.isPending}
+          />
+        </>
+      )}
+    </div>
   );
 }
 

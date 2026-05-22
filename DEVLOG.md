@@ -613,3 +613,42 @@ Remaining deferrals:
 - Visual screenshot capture still pending (no browser automation this session); dev server at
   localhost:5173 for manual review.
 - Engaging animation is built but unwired (no run state maps to it yet).
+
+## 2026-05-21 21:10 EDT — UI parity wave 3: structural / IA fidelity (sidebar + split-pane)
+
+Third pass after a structural re-audit. Two gaps vs the kit: (1) the sidebar didn't match
+shell.jsx (flat list, text glyphs, no counts), and (2) every list+detail surface used shadcn
+Sheet modal overlays instead of the kit's persistent inline `.drawer` columns — detail was
+"stuffed in drawers" rather than shown as proper split-panes beside the list.
+
+Foundation:
+- NEW `frontend/src/components/ui/icons.tsx` — full port of the kit's 44 line icons
+  (16px, stroke 1.5) as typed React components.
+- NEW `frontend/src/components/ui/split-pane.tsx` — master-detail layout primitive: desktop =
+  list (flex-1) + fixed-width inline detail column (the kit's `.drawer`-as-grid-column topology);
+  mobile = detail full-width takeover, list hidden. Detail node mounts once.
+
+Sidebar (`AppShell.tsx` + new `lib/navCounts.ts`):
+- Two labeled sections — Operations (Dash/Chat/Alerts/Runs/Graph/Artifacts/Campaigns/Assets-Scope)
+  and Governance (Approvals/Registry/Settings) — matching shell.jsx grouping.
+- Text glyphs replaced with line icons; `.side-link.active` cyan inset rail.
+- Live count badges: Alerts (untriaged), Runs (active), Approvals (pending), Assets/Scope (count);
+  composed from existing query hooks, no new endpoints, omit-when-unavailable.
+- Footer: status dot + active provider · model (from /api/settings). Latency omitted (no cheap signal).
+- PhantomMark gains the "GOVERNED OPS" sub-label.
+
+Split-pane conversion (Sheet overlay → inline column; routes + deep-linking unchanged):
+- Alerts (1fr | 420px), Runs (list | trace | 360px metadata), Scope, Campaigns, Approvals (route-based),
+  Registry (state-based). Each page is now height-bounded (`h-[calc(100vh-3rem)]` flex column) with the
+  PageHeader on top and the SplitPane filling the rest; detail routes dropped `<Sheet>` for inline
+  `.drawer`/`.drawer-hd`/`.drawer-bd` chrome with an IcX close that navigates back to the list.
+- detailOpen derived via react-router `useMatch`; Scope/Campaigns exclude the `new` create route (those
+  stay full-width create forms). Approve/deny flow + EngagingIcon preserved. Fixed a hook-order bug in
+  the Runs match logic (both useMatch calls must run before combining).
+
+Validation passed:
+- `npx tsc --noEmit -p tsconfig.frontend.json` — 0 errors.
+- `npm run build:react` — clean.
+- `npm run test:frontend` — 196/196 (27 files; +5 since wave 2).
+
+Not yet committed/deployed — awaiting operator review + the docker-server deploy step.

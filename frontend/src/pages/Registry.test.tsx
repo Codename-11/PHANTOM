@@ -1,6 +1,6 @@
-// Registry list + detail Sheet — behind a stubbed fetch routed by URL.
-// Covers: list render, detail Sheet open, trust pill (signed vs unsigned),
-// and the rendered-but-disabled Request-install button.
+// Registry list + inline detail column (SplitPane) — behind a stubbed
+// fetch routed by URL. Covers: list render, detail column open, trust pill
+// (signed vs unsigned), and the rendered-but-disabled Request-install button.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 
@@ -132,7 +132,7 @@ describe('RegistryPage', () => {
     expect(screen.getByText(/No manifests found/i)).toBeInTheDocument();
   });
 
-  it('opens the detail Sheet on row click with a signed trust pill', async () => {
+  it('opens the inline detail column on row click with a signed trust pill', async () => {
     globalThis.fetch = makeFetch();
     renderWithProviders(<RegistryPage />, { route: '/react/registry' });
 

@@ -1,6 +1,6 @@
-// Approvals page — list renders, detail drawer surfaces the EXPLAINED
-// fields, denial of a high|crit approval requires a note before
-// submission.
+// Approvals page — list renders, inline detail column (SplitPane)
+// surfaces the EXPLAINED fields beside the list, denial of a high|crit
+// approval requires a note before submission.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -136,13 +136,16 @@ describe('ApprovalsPage', () => {
     vi.restoreAllMocks();
   });
 
+  // Routes mirror the real app (`/approvals` + `:id` child) so the
+  // parent's `useMatch('/approvals/:id')` correctly drives the inline
+  // detail column open/closed.
   function renderWithRoute(initial: string, qc: QueryClient = makeQueryClient()) {
     return render(
       <QueryClientProvider client={qc}>
         <ToastProvider>
           <MemoryRouter initialEntries={[initial]}>
             <Routes>
-              <Route path="/react/approvals" element={<ApprovalsPage />}>
+              <Route path="/approvals" element={<ApprovalsPage />}>
                 <Route path=":id" element={<ApprovalDetailRoute />} />
               </Route>
             </Routes>
@@ -154,7 +157,7 @@ describe('ApprovalsPage', () => {
 
   it('renders the pending approvals list', async () => {
     stubFetch();
-    renderWithRoute('/react/approvals');
+    renderWithRoute('/approvals');
     await waitFor(() => {
       expect(screen.getByTestId('approvals-list')).toBeInTheDocument();
     });
@@ -165,7 +168,7 @@ describe('ApprovalsPage', () => {
 
   it('renders the KPI strip with decision counts + derived approve rate', async () => {
     stubFetch();
-    renderWithRoute('/react/approvals');
+    renderWithRoute('/approvals');
     await waitFor(() => {
       expect(screen.getByTestId('approvals-kpi')).toBeInTheDocument();
     });
@@ -181,7 +184,7 @@ describe('ApprovalsPage', () => {
 
   it('renders the decision-history feed of past decisions', async () => {
     stubFetch();
-    renderWithRoute('/react/approvals');
+    renderWithRoute('/approvals');
     await waitFor(() => {
       expect(screen.getByTestId('approvals-history-list')).toBeInTheDocument();
     });
@@ -196,7 +199,7 @@ describe('ApprovalsPage', () => {
 
   it('renders the history empty state when no decisions are recorded', async () => {
     stubFetch({ history: { count: 0, events: [], explained: [] } });
-    renderWithRoute('/react/approvals');
+    renderWithRoute('/approvals');
     await waitFor(() => {
       expect(screen.getByTestId('approvals-history-empty')).toBeInTheDocument();
     });
@@ -204,21 +207,21 @@ describe('ApprovalsPage', () => {
 
   it('renders the empty state when there are no pending approvals', async () => {
     stubFetch({ pending: { requests: [], explained: [] } });
-    renderWithRoute('/react/approvals');
+    renderWithRoute('/approvals');
     await waitFor(() => {
       expect(screen.getByTestId('approvals-empty')).toBeInTheDocument();
     });
   });
 
-  it('opens the detail Sheet at /react/approvals/:id with structured fields', async () => {
+  it('opens the inline detail column at /approvals/:id with structured fields', async () => {
     stubFetch();
-    renderWithRoute('/react/approvals/req-1');
+    renderWithRoute('/approvals/req-1');
     // Wait for the data-driven raw-json section to render — this is
     // the last piece to mount once the bundle query resolves.
     const raw = await screen.findByTestId('approval-raw-json', {}, { timeout: 3000 });
     expect(raw).toBeInTheDocument();
     // ACTION / REASON / EFFECT rows present (use getAllByText because
-    // both the list row + detail Sheet render the same approval).
+    // both the list row + inline detail column render the same approval).
     expect(screen.getAllByText(/install\.apt/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/requires elevated privileges/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Installs 1 security tool via apt/).length).toBeGreaterThan(0);
@@ -226,7 +229,7 @@ describe('ApprovalsPage', () => {
 
   it('requires a denial note before submitting deny for high|crit approval', async () => {
     stubFetch();
-    renderWithRoute('/react/approvals/req-1');
+    renderWithRoute('/approvals/req-1');
     const denyBtn = await screen.findByTestId('approval-deny-btn', {}, { timeout: 3000 });
     fireEvent.click(denyBtn);
     await waitFor(() => {

@@ -2,14 +2,16 @@
 // and the surrounding chrome in pages/campaigns-page.js.
 //
 // React Query owns the data; clicking a row navigates to
-// /campaigns/:id (which mounts CampaignDetail in a Sheet). The
-// page-header "+ New campaign" button navigates to /campaigns/new
-// which mounts the CampaignCreate Dialog above the same list.
-import { Link, Outlet, useNavigate } from 'react-router-dom';
+// /campaigns/:id (which mounts CampaignDetail as a persistent inline
+// detail column via SplitPane). The page-header "+ New campaign" button
+// navigates to /campaigns/new which mounts the CampaignCreate Dialog
+// full-width above the same list.
+import { Link, Outlet, useMatch, useNavigate } from 'react-router-dom';
 
 import { CampaignPill } from '@/components/CampaignPill';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
+import { SplitPane } from '@/components/ui/split-pane';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCampaigns } from '@/lib/useCampaigns';
 import type { Campaign } from '@/lib/types';
@@ -89,70 +91,108 @@ function CampaignsEmpty() {
   );
 }
 
-export function CampaignsPage() {
-  const navigate = useNavigate();
-  const { data: campaigns, isLoading, isError, error, refetch, isFetching } = useCampaigns();
+// The campaign list region — extracted so SplitPane can render it as the
+// persistent master column beside the inline detail.
+function CampaignList() {
+  const { data: campaigns, isLoading, isError, error } = useCampaigns();
   const list = campaigns ?? [];
 
   return (
-    <main className="min-h-screen bg-background text-foreground p-6 font-sans">
-      <div className="max-w-[1400px] mx-auto">
-        <PageHeader
-          className="mb-4"
-          eyebrow="Governed multi-run automation"
-          title="Campaigns"
-          description="Scoped security objectives that continue across child runs until completion, blocker, approval gate, budget limit, or stop. PHANTOM remains the supervisor — every child action is a normal PHANTOM run."
-          actions={
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => refetch()}
-                disabled={isFetching}
-                data-testid="refresh-campaigns-btn"
-              >
-                ↻ Refresh
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => navigate('/campaigns/new')}
-                data-testid="new-campaign-btn"
-              >
-                <span aria-hidden="true">+</span> New campaign
-              </Button>
-            </>
-          }
-        />
-
-        <section
-          aria-label="Campaign list"
-          data-empty={list.length === 0}
-          className="py-4"
+    <section
+      aria-label="Campaign list"
+      data-empty={list.length === 0}
+      className="px-6 py-4"
+    >
+      {isLoading ? (
+        <CampaignListSkeleton />
+      ) : isError ? (
+        <div
+          role="alert"
+          className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
         >
-          {isLoading ? (
-            <CampaignListSkeleton />
-          ) : isError ? (
-            <div
-              role="alert"
-              className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
-            >
-              Failed to load campaigns: {(error as Error)?.message ?? 'unknown error'}
-            </div>
-          ) : list.length === 0 ? (
-            <CampaignsEmpty />
-          ) : (
-            <ul className="flex flex-col gap-2 list-none m-0 p-0">
-              {list.map((c) => (
-                <CampaignRow key={c.id} campaign={c} />
-              ))}
-            </ul>
-          )}
-        </section>
+          Failed to load campaigns: {(error as Error)?.message ?? 'unknown error'}
+        </div>
+      ) : list.length === 0 ? (
+        <CampaignsEmpty />
+      ) : (
+        <ul className="flex flex-col gap-2 list-none m-0 p-0">
+          {list.map((c) => (
+            <CampaignRow key={c.id} campaign={c} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
 
-        {/* Mounts CampaignDetail (sheet) and CampaignCreate (dialog)
-            via nested routes — they sit on top of the list. */}
-        <Outlet />
+export function CampaignsPage() {
+  const navigate = useNavigate();
+  const { refetch, isFetching } = useCampaigns();
+
+  // The detail column is open only for the `:id` detail route — NOT for the
+  // `new` create route. When `new` is active we bypass SplitPane and render
+  // the create dialog full-width (its UX is unchanged this pass).
+  const detailMatch = useMatch('/campaigns/:id');
+  const newMatch = useMatch('/campaigns/new');
+  const detailOpen = !!detailMatch && detailMatch.params.id !== 'new';
+
+  const header = (
+    <PageHeader
+      className="mb-0 px-6 pt-6"
+      eyebrow="Governed multi-run automation"
+      title="Campaigns"
+      description="Scoped security objectives that continue across child runs until completion, blocker, approval gate, budget limit, or stop. PHANTOM remains the supervisor — every child action is a normal PHANTOM run."
+      actions={
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            data-testid="refresh-campaigns-btn"
+          >
+            ↻ Refresh
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => navigate('/campaigns/new')}
+            data-testid="new-campaign-btn"
+          >
+            <span aria-hidden="true">+</span> New campaign
+          </Button>
+        </>
+      }
+    />
+  );
+
+  // Create route (`/campaigns/new`): keep the legacy full-width create UX —
+  // render the Outlet (CampaignCreate dialog) directly, bypassing SplitPane.
+  if (newMatch) {
+    return (
+      <main className="min-h-screen bg-background text-foreground font-sans">
+        <div className="max-w-[1400px] mx-auto">
+          {header}
+          <div className="px-6 py-4">
+            <Outlet />
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="bg-background text-foreground font-sans">
+      <div className="flex h-[calc(100vh-3rem)] flex-col">
+        {header}
+        <div className="min-h-0 flex-1">
+          <SplitPane
+            list={<CampaignList />}
+            detail={<Outlet />}
+            detailOpen={detailOpen}
+            detailWidth={400}
+          />
+        </div>
       </div>
     </main>
   );

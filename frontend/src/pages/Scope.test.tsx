@@ -126,6 +126,9 @@ describe('ScopesPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('scope-detail-kv')).toBeInTheDocument();
     });
+    // Detail renders inline as a persistent `.drawer` panel (no modal sheet).
+    expect(screen.getByTestId('scope-detail-panel')).toBeInTheDocument();
+    expect(screen.getByLabelText('Close detail')).toBeInTheDocument();
     const kv = screen.getByTestId('scope-detail-kv');
     // Kv keys present.
     expect(within(kv).getByText('Allowed')).toBeInTheDocument();
@@ -138,6 +141,36 @@ describe('ScopesPage', () => {
     expect(kv.querySelector('.badge.ok')).toBeTruthy();
     expect(kv.querySelector('.badge.policy')).toBeTruthy();
     expect(within(kv).getByText('No traffic after 22:00.')).toBeInTheDocument();
+  });
+
+  it('keeps the list visible beside the inline detail (split-pane)', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      // The :id detail fetch resolves a single scope; the list fetch an array.
+      if (/\/scopes\/s1\b/.test(url)) {
+        return jsonResponse(makeScope());
+      }
+      return jsonResponse([makeScope(), makeScope({ id: 's2', name: 'BUG-BOUNTY' })]);
+    }) as unknown as typeof fetch;
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/scope" element={<ScopesPage />}>
+          <Route path=":id" element={<ScopeDetailRoute />} />
+        </Route>
+      </Routes>,
+      { route: '/scope/s1' },
+    );
+
+    // Inline detail panel and the master list are both mounted at once —
+    // SplitPane keeps the list beside the detail column (no modal overlay).
+    await waitFor(() => {
+      expect(screen.getByTestId('scope-detail-panel')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('scopes-list')).toBeInTheDocument();
+    });
+    expect(screen.getByText('BUG-BOUNTY')).toBeInTheDocument();
   });
 
   it('shows the failure banner on a network error', async () => {

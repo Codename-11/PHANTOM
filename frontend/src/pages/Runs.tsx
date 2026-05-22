@@ -1,9 +1,12 @@
-// Runs — list + detail (Sheet) surface. React translation of the
-// legacy frontend/js/pages/runs-page.js chrome.
+// Runs — list + persistent INLINE detail surface. React translation of
+// the legacy frontend/js/pages/runs-page.js chrome.
 //
-// Layout mirrors CampaignsPage: a recents list on the left, with a
-// Sheet drawer that slides in from the right when the operator clicks
-// a row (mounted via the /runs/:id nested route).
+// Layout mirrors the kit's master-detail run view: a recents list on the
+// left, with the run detail rendered as a persistent inline column beside
+// it (SplitPane) when the operator clicks a row (mounted via the
+// /runs/:id nested route). The kit's run detail is itself 3-column
+// (list | 1fr trace | 360px metadata) — the Trace tab keeps the inner
+// trace | metadata split.
 //
 // A8.5b parity-close ported the two features that previously deferred to
 // legacy:
@@ -11,23 +14,17 @@
 //   - LLM-enriched synthesis — RunSynthesisCard over GET /api/runs/:id/synthesis
 //
 // Still deferred:
-//   - Live SSE refresh — Sheet re-reads on query invalidation only
+//   - Live SSE refresh — detail re-reads on query invalidation only
 //   - Messages reconstruction — Trace tab renders the raw event timeline
 
-import { useState, useEffect } from 'react';
-import { Link, Outlet, useNavigate, useParams } from 'react-router-dom';
+import { Link, Outlet, useMatch, useNavigate, useParams } from 'react-router-dom';
 
 import { PageHeader } from '@/components/PageHeader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
+import { IcX } from '@/components/ui/icons';
+import { SplitPane } from '@/components/ui/split-pane';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/toast';
@@ -155,11 +152,43 @@ export function RunsPage() {
   const { data: runs, isLoading, isError, error, refetch, isFetching } = useRuns();
   const list = runs ?? [];
 
+  // Detail is open whenever the /runs/:id child route is active. We match
+  // both the production mount (/runs) and the test mount (/react/runs) so
+  // the inline detail column opens regardless of the base path. Both
+  // useMatch hooks must run unconditionally (no `||` short-circuit) to keep
+  // hook order stable across renders. The SplitPane keeps the list visible
+  // beside the detail.
+  const matchProd = useMatch('/runs/:id');
+  const matchReact = useMatch('/react/runs/:id');
+  const detailOpen = matchProd != null || matchReact != null;
+
+  const listRegion = (
+    <section aria-label="Run list" data-empty={list.length === 0} className="px-6 py-4">
+      {isLoading ? (
+        <RunListSkeleton />
+      ) : isError ? (
+        <div
+          role="alert"
+          className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+        >
+          Failed to load runs: {(error as Error)?.message ?? 'unknown error'}
+        </div>
+      ) : list.length === 0 ? (
+        <RunsEmpty />
+      ) : (
+        <ul className="flex flex-col gap-2 list-none m-0 p-0" data-testid="runs-list">
+          {list.map((r) => (
+            <RunRow key={r.id} run={r} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+
   return (
-    <main className="min-h-screen bg-background text-foreground p-6 font-sans">
-      <div className="max-w-[1400px] mx-auto">
+    <main className="flex h-[calc(100vh-3rem)] flex-col bg-background text-foreground font-sans">
+      <div className="px-6 pt-6">
         <PageHeader
-          className="mb-4"
           eyebrow="Forensic lens on every tool-using chat turn"
           title="Runs"
           description="Each run captures the goal, model route, scope, full trace, and artifacts. Click a row to inspect synthesis, trace, artifacts, or the redacted evidence bundle."
@@ -185,36 +214,25 @@ export function RunsPage() {
             </>
           }
         />
+      </div>
 
-        <section aria-label="Run list" data-empty={list.length === 0} className="py-4">
-          {isLoading ? (
-            <RunListSkeleton />
-          ) : isError ? (
-            <div
-              role="alert"
-              className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
-            >
-              Failed to load runs: {(error as Error)?.message ?? 'unknown error'}
-            </div>
-          ) : list.length === 0 ? (
-            <RunsEmpty />
-          ) : (
-            <ul className="flex flex-col gap-2 list-none m-0 p-0" data-testid="runs-list">
-              {list.map((r) => (
-                <RunRow key={r.id} run={r} />
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {/* Mounts the detail Sheet via the nested route. */}
-        <Outlet />
+      {/* Master-detail: the list stays visible beside the inline detail
+          column (<Outlet/> → RunDetailRoute) when /runs/:id is active. The
+          run detail is wide (trace + metadata), so the detail column takes
+          a larger share than the alert drawer. */}
+      <div className="min-h-0 flex-1">
+        <SplitPane
+          list={listRegion}
+          detail={<Outlet />}
+          detailOpen={detailOpen}
+          detailWidth="62%"
+        />
       </div>
     </main>
   );
 }
 
-// ── Detail Sheet (mounted at /react/runs/:id) ─────────────────────────
+// ── Detail panel (inline, mounted at /runs/:id) ───────────────────────
 
 function SynthesisPane({ run }: { run: RunRecord }) {
   const navigate = useNavigate();
@@ -463,7 +481,7 @@ function TracePane({ run }: { run: RunDetail }) {
   }
   const list = events ?? [];
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
+    <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
       <div className="space-y-4 min-w-0">
         <section aria-label="Replay scrubber">
           <h3 className="mb-2 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
@@ -783,102 +801,128 @@ function DetailSkeleton() {
 export function RunDetailRoute() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [open, setOpen] = useState(true);
 
   const { data: run, isLoading, isError, error } = useRun(id);
   const evidence = useRunEvidence(id);
 
-  useEffect(() => {
-    if (!open) {
-      navigate('/runs', { replace: true });
-    }
-  }, [open, navigate]);
+  function close() {
+    navigate('/runs', { replace: true });
+  }
+
+  // Inline detail panel — rendered into the SplitPane's detail column, so
+  // the run list stays visible beside it on desktop (master-detail).
+  if (isLoading) {
+    return (
+      <div className="drawer h-full" data-testid="run-detail-panel">
+        <DetailSkeleton />
+      </div>
+    );
+  }
+  if (isError || !run) {
+    return (
+      <div className="drawer h-full" data-testid="run-detail-panel">
+        <div className="drawer-hd">
+          <div className="grow">
+            <div className="title">Failed to load</div>
+            <div className="sub mono" style={{ fontSize: 11 }}>
+              {(error as Error)?.message ?? 'Run not found.'}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost shrink-0"
+            onClick={close}
+            aria-label="Close run detail"
+            data-testid="run-detail-close"
+          >
+            <IcX />
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetContent side="right" data-testid="run-detail-sheet">
-        {isLoading ? (
-          <DetailSkeleton />
-        ) : isError || !run ? (
-          <SheetHeader>
-            <SheetTitle>Failed to load</SheetTitle>
-            <SheetDescription>
-              {(error as Error)?.message ?? 'Run not found.'}
-            </SheetDescription>
-          </SheetHeader>
-        ) : (
-          <>
-            <SheetHeader>
-              <div className="flex items-center gap-2">
-                <RunPill status={run.status} />
-                <span className="font-mono text-[10px] text-muted-foreground">
-                  {run.id}
-                </span>
-              </div>
-              <SheetTitle>{run.title || run.goal || 'Run'}</SheetTitle>
-              <SheetDescription>
-                {run.scope?.name || 'no scope'} · {run.model || 'model unknown'} ·{' '}
-                {ago(run.started_at)}
-              </SheetDescription>
-              <div className="flex gap-1.5">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => navigate(`/graph/${run.id}`)}
-                  data-run-action="graph"
-                >
-                  Open graph
-                </Button>
-              </div>
-            </SheetHeader>
+    <div className="drawer h-full" data-testid="run-detail-panel">
+      <div className="drawer-hd">
+        <div className="grow">
+          <div className="flex items-center gap-2">
+            <RunPill status={run.status} />
+            <span className="font-mono text-[10px] text-muted-foreground">
+              {run.id}
+            </span>
+          </div>
+          <div className="title">{run.title || run.goal || 'Run'}</div>
+          <div className="sub mono" style={{ fontSize: 11 }}>
+            {run.scope?.name || 'no scope'} · {run.model || 'model unknown'} ·{' '}
+            {ago(run.started_at)}
+          </div>
+          <div className="flex gap-1.5 mt-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate(`/graph/${run.id}`)}
+              data-run-action="graph"
+            >
+              Open graph
+            </Button>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="btn btn-sm btn-ghost shrink-0"
+          onClick={close}
+          aria-label="Close run detail"
+          data-testid="run-detail-close"
+        >
+          <IcX />
+        </button>
+      </div>
 
-            <Tabs defaultValue="synthesis" className="flex-1 flex flex-col min-h-0">
-              <TabsList aria-label="Run detail tabs">
-                <TabsTrigger value="synthesis">Synthesis</TabsTrigger>
-                <TabsTrigger value="trace">
-                  Trace
-                  {run.events?.length ? (
-                    <span className="ml-1 font-mono text-[10px] text-muted-foreground">
-                      · {run.events.length}
-                    </span>
-                  ) : null}
-                </TabsTrigger>
-                <TabsTrigger value="artifacts">
-                  Artifacts
-                  {run.artifacts?.length ? (
-                    <span className="ml-1 font-mono text-[10px] text-muted-foreground">
-                      · {run.artifacts.length}
-                    </span>
-                  ) : null}
-                </TabsTrigger>
-                <TabsTrigger value="evidence">Evidence</TabsTrigger>
-              </TabsList>
+      <Tabs defaultValue="synthesis" className="drawer-bd flex flex-col min-h-0">
+        <TabsList aria-label="Run detail tabs" className="shrink-0">
+          <TabsTrigger value="synthesis">Synthesis</TabsTrigger>
+          <TabsTrigger value="trace">
+            Trace
+            {run.events?.length ? (
+              <span className="ml-1 font-mono text-[10px] text-muted-foreground">
+                · {run.events.length}
+              </span>
+            ) : null}
+          </TabsTrigger>
+          <TabsTrigger value="artifacts">
+            Artifacts
+            {run.artifacts?.length ? (
+              <span className="ml-1 font-mono text-[10px] text-muted-foreground">
+                · {run.artifacts.length}
+              </span>
+            ) : null}
+          </TabsTrigger>
+          <TabsTrigger value="evidence">Evidence</TabsTrigger>
+        </TabsList>
 
-              <div className="flex-1 overflow-y-auto px-4 py-3">
-                <TabsContent value="synthesis">
-                  <SynthesisPane run={run} />
-                </TabsContent>
-                <TabsContent value="trace">
-                  <TracePane run={run} />
-                </TabsContent>
-                <TabsContent value="artifacts">
-                  <ArtifactsPane artifacts={run.artifacts ?? []} />
-                </TabsContent>
-                <TabsContent value="evidence">
-                  <EvidencePane
-                    runId={run.id}
-                    bundle={evidence.data}
-                    isLoading={evidence.isLoading}
-                    isError={evidence.isError}
-                    error={(evidence.error as Error) ?? null}
-                  />
-                </TabsContent>
-              </div>
-            </Tabs>
-          </>
-        )}
-      </SheetContent>
-    </Sheet>
+        <div className="flex-1 overflow-y-auto px-4 py-3">
+          <TabsContent value="synthesis">
+            <SynthesisPane run={run} />
+          </TabsContent>
+          <TabsContent value="trace">
+            <TracePane run={run} />
+          </TabsContent>
+          <TabsContent value="artifacts">
+            <ArtifactsPane artifacts={run.artifacts ?? []} />
+          </TabsContent>
+          <TabsContent value="evidence">
+            <EvidencePane
+              runId={run.id}
+              bundle={evidence.data}
+              isLoading={evidence.isLoading}
+              isError={evidence.isError}
+              error={(evidence.error as Error) ?? null}
+            />
+          </TabsContent>
+        </div>
+      </Tabs>
+    </div>
   );
 }
 

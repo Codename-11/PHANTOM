@@ -275,7 +275,81 @@ describe('RunsPage', () => {
     });
   });
 
-  it('detail Sheet renders the error banner when run fetch fails', async () => {
+  it('renders the detail inline as a master-detail split — run list stays visible beside it', async () => {
+    const fetchMock: FetchFn = async (url) => {
+      const u = String(url);
+      if (u.startsWith('/api/runs?')) return jsonResponse([makeRun()]);
+      if (u === '/api/runs/run-aaaa1111') {
+        return jsonResponse({ ...makeRun(), events: [], artifacts: [] });
+      }
+      if (u.startsWith('/api/runs/run-aaaa1111/events')) return jsonResponse([]);
+      if (u === '/api/runs/run-aaaa1111/synthesis') return jsonResponse(makeSynthesis());
+      return jsonResponse({ error: 'unhandled' }, 404);
+    };
+    globalThis.fetch = vi.fn(fetchMock as unknown as typeof fetch) as unknown as typeof fetch;
+
+    renderWithProviders(
+      <ToastProvider>
+        <Routes>
+          <Route path="/react/runs" element={<RunsPage />}>
+            <Route path=":id" element={<RunDetailRoute />} />
+          </Route>
+        </Routes>
+      </ToastProvider>,
+      { route: '/react/runs/run-aaaa1111' },
+    );
+
+    // The run list stays visible alongside the inline detail (master-detail),
+    // not hidden behind a modal Sheet.
+    await waitFor(() => {
+      expect(screen.getByTestId('runs-list')).toBeInTheDocument();
+    });
+    // Inline detail panel mounts beside it once the run resolves.
+    await waitFor(() => {
+      expect(screen.getByTestId('run-detail-panel')).toBeInTheDocument();
+    });
+    // The title appears in both the list row and the detail header (proof the
+    // list is not unmounted behind a modal).
+    expect(screen.getAllByText('Map admin portal').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('close button navigates back to the list (deep-link reversible)', async () => {
+    const fetchMock: FetchFn = async (url) => {
+      const u = String(url);
+      if (u.startsWith('/api/runs?')) return jsonResponse([makeRun()]);
+      if (u === '/api/runs/run-aaaa1111') {
+        return jsonResponse({ ...makeRun(), events: [], artifacts: [] });
+      }
+      if (u.startsWith('/api/runs/run-aaaa1111/events')) return jsonResponse([]);
+      if (u === '/api/runs/run-aaaa1111/synthesis') return jsonResponse(makeSynthesis());
+      return jsonResponse({ error: 'unhandled' }, 404);
+    };
+    globalThis.fetch = vi.fn(fetchMock as unknown as typeof fetch) as unknown as typeof fetch;
+
+    // Mount the production /runs parent too so the close affordance's
+    // navigate('/runs') resolves back to the list (deep-link reversible).
+    renderWithProviders(
+      <ToastProvider>
+        <Routes>
+          <Route path="/runs" element={<RunsPage />}>
+            <Route path=":id" element={<RunDetailRoute />} />
+          </Route>
+        </Routes>
+      </ToastProvider>,
+      { route: '/runs/run-aaaa1111' },
+    );
+
+    const closeBtn = await screen.findByTestId('run-detail-close');
+    await act(async () => {
+      fireEvent.click(closeBtn);
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId('run-detail-panel')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('runs-list')).toBeInTheDocument();
+  });
+
+  it('detail panel renders the error banner when run fetch fails', async () => {
     const fetchMock: FetchFn = async (url) => {
       const u = String(url);
       if (u.startsWith('/api/runs?')) return jsonResponse([]);

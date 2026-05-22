@@ -1,6 +1,7 @@
 // Alerts — triage queue for findings. Filter chips by severity +
-// triage status; clicking a row opens a Sheet with the full finding
-// detail + a 4-button TriageRail at the bottom.
+// triage status; clicking a row opens a persistent INLINE detail panel
+// beside the list (master-detail SplitPane) with the full finding detail
+// + a 4-button TriageRail at the bottom.
 //
 // Mirrors the legacy frontend/js/pages/alerts-page.js contract:
 //   - GET /api/findings
@@ -9,8 +10,8 @@
 //
 // This page now serves the bare /alerts path (post-A8.5 cutover).
 
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link, Outlet, useNavigate, useParams } from 'react-router-dom';
+import { Fragment, useMemo, useState, type ReactNode } from 'react';
+import { Link, Outlet, useMatch, useNavigate, useParams } from 'react-router-dom';
 
 import { ListRow } from '@/components/ListRow';
 import { SeverityBadge } from '@/components/SeverityBadge';
@@ -19,14 +20,9 @@ import { PageHeader } from '@/components/PageHeader';
 import { Kv, SevTick, type Severity } from '@/components/ui/kit';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { IcX } from '@/components/ui/icons';
 import { Input } from '@/components/ui/input';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
+import { SplitPane } from '@/components/ui/split-pane';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -383,52 +379,13 @@ export function AlertsPage() {
     navigate(`/alerts/${f.id}`);
   }
 
-  return (
-    <main className="min-h-screen bg-background text-foreground p-6 font-sans">
-      <div className="max-w-[1400px] mx-auto">
-        <PageHeader
-          className="mb-4"
-          eyebrow="Triage queue"
-          title="Alerts"
-          description="Every finding lands here. Filter by severity or triage status, then ack / progress / dismiss / close from the drawer. High and critical dismissals require a note for the audit trail."
-          actions={
-            <>
-              <Tooltip content="Download the currently-filtered findings as CSV">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleExport('csv')}
-                  disabled={filtered.length === 0}
-                  data-testid="export-csv-btn"
-                >
-                  ↓ CSV
-                </Button>
-              </Tooltip>
-              <Tooltip content="Download the currently-filtered findings as JSON">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleExport('json')}
-                  disabled={filtered.length === 0}
-                  data-testid="export-json-btn"
-                >
-                  ↓ JSON
-                </Button>
-              </Tooltip>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => refetch()}
-                loading={isFetching}
-                data-testid="refresh-alerts-btn"
-              >
-                ↻ Refresh
-              </Button>
-            </>
-          }
-        />
+  // Detail is open whenever the /alerts/:id child route is active. The
+  // SplitPane keeps the list visible beside the inline detail panel.
+  const detailOpen = useMatch('/alerts/:id') != null;
 
-        <div className="flex flex-wrap items-center gap-2 mb-3">
+  const listRegion = (
+    <div className="px-6 py-4">
+      <div className="flex flex-wrap items-center gap-2 mb-3">
           <Input
             type="search"
             value={search}
@@ -605,14 +562,69 @@ export function AlertsPage() {
             </div>
           )}
         </section>
+    </div>
+  );
 
-        <Outlet />
+  return (
+    <main className="flex h-[calc(100vh-3rem)] flex-col bg-background text-foreground font-sans">
+      <div className="px-6 pt-6">
+        <PageHeader
+          eyebrow="Triage queue"
+          title="Alerts"
+          description="Every finding lands here. Filter by severity or triage status, then ack / progress / dismiss / close from the detail panel. High and critical dismissals require a note for the audit trail."
+          actions={
+            <>
+              <Tooltip content="Download the currently-filtered findings as CSV">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleExport('csv')}
+                  disabled={filtered.length === 0}
+                  data-testid="export-csv-btn"
+                >
+                  ↓ CSV
+                </Button>
+              </Tooltip>
+              <Tooltip content="Download the currently-filtered findings as JSON">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleExport('json')}
+                  disabled={filtered.length === 0}
+                  data-testid="export-json-btn"
+                >
+                  ↓ JSON
+                </Button>
+              </Tooltip>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => refetch()}
+                loading={isFetching}
+                data-testid="refresh-alerts-btn"
+              >
+                ↻ Refresh
+              </Button>
+            </>
+          }
+        />
+      </div>
+
+      {/* Master-detail: the list stays visible beside the inline detail
+          column (<Outlet/> → AlertDetailRoute) when /alerts/:id is active. */}
+      <div className="min-h-0 flex-1">
+        <SplitPane
+          list={listRegion}
+          detail={<Outlet />}
+          detailOpen={detailOpen}
+          detailWidth={420}
+        />
       </div>
     </main>
   );
 }
 
-// ── Detail Sheet ─────────────────────────────────────────────────────
+// ── Detail panel (inline) ────────────────────────────────────────────
 
 function DetailSkeleton() {
   return (
@@ -837,12 +849,14 @@ interface FindingDrawerProps {
   feedback: { kind: 'ok' | 'err'; text: string } | null;
   onTriage: (status: FindingTriageStatus, note: string | null) => void | Promise<void>;
   triaging: boolean;
+  onClose: () => void;
 }
 
-// The detail drawer, styled to the kit's `.drawer` anatomy inside the
-// Sheet container: header (sev-tick + badge + mono id + status + title),
-// tabbed body (Evidence / Asset / Trace / History), footer triage rail.
-function FindingDrawer({ finding, tab, onTab, feedback, onTriage, triaging }: FindingDrawerProps) {
+// The detail drawer, styled to the kit's `.drawer` anatomy as a persistent
+// inline column beside the list: header (sev-tick + badge + mono id +
+// status + title + close), tabbed body (Evidence / Asset / Trace /
+// History), footer triage rail.
+function FindingDrawer({ finding, tab, onTab, feedback, onTriage, triaging, onClose }: FindingDrawerProps) {
   const sev = severityClass(finding.severity) as Severity;
   const cols = findingCols(finding);
   const meta = parseFindingMeta(finding);
@@ -879,7 +893,7 @@ function FindingDrawer({ finding, tab, onTab, feedback, onTriage, triaging }: Fi
 
   return (
     <div className="drawer" data-testid="alert-drawer" style={{ height: '100%' }}>
-      <SheetHeader className="drawer-hd">
+      <div className="drawer-hd">
         <SevTick s={sev} />
         <div className="grow">
           <div className="kit-row" style={{ gap: 8, marginBottom: 2, flexWrap: 'wrap' }}>
@@ -891,14 +905,23 @@ function FindingDrawer({ finding, tab, onTab, feedback, onTriage, triaging }: Fi
               · {status}
             </span>
           </div>
-          <SheetTitle className="title">{finding.title || '(untitled)'}</SheetTitle>
-          <SheetDescription className="sub mono" style={{ fontSize: 11 }}>
+          <div className="title">{finding.title || '(untitled)'}</div>
+          <div className="sub mono" style={{ fontSize: 11 }}>
             {[cols.cve, cols.rule !== '—' ? `via ${cols.rule}` : '']
               .filter(Boolean)
               .join(' · ') || 'No detector metadata'}
-          </SheetDescription>
+          </div>
         </div>
-      </SheetHeader>
+        <button
+          type="button"
+          className="btn btn-sm btn-ghost shrink-0"
+          onClick={onClose}
+          aria-label="Close finding detail"
+          data-testid="alert-detail-close"
+        >
+          <IcX />
+        </button>
+      </div>
 
       <Tabs
         value={tab}
@@ -1051,7 +1074,6 @@ function FindingDrawer({ finding, tab, onTab, feedback, onTriage, triaging }: Fi
 export function AlertDetailRoute() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [open, setOpen] = useState(true);
   const [tab, setTab] = useState<DetailTab>('evidence');
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
@@ -1062,9 +1084,9 @@ export function AlertDetailRoute() {
 
   const triage = useTriage(id);
 
-  useEffect(() => {
-    if (!open) navigate('/alerts', { replace: true });
-  }, [open, navigate]);
+  function close() {
+    navigate('/alerts', { replace: true });
+  }
 
   async function handleTriage(triageStatus: FindingTriageStatus, dismissalNote: string | null) {
     setFeedback(null);
@@ -1072,7 +1094,7 @@ export function AlertDetailRoute() {
       await triage.mutateAsync({ triageStatus, dismissalNote });
       setFeedback({ kind: 'ok', text: `✓ Marked ${triageStatus}.` });
       if (triageStatus === 'dismissed' || triageStatus === 'closed') {
-        setTimeout(() => setOpen(false), 600);
+        setTimeout(() => close(), 600);
       }
     } catch (err) {
       const e = err as { code?: string; message?: string };
@@ -1084,30 +1106,50 @@ export function AlertDetailRoute() {
     }
   }
 
-  return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetContent side="right" data-testid="alert-detail-sheet">
-        {isLoading ? (
-          <DetailSkeleton />
-        ) : isError || !finding ? (
-          <SheetHeader>
-            <SheetTitle>Failed to load</SheetTitle>
-            <SheetDescription>
+  // Inline detail panel — rendered into the SplitPane's detail column, so
+  // the list stays visible beside it on desktop (master-detail).
+  if (isLoading) {
+    return (
+      <div className="drawer h-full" data-testid="alert-detail-panel">
+        <DetailSkeleton />
+      </div>
+    );
+  }
+  if (isError || !finding) {
+    return (
+      <div className="drawer h-full" data-testid="alert-detail-panel">
+        <div className="drawer-hd">
+          <div className="grow">
+            <div className="title">Failed to load</div>
+            <div className="sub mono" style={{ fontSize: 11 }}>
               {(error as Error)?.message ?? 'Finding not found.'}
-            </SheetDescription>
-          </SheetHeader>
-        ) : (
-          <FindingDrawer
-            finding={finding}
-            tab={tab}
-            onTab={setTab}
-            feedback={feedback}
-            onTriage={handleTriage}
-            triaging={triage.isPending}
-          />
-        )}
-      </SheetContent>
-    </Sheet>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost shrink-0"
+            onClick={close}
+            aria-label="Close finding detail"
+            data-testid="alert-detail-close"
+          >
+            <IcX />
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="h-full" data-testid="alert-detail-panel">
+      <FindingDrawer
+        finding={finding}
+        tab={tab}
+        onTab={setTab}
+        feedback={feedback}
+        onTriage={handleTriage}
+        triaging={triage.isPending}
+        onClose={close}
+      />
+    </div>
   );
 }
 

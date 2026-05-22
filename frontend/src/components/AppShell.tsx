@@ -1,57 +1,123 @@
 // Persistent application shell: left sidebar nav + breadcrumb topbar.
 //
-// The React migration (A8.x) shipped each page as a standalone <main>
-// with no shared chrome, so operators lost the legacy sidebar. This
-// restores it. Nav routes mirror the legacy frontend/index.html sidebar
-// (dash · chat · runs · graph · alerts · artifacts · approvals · scope ·
-// campaigns · registry · settings). React-migrated routes navigate via
-// react-router NavLink (SPA, no reload); routes still served by the
-// legacy bundle (chat, registry, docs) use full-page anchors.
+// Reworked for 1:1 parity with the design kit's shell.jsx: two labeled
+// nav sections (Operations + Governance), line icons (16px) instead of
+// text glyphs, per-item count badges wired to live data, and a footer
+// showing the active model + a status dot. The kit's `.side*` CSS rules
+// are replicated here with token-driven Tailwind utilities (cyan accent,
+// inset active rail) because AppShell owns its own chrome and the shared
+// CSS files are off-limits to this surface.
+//
+// All routes are React (A8 migration complete), so every nav item uses a
+// react-router NavLink (SPA, no reload). Docs stays a footer anchor —
+// it's served outside the SPA and opens in a new tab.
 import * as React from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 
+import { useNavCounts } from '@/lib/navCounts';
+import { useSettings } from '@/lib/settings';
 import { cn } from '@/lib/utils';
 
 import { PhantomMark } from './PhantomMark';
+import {
+  IcAi,
+  IcAlert,
+  IcArtifact,
+  IcAssets,
+  IcChain,
+  IcCockpit,
+  IcGraph,
+  IcGrid,
+  IcRuns,
+  IcSettings,
+  IcShield,
+  IcDoc,
+} from './ui/icons';
+
+// Keys into NavCounts; `undefined` means "no badge wired for this item".
+type CountKey = 'alerts' | 'runs' | 'approvals' | 'assets';
 
 interface NavItem {
   to: string;
   label: string;
-  glyph: string;
-  react: boolean;
+  icon: React.ReactNode;
+  count?: CountKey;
 }
 
-const NAV: NavItem[] = [
-  { to: '/dash', label: 'Dash', glyph: 'DSH', react: true },
-  { to: '/chat', label: 'Chat', glyph: 'CMD', react: true },
-  { to: '/runs', label: 'Runs', glyph: 'RUN', react: true },
-  { to: '/graph', label: 'Graph', glyph: 'MAP', react: true },
-  { to: '/alerts', label: 'Alerts', glyph: 'ALR', react: true },
-  { to: '/artifacts', label: 'Artifacts', glyph: 'EVD', react: true },
-  { to: '/approvals', label: 'Approvals', glyph: 'APV', react: true },
-  { to: '/scope', label: 'Assets / Scope', glyph: 'SCP', react: true },
-  { to: '/campaigns', label: 'Campaigns', glyph: 'CMP', react: true },
-  { to: '/registry', label: 'Registry', glyph: 'REG', react: true },
-  { to: '/settings', label: 'Settings', glyph: 'CFG', react: true },
+const NAV_OPERATIONS: NavItem[] = [
+  { to: '/dash', label: 'Dash', icon: <IcCockpit size={16} /> },
+  { to: '/chat', label: 'Chat', icon: <IcAi size={16} /> },
+  { to: '/alerts', label: 'Alerts', icon: <IcAlert size={16} />, count: 'alerts' },
+  { to: '/runs', label: 'Runs', icon: <IcRuns size={16} />, count: 'runs' },
+  { to: '/graph', label: 'Graph', icon: <IcGraph size={16} /> },
+  { to: '/artifacts', label: 'Artifacts', icon: <IcArtifact size={16} /> },
+  { to: '/campaigns', label: 'Campaigns', icon: <IcChain size={16} /> },
+  { to: '/scope', label: 'Assets / Scope', icon: <IcAssets size={16} />, count: 'assets' },
 ];
 
-const navItemClass = (active: boolean) =>
+const NAV_GOVERNANCE: NavItem[] = [
+  { to: '/approvals', label: 'Approvals', icon: <IcShield size={16} />, count: 'approvals' },
+  { to: '/registry', label: 'Registry', icon: <IcGrid size={16} /> },
+  { to: '/settings', label: 'Settings', icon: <IcSettings size={16} /> },
+];
+
+// `.side-link` + `.side-link.active` from kit.css, token-for-token:
+// inactive = fg-2 text / fg-3 icon, hover = bg-hover + fg-1, active =
+// bg-3 fill, fg-1 text, cyan inset rail, cyan icon.
+const sideLinkClass = (active: boolean) =>
   cn(
-    'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors motion-reduce:transition-none',
+    'group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[12px] text-left',
+    'transition-colors duration-[80ms] motion-reduce:transition-none',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+    '[&>svg]:text-[var(--fg-3)] [&>svg]:transition-colors',
     active
-      ? 'bg-[var(--cy-3)]/40 text-[var(--cy-fg)] border border-[var(--cy-2)]'
-      : 'text-muted-foreground border border-transparent hover:bg-[var(--bg-3)] hover:text-foreground',
+      ? 'bg-[var(--bg-3)] text-[var(--fg-1)] shadow-[inset_2px_0_0_var(--cy-1)] [&>svg]:text-[var(--cy-1)]'
+      : 'text-[var(--fg-2)] hover:bg-[var(--bg-hover)] hover:text-[var(--fg-1)] hover:[&>svg]:text-[var(--fg-1)]',
   );
 
-const Glyph = ({ children }: { children: string }) => (
-  <span
-    aria-hidden="true"
-    className="inline-flex w-9 shrink-0 justify-center font-mono text-[10px] tracking-[0.08em] text-[var(--fg-3)]"
-  >
-    {children}
-  </span>
-);
+// `.side-link .ct` — mono pill, right-aligned, fg-3 on bg-3 with a hairline.
+function CountBadge({ value }: { value: number }) {
+  return (
+    <span className="ml-auto rounded-full border border-[var(--line-1)] bg-[var(--bg-3)] px-1.5 py-px font-mono text-[10px] leading-none text-[var(--fg-3)]">
+      {value}
+    </span>
+  );
+}
+
+function NavSection({
+  label,
+  items,
+  counts,
+}: {
+  label: string;
+  items: NavItem[];
+  counts: ReturnType<typeof useNavCounts>;
+}) {
+  return (
+    <div className="px-2 pb-1.5 pt-3">
+      <div className="px-2 pb-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--fg-3)]">
+        {label}
+      </div>
+      <div className="space-y-0.5">
+        {items.map((item) => {
+          const count = item.count ? counts[item.count] : undefined;
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) => sideLinkClass(isActive)}
+              title={item.label}
+            >
+              {item.icon}
+              <span className="truncate">{item.label}</span>
+              {count != null ? <CountBadge value={count} /> : null}
+            </NavLink>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function titleize(seg: string): string {
   return seg.charAt(0).toUpperCase() + seg.slice(1);
@@ -75,10 +141,23 @@ function useCrumbs(): { label: string; to?: string }[] {
   return crumbs;
 }
 
+// Footer model label — `provider · model` from /api/settings, mirroring
+// the kit's "Hermes · gpt-4o-2026". Degrades gracefully while loading.
+function useModelLabel(): string {
+  const { data } = useSettings();
+  if (!data) return 'Connecting…';
+  const provider = data.provider?.trim();
+  const model = data.model?.trim();
+  if (provider && model) return `${provider} · ${model}`;
+  return model || provider || 'No model';
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const crumbs = useCrumbs();
   const { pathname } = useLocation();
+  const counts = useNavCounts();
+  const modelLabel = useModelLabel();
 
   // Close the mobile drawer on navigation.
   React.useEffect(() => {
@@ -94,50 +173,44 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         )}
         aria-label="Primary navigation"
       >
-        <div className="flex items-center gap-2 border-b border-border px-4 py-3.5">
+        {/* .side-hd — brand mark + GOVERNED OPS sub-label */}
+        <div className="flex h-11 items-center gap-2.5 border-b border-border px-3.5">
           <PhantomMark size={26} />
-          <span className="font-mono text-sm font-semibold tracking-[0.12em] text-foreground">
-            PHANTOM
-          </span>
-          <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--fg-3)]">
-            SEC
+          <span className="font-mono text-[12px] font-semibold leading-none tracking-[0.14em] text-[var(--fg-1)]">
+            PHANTOM SEC
+            <span className="mt-0.5 block font-normal tracking-[0.1em] text-[9px] text-[var(--fg-3)]">
+              GOVERNED OPS
+            </span>
           </span>
         </div>
 
-        <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
-          {NAV.map((item) =>
-            item.react ? (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={({ isActive }) => navItemClass(isActive)}
-                title={item.label}
-              >
-                <Glyph>{item.glyph}</Glyph>
-                <span className="truncate">{item.label}</span>
-              </NavLink>
-            ) : (
-              <a key={item.to} href={item.to} className={navItemClass(false)} title={item.label}>
-                <Glyph>{item.glyph}</Glyph>
-                <span className="truncate">{item.label}</span>
-                <span className="ml-auto font-mono text-[9px] text-[var(--fg-4)]">↗</span>
-              </a>
-            ),
-          )}
+        <nav className="flex-1 overflow-y-auto" aria-label="Sections">
+          <NavSection label="Operations" items={NAV_OPERATIONS} counts={counts} />
+          <NavSection label="Governance" items={NAV_GOVERNANCE} counts={counts} />
         </nav>
 
-        <div className="border-t border-border p-2">
+        {/* Docs — secondary footer link, opens outside the SPA */}
+        <div className="px-2 py-2">
           <a
             href="/docs/"
             target="_blank"
             rel="noopener"
-            className={navItemClass(false)}
+            className={cn(sideLinkClass(false))}
             title="User docs (opens in new tab)"
           >
-            <Glyph>DOC</Glyph>
+            <IcDoc size={16} />
             <span className="truncate">Docs</span>
             <span className="ml-auto font-mono text-[9px] text-[var(--fg-4)]">↗</span>
           </a>
+        </div>
+
+        {/* .side-ft — status dot + active model */}
+        <div className="mt-auto flex items-center gap-2.5 border-t border-border px-3 py-2.5 text-[11px] text-[var(--fg-3)]">
+          <span
+            className="h-[7px] w-[7px] shrink-0 rounded-full bg-[var(--sev-ok)] shadow-[0_0_8px_var(--sev-ok-line)]"
+            aria-hidden="true"
+          />
+          <span className="grow truncate font-mono">{modelLabel}</span>
         </div>
       </aside>
 

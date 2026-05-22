@@ -2,25 +2,22 @@
 // pages/registry-page.js (legacy B2 surface).
 //
 // React Query owns the data. The list mirrors the Campaigns list/ListRow
-// pattern; clicking a row opens a self-contained detail Sheet (selected-id
-// state, not a nested route) that shows validity/trust pills, risk chips,
-// tools, install recipes, lifecycle, and the declarative preview-install
-// plan. The "Request install" button is rendered-but-disabled — Approvals
+// pattern; clicking a row opens a persistent INLINE detail column
+// (SplitPane, kit `.drawer` chrome) driven by selected-id local state (not
+// a nested route) that shows validity/trust pills, risk chips, tools,
+// install recipes, lifecycle, and the declarative preview-install plan.
+// The "Request install" button is rendered-but-disabled — Approvals
 // plumbing for registry events is a separate follow-up (matches legacy).
 import { useEffect, useState, type ReactNode } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
+import { IcX } from '@/components/ui/icons';
+import { SplitPane } from '@/components/ui/split-pane';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip } from '@/components/ui/tooltip';
 import { ListRow } from '@/components/ListRow';
+import { PageHeader } from '@/components/PageHeader';
 import {
   deriveTrust,
   usePreviewInstall,
@@ -139,7 +136,7 @@ function RegistryEmpty() {
   );
 }
 
-// ── Detail Sheet panes ─────────────────────────────────────────────────
+// ── Detail panes ───────────────────────────────────────────────────────
 
 function MetaDl({ rows }: { rows: Array<[string, ReactNode]> }) {
   return (
@@ -208,7 +205,7 @@ function DetailBody({ record }: { record: RegistryManifestRecord }) {
   }, [record.id, record.valid]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+    <div className="drawer-bd px-4 py-3 space-y-3">
       {!record.valid ? (
         <div
           role="alert"
@@ -357,7 +354,7 @@ function DetailSkeleton() {
   );
 }
 
-function RegistryDetailSheet({
+function RegistryDetail({
   id,
   onClose,
 }: {
@@ -371,20 +368,29 @@ function RegistryDetailSheet({
   const version = record?.manifest?.identity?.version || record?.version || '?';
 
   return (
-    <Sheet open onOpenChange={(open) => (open ? null : onClose())}>
-      <SheetContent side="right" data-testid="registry-detail-sheet">
-        {isLoading ? (
-          <DetailSkeleton />
-        ) : isError || !record ? (
-          <SheetHeader>
-            <SheetTitle>Failed to load</SheetTitle>
-            <SheetDescription>
-              {(error as Error)?.message ?? 'Manifest not found.'}
-            </SheetDescription>
-          </SheetHeader>
-        ) : (
-          <>
-            <SheetHeader>
+    <div className="drawer" data-testid="registry-detail-sheet" style={{ height: '100%' }}>
+      {isLoading ? (
+        <DetailSkeleton />
+      ) : isError || !record ? (
+        <div className="drawer-hd">
+          <div className="grow">
+            <div className="title">Failed to load</div>
+            <div className="sub">{(error as Error)?.message ?? 'Manifest not found.'}</div>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            aria-label="Close detail"
+            data-testid="registry-detail-close"
+          >
+            <IcX />
+          </Button>
+        </div>
+      ) : (
+        <>
+          <div className="drawer-hd">
+            <div className="grow">
               <div className="flex flex-wrap items-center gap-2">
                 <ValidityPill valid={record.valid} />
                 <TrustPill
@@ -395,18 +401,23 @@ function RegistryDetailSheet({
                   {record.id} · v{version}
                 </span>
               </div>
-              <SheetTitle>{title}</SheetTitle>
-              {summary ? (
-                <SheetDescription className="text-sm text-muted-foreground">
-                  {summary}
-                </SheetDescription>
-              ) : null}
-            </SheetHeader>
-            <DetailBody record={record} />
-          </>
-        )}
-      </SheetContent>
-    </Sheet>
+              <div className="title">{title}</div>
+              {summary ? <div className="sub">{summary}</div> : null}
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onClose}
+              aria-label="Close detail"
+              data-testid="registry-detail-close"
+            >
+              <IcX />
+            </Button>
+          </div>
+          <DetailBody record={record} />
+        </>
+      )}
+    </div>
   );
 }
 
@@ -418,22 +429,53 @@ export function RegistryPage() {
   const summary = data?.summary;
   const list = data?.manifests ?? [];
 
-  return (
-    <main className="min-h-screen bg-background text-foreground p-6 font-sans">
-      <div className="max-w-[1400px] mx-auto">
-        <header className="flex items-start justify-between gap-4 mb-4">
-          <div>
-            <p className="font-mono uppercase tracking-[0.08em] text-[11px] text-muted-foreground mb-1">
-              Governed toolpack catalog
-            </p>
-            <h1 className="text-2xl font-semibold text-foreground mb-1">Registry</h1>
-            <p className="text-sm text-muted-foreground max-w-2xl">
-              Local toolpack manifests, each validated and trust-checked against its on-disk
-              SHA-256. Read-only — install requests thread through the Approvals queue in a
-              follow-up.
-            </p>
+  // The master column: summary line + the toolpack manifest list. Lives in
+  // the SplitPane's list slot so it stays visible beside the inline detail
+  // column on desktop.
+  const listColumn = (
+    <div className="p-6">
+      {summary ? (
+        <div
+          className="flex flex-wrap gap-3 font-mono text-[11px] text-muted-foreground mb-3"
+          data-testid="registry-summary"
+        >
+          <span>total {summary.total}</span>
+          <span>valid {summary.valid}</span>
+          <span>invalid {summary.invalid}</span>
+        </div>
+      ) : null}
+
+      <section aria-label="Toolpack list" data-empty={list.length === 0} className="py-2">
+        {isLoading ? (
+          <ListSkeleton />
+        ) : isError ? (
+          <div
+            role="alert"
+            className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+          >
+            Failed to load registry: {(error as Error)?.message ?? 'unknown error'}
           </div>
-          <div className="flex gap-2 shrink-0">
+        ) : list.length === 0 ? (
+          <RegistryEmpty />
+        ) : (
+          <ul className="flex flex-col gap-2 list-none m-0 p-0">
+            {list.map((item) => (
+              <RegistryRow key={item.id} item={item} onOpen={setSelectedId} />
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+
+  return (
+    <main className="flex h-[calc(100vh-3rem)] flex-col bg-background text-foreground font-sans">
+      <div className="px-6 pt-6">
+        <PageHeader
+          eyebrow="Governed toolpack catalog"
+          title="Registry"
+          description="Local toolpack manifests, each validated and trust-checked against its on-disk SHA-256. Read-only — install requests thread through the Approvals queue in a follow-up."
+          actions={
             <Button
               variant="ghost"
               size="sm"
@@ -443,44 +485,21 @@ export function RegistryPage() {
             >
               ↻ Refresh
             </Button>
-          </div>
-        </header>
+          }
+        />
+      </div>
 
-        {summary ? (
-          <div
-            className="flex flex-wrap gap-3 font-mono text-[11px] text-muted-foreground mb-3"
-            data-testid="registry-summary"
-          >
-            <span>total {summary.total}</span>
-            <span>valid {summary.valid}</span>
-            <span>invalid {summary.invalid}</span>
-          </div>
-        ) : null}
-
-        <section aria-label="Toolpack list" data-empty={list.length === 0} className="py-2">
-          {isLoading ? (
-            <ListSkeleton />
-          ) : isError ? (
-            <div
-              role="alert"
-              className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
-            >
-              Failed to load registry: {(error as Error)?.message ?? 'unknown error'}
-            </div>
-          ) : list.length === 0 ? (
-            <RegistryEmpty />
-          ) : (
-            <ul className="flex flex-col gap-2 list-none m-0 p-0">
-              {list.map((item) => (
-                <RegistryRow key={item.id} item={item} onOpen={setSelectedId} />
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {selectedId ? (
-          <RegistryDetailSheet id={selectedId} onClose={() => setSelectedId(null)} />
-        ) : null}
+      <div className="min-h-0 flex-1">
+        <SplitPane
+          list={listColumn}
+          detail={
+            selectedId ? (
+              <RegistryDetail id={selectedId} onClose={() => setSelectedId(null)} />
+            ) : null
+          }
+          detailOpen={!!selectedId}
+          detailWidth={420}
+        />
       </div>
     </main>
   );

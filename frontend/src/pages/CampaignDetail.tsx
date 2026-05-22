@@ -1,21 +1,16 @@
-// Campaign detail Sheet — translates the four drawer panes from
-// campaign-presenter.js (Overview / Goals / Runs / Evidence) into a
-// Radix-Sheet + shadcn-Tabs surface.
+// Campaign detail — translates the four drawer panes from
+// campaign-presenter.js (Overview / Goals / Runs / Evidence) into a kit
+// `.drawer` + shadcn-Tabs surface.
 //
-// Mounts as a nested route under /campaigns/:id; closing the
-// Sheet navigates back to /campaigns so the list stays visible.
-import { useState, useEffect } from 'react';
+// Mounts as a nested route under /campaigns/:id; rendered as a persistent
+// inline detail column (SplitPane) so the list stays visible. The IcX close
+// button navigates back to /campaigns.
+import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
+import { IcX } from '@/components/ui/icons';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CampaignPill, mapGoalStatus, mapRunStatus } from '@/components/CampaignPill';
@@ -332,7 +327,6 @@ function DetailSkeleton() {
 export function CampaignDetailRoute() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [open, setOpen] = useState(true);
   const [evidenceFeedback, setEvidenceFeedback] = useState<
     { kind: 'success' | 'error'; text: string } | null
   >(null);
@@ -341,13 +335,9 @@ export function CampaignDetailRoute() {
   const { data: replay, isLoading, isError, error } = useCampaign(id);
   const lifecycle = useLifecycleAction(id);
 
-  // The Sheet's open state and the route are kept in sync — closing the
-  // sheet pops back to the list URL so the legacy route stays clean.
-  useEffect(() => {
-    if (!open) {
-      navigate('/campaigns', { replace: true });
-    }
-  }, [open, navigate]);
+  // Closing the inline detail pops back to the list URL so deep-linking and
+  // the browser back button keep working.
+  const close = () => navigate('/campaigns', { replace: true });
 
   const onLifecycle = async (
     action: 'start' | 'pause' | 'resume' | 'cancel' | 'run-next',
@@ -392,84 +382,98 @@ export function CampaignDetailRoute() {
     }
   };
 
+  const closeButton = (
+    <button
+      type="button"
+      onClick={close}
+      aria-label="Close detail"
+      data-testid="campaign-detail-close"
+      className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-[var(--bg-3)] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <IcX />
+    </button>
+  );
+
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetContent side="right" data-testid="campaign-detail-sheet">
-        {isLoading ? (
-          <DetailSkeleton />
-        ) : isError || !replay ? (
-          <SheetHeader>
-            <SheetTitle>Failed to load</SheetTitle>
-            <SheetDescription>
-              {(error as Error)?.message ?? 'Campaign not found.'}
-            </SheetDescription>
-          </SheetHeader>
-        ) : (
-          <>
-            <SheetHeader>
-              <div className="flex items-center gap-2">
+    <aside className="drawer h-full" data-testid="campaign-detail-panel">
+      {isLoading ? (
+        <DetailSkeleton />
+      ) : isError || !replay ? (
+        <div className="drawer-hd">
+          <div className="grow">
+            <div className="title">Failed to load</div>
+            <div className="sub">{(error as Error)?.message ?? 'Campaign not found.'}</div>
+          </div>
+          {closeButton}
+        </div>
+      ) : (
+        <>
+          <div className="drawer-hd">
+            <div className="grow">
+              <div className="flex items-center gap-2 mb-1">
                 <CampaignPill status={replay.campaign.status} />
                 <span className="font-mono text-[10px] text-muted-foreground">
                   {replay.campaign.id}
                 </span>
               </div>
-              <SheetTitle>{replay.campaign.title}</SheetTitle>
-              <SheetDescription className="text-sm text-muted-foreground">
-                {replay.campaign.objective}
-              </SheetDescription>
-              <LifecycleButtons
-                campaign={replay.campaign}
-                onAction={(a) => void onLifecycle(a)}
-                pending={lifecycle.isPending}
-              />
-            </SheetHeader>
-
-            <Tabs defaultValue="overview" className="flex-1 flex flex-col min-h-0">
-              <TabsList aria-label="Campaign detail tabs">
-                <TabsTrigger value="overview">Overview</TabsTrigger>
-                <TabsTrigger value="goals">
-                  Goals
-                  {replay.goals.length > 0 ? (
-                    <span className="ml-1 font-mono text-[10px] text-muted-foreground">
-                      · {replay.goals.length}
-                    </span>
-                  ) : null}
-                </TabsTrigger>
-                <TabsTrigger value="runs">
-                  Runs
-                  {replay.runs.length > 0 ? (
-                    <span className="ml-1 font-mono text-[10px] text-muted-foreground">
-                      · {replay.runs.length}
-                    </span>
-                  ) : null}
-                </TabsTrigger>
-                <TabsTrigger value="evidence">Evidence</TabsTrigger>
-              </TabsList>
-
-              <div className="flex-1 overflow-y-auto px-4 py-3">
-                <TabsContent value="overview">
-                  <OverviewPane replay={replay} />
-                </TabsContent>
-                <TabsContent value="goals">
-                  <GoalsPane replay={replay} />
-                </TabsContent>
-                <TabsContent value="runs">
-                  <RunsPane replay={replay} />
-                </TabsContent>
-                <TabsContent value="evidence">
-                  <EvidencePane
-                    onReport={() => onArtifact('report')}
-                    onEvidence={() => onArtifact('evidence')}
-                    feedback={evidenceFeedback}
-                    pending={pendingArtifact}
-                  />
-                </TabsContent>
+              <div className="title">{replay.campaign.title}</div>
+              <div className="sub">{replay.campaign.objective}</div>
+              <div className="mt-2">
+                <LifecycleButtons
+                  campaign={replay.campaign}
+                  onAction={(a) => void onLifecycle(a)}
+                  pending={lifecycle.isPending}
+                />
               </div>
-            </Tabs>
-          </>
-        )}
-      </SheetContent>
-    </Sheet>
+            </div>
+            {closeButton}
+          </div>
+
+          <Tabs defaultValue="overview" className="flex-1 flex flex-col min-h-0">
+            <TabsList aria-label="Campaign detail tabs">
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="goals">
+                Goals
+                {replay.goals.length > 0 ? (
+                  <span className="ml-1 font-mono text-[10px] text-muted-foreground">
+                    · {replay.goals.length}
+                  </span>
+                ) : null}
+              </TabsTrigger>
+              <TabsTrigger value="runs">
+                Runs
+                {replay.runs.length > 0 ? (
+                  <span className="ml-1 font-mono text-[10px] text-muted-foreground">
+                    · {replay.runs.length}
+                  </span>
+                ) : null}
+              </TabsTrigger>
+              <TabsTrigger value="evidence">Evidence</TabsTrigger>
+            </TabsList>
+
+            <div className="flex-1 overflow-y-auto px-4 py-3">
+              <TabsContent value="overview">
+                <OverviewPane replay={replay} />
+              </TabsContent>
+              <TabsContent value="goals">
+                <GoalsPane replay={replay} />
+              </TabsContent>
+              <TabsContent value="runs">
+                <RunsPane replay={replay} />
+              </TabsContent>
+              <TabsContent value="evidence">
+                <EvidencePane
+                  onReport={() => onArtifact('report')}
+                  onEvidence={() => onArtifact('evidence')}
+                  feedback={evidenceFeedback}
+                  pending={pendingArtifact}
+                />
+              </TabsContent>
+            </div>
+          </Tabs>
+        </>
+      )}
+    </aside>
   );
 }
 
