@@ -12,13 +12,22 @@
 // react-router NavLink (SPA, no reload). Docs stays a footer anchor —
 // it's served outside the SPA and opens in a new tab.
 import * as React from 'react';
-import { Link, NavLink, useLocation } from 'react-router-dom';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 
+import { useCommandPalette } from '@/lib/commandStore';
 import { useNavCounts } from '@/lib/navCounts';
 import { useSettings } from '@/lib/settings';
 import { cn } from '@/lib/utils';
 
 import { PhantomMark } from './PhantomMark';
+import { TweaksMenu } from './TweaksMenu';
+import { Kbd } from './ui/kit';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog';
 import {
   IcAi,
   IcAlert,
@@ -29,8 +38,10 @@ import {
   IcGraph,
   IcGrid,
   IcRuns,
+  IcSearch,
   IcSettings,
   IcShield,
+  IcUser,
   IcDoc,
 } from './ui/icons';
 
@@ -154,10 +165,13 @@ function useModelLabel(): string {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const [profileOpen, setProfileOpen] = React.useState(false);
   const crumbs = useCrumbs();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const counts = useNavCounts();
   const modelLabel = useModelLabel();
+  const openCmdK = useCommandPalette((s) => s.setOpen);
 
   // Close the mobile drawer on navigation.
   React.useEffect(() => {
@@ -249,10 +263,101 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               ))}
             </ol>
           </nav>
+
+          <div className="ml-auto flex items-center gap-2">
+            {/* ⌘K command trigger (kit .cmd-trigger) */}
+            <button
+              type="button"
+              onClick={() => openCmdK(true)}
+              title="Search (⌘K)"
+              data-testid="cmdk-trigger"
+              className="hidden h-7 items-center gap-2 rounded-md border border-[var(--line-1)] bg-[var(--bg-2)] px-2.5 text-[12px] text-[var(--fg-3)] transition-colors hover:border-[var(--line-2)] hover:text-[var(--fg-2)] sm:inline-flex"
+            >
+              <IcSearch size={13} />
+              <span className="hidden md:inline">Search alerts, runs, assets…</span>
+              <Kbd className="ml-2">⌘K</Kbd>
+            </button>
+            {/* compact search icon on small screens */}
+            <button
+              type="button"
+              onClick={() => openCmdK(true)}
+              aria-label="Search (Ctrl/Cmd K)"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--line-1)] text-[var(--fg-3)] hover:text-[var(--fg-1)] sm:hidden"
+            >
+              <IcSearch size={15} />
+            </button>
+
+            <TweaksMenu />
+
+            {/* Notifications bell → untriaged alerts */}
+            <button
+              type="button"
+              onClick={() => navigate('/alerts')}
+              title="Untriaged alerts"
+              data-testid="topbar-bell"
+              className="relative inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--line-1)] text-[var(--fg-3)] transition-colors hover:border-[var(--line-2)] hover:text-[var(--fg-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <IcAlert size={15} />
+              {counts.alerts ? (
+                <span className="absolute -right-1 -top-1 min-w-[14px] rounded-full bg-[var(--sev-crit)] px-1 text-center font-mono text-[9px] leading-[14px] text-[#1a0507]">
+                  {counts.alerts > 99 ? '99+' : counts.alerts}
+                </span>
+              ) : null}
+            </button>
+
+            {/* Profile / operator menu */}
+            <button
+              type="button"
+              onClick={() => setProfileOpen(true)}
+              title="Operator"
+              aria-label="Operator menu"
+              data-testid="topbar-profile"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--line-1)] text-[var(--fg-3)] transition-colors hover:border-[var(--line-2)] hover:text-[var(--fg-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <IcUser size={15} />
+            </button>
+          </div>
         </header>
 
         <div className="min-w-0 flex-1">{children}</div>
       </div>
+
+      {/* Operator / profile menu */}
+      <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+        <DialogContent data-testid="profile-dialog">
+          <DialogHeader>
+            <DialogTitle>Operator</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 px-5 py-4 text-[13px]">
+            <div className="flex items-center gap-2.5">
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--line-2)] text-[var(--fg-2)]">
+                <IcUser size={16} />
+              </span>
+              <div>
+                <div className="text-[var(--fg-1)]">Operator</div>
+                <div className="font-mono text-[11px] text-[var(--fg-3)]">{modelLabel}</div>
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Link
+                to="/settings"
+                onClick={() => setProfileOpen(false)}
+                className="rounded-md px-2 py-1.5 text-[var(--fg-2)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--fg-1)]"
+              >
+                Settings
+              </Link>
+              <a
+                href="/docs/"
+                target="_blank"
+                rel="noopener"
+                className="rounded-md px-2 py-1.5 text-[var(--fg-2)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--fg-1)]"
+              >
+                User docs ↗
+              </a>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

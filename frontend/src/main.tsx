@@ -10,9 +10,14 @@ import { QueryClientProvider } from '@tanstack/react-query';
 
 import { App } from './App';
 import { queryClient } from './lib/queryClient';
+import { initUiPrefs } from './lib/uiPrefs';
 import './styles/globals.css';
 import './styles/kit-components.css';
 import './styles/agent-states.css';
+
+// Apply the operator's saved theme/density (data-theme / data-density on
+// <html>) before first render so a reload doesn't flash the defaults.
+initUiPrefs();
 
 const rootEl = document.getElementById('root');
 if (!rootEl) {

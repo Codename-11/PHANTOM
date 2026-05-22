@@ -652,3 +652,25 @@ Validation passed:
 - `npm run test:frontend` — 196/196 (27 files; +5 since wave 2).
 
 Not yet committed/deployed — awaiting operator review + the docker-server deploy step.
+
+## 2026-05-21 21:25 EDT — UI parity wave 4: ⌘K palette + Tweaks + topbar affordances
+
+Closed the remaining kit interaction gaps surfaced after the structural pass.
+
+- ⌘K command palette (NEW `components/CommandPalette.tsx` + `lib/commandStore.ts`): always-mounted,
+  renders nothing until the shared zustand store opens; global ⌘K/Ctrl+K toggle + Esc close; lazy data
+  (findings/scopes/assets/runs queries fire only while open). Groups: Navigation (11 routes), Findings
+  → /alerts/:id, Assets/Scopes → /assets|/scope/:id, Runs → /runs/:id, Actions (New scope/campaign,
+  Refresh). Arrow/Enter keyboard nav + hover/click; uses the ported `.cmdk*` CSS. Mounted in App.tsx.
+- Tweaks (NEW `lib/uiPrefs.ts` + `components/TweaksMenu.tsx`): theme (dark/light) + density
+  (operator/compact) toggles via the ButtonGroup primitive, persisted to localStorage and applied as
+  data-theme/data-density on <html>; `initUiPrefs()` runs in main.tsx before render (no flash). This
+  finally exposes the light-mode + compact tokens that globals.css already defined.
+- Topbar (AppShell): added the ⌘K search trigger (kit `.cmd-trigger` look), the TweaksMenu gear, a
+  notifications bell with the untriaged-alerts count → /alerts, and an operator/profile menu (model +
+  Settings/Docs links). Breadcrumbs + responsive mobile drawer preserved.
+
+Validation: tsc --noEmit clean · build:react clean · frontend 201/201 (28 files).
+
+Remaining (lower priority): topbar scope-strip needs an active-scope concept (product feature, not
+just UI); a few Graph view-switch/replay items stay presentational.

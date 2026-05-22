@@ -10,6 +10,7 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
 import { AppShell } from './components/AppShell';
+import { CommandPalette } from './components/CommandPalette';
 import { SplashScreen } from './components/SplashScreen';
 import { ToastProvider } from './components/ui/toast';
 import CampaignsPage from './pages/Campaigns';
@@ -108,6 +109,7 @@ export function App() {
             <Route path="*" element={<HealthCard />} />
           </Routes>
           </Suspense>
+          <CommandPalette />
         </AppShell>
       </ToastProvider>
     </BrowserRouter>
